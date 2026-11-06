@@ -1,0 +1,26 @@
+# vscode
+.vscode
+
+# Intellij
+*.iml
+.idea
+
+# npm
+node_modules
+
+# Don't include the compiled main.js file in the repo.
+# It is uploaded to GitHub releases instead.
+main.js
+
+# Exclude sourcemaps
+*.map
+
+# obsidian
+data.json
+
+# Local test data: real chat exports, never published
+samples/
+scripts/.test-offline.cjs
+
+# Exclude macOS Finder (System Explorer) View States
+.DS_Store

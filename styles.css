@@ -1,0 +1,58 @@
+/* Provider tabs in the settings (Claude | OpenAI). */
+.ccs-tabs {
+	display: flex;
+	gap: 4px;
+	margin: 1.5em 0 0.75em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ccs-tabs .ccs-tab {
+	background: none;
+	box-shadow: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	border-radius: 0;
+	padding: 6px 16px;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.ccs-tabs .ccs-tab:hover {
+	color: var(--text-normal);
+}
+
+/* Progress bar in the sync notice. */
+.ccs-progress {
+	position: relative;
+	height: 6px;
+	margin-top: 8px;
+	border-radius: 3px;
+	overflow: hidden;
+	background: var(--background-modifier-border);
+}
+
+.ccs-progress .ccs-progress-fill {
+	height: 100%;
+	width: 0;
+	border-radius: 3px;
+	background: var(--interactive-accent);
+	transition: width 0.3s ease;
+}
+
+/* Step without a known total: a sliding block. */
+.ccs-progress.is-indeterminate .ccs-progress-fill {
+	position: absolute;
+	width: 30%;
+	animation: ccs-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes ccs-slide {
+	from { left: -30%; }
+	to { left: 100%; }
+}
+
+.ccs-tabs .ccs-tab.is-active {
+	color: var(--text-normal);
+	font-weight: var(--font-semibold);
+	border-bottom-color: var(--interactive-accent);
+}

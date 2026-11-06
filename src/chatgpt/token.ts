@@ -1,0 +1,36 @@
+// The chatgpt.com page carries the key its own requests send as "Authorization: Bearer …"
+// (found 2026-11-06 with DevTools search: "accessToken" is in the HTML of chatgpt.com pages).
+// Pure functions, testable offline. The key is never stored or logged.
+
+const JWT = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
+
+/**
+ * The key: first the key-shaped value right after an "accessToken" label; if the page
+ * stores the value elsewhere (e.g. referenced by position), the only key-shaped value
+ * in the page. Null if neither.
+ */
+export function findAccessToken(html: string): string | null {
+	let i = html.indexOf('accessToken');
+	while (i >= 0) {
+		const m = html.slice(i, i + 400).match(JWT);
+		if (m?.[0]) return m[0];
+		i = html.indexOf('accessToken', i + 11);
+	}
+	const all = [...new Set(html.match(JWT) ?? [])];
+	return all.length === 1 ? all[0]! : null;
+}
+
+/** Masks every key-shaped or long random-looking value. */
+export function maskSecrets(text: string): string {
+	return text.replace(JWT, '[key]').replace(/[A-Za-z0-9_\-+/=]{24,}/g, '[hidden]');
+}
+
+/** What the page looked like, with all secrets masked – for the stop message when no key was found. */
+export function describePage(html: string): string {
+	const count = (s: string) => html.split(s).length - 1;
+	const keys = new Set(html.match(JWT) ?? []).size;
+	const title = /<title[^>]*>([^<]{0,80})/i.exec(html)?.[1]?.trim() ?? '';
+	const i = html.indexOf('accessToken');
+	const around = i >= 0 ? maskSecrets(html.slice(Math.max(0, i - 40), i + 120)).replace(/\s+/g, ' ') : '';
+	return `page ${html.length} chars, title "${maskSecrets(title)}", "accessToken" ${count('accessToken')}×, key-shaped values ${keys}×${around ? `, around it: ${around}` : ''}`;
+}
