@@ -6,7 +6,7 @@ import { GptRateLimitError, retryDeadline } from '../src/chatgpt/recovery';
 import { sandboxKey } from '../src/chatgpt/files';
 import { checkGptChat, checkGptOlderPage } from '../src/chatgpt/schema';
 import { DEFAULT_SETTINGS, DEFAULT_GPT } from '../src/settings';
-import AIChatBridge from '../src/main';
+import AIChatBridge, { formatClock } from '../src/main';
 import { StopError } from '../src/api';
 
 const id = '12345678-1234-1234-1234-123456789abc';
@@ -151,12 +151,12 @@ async function testAutomaticResume() {
 		p = await load();
 		p.settings.intervalMinutes = 30;
 		p.restartTimer();
-		assert.equal(status, 'AI ChatBridge active');
+		assert.equal(status, `AI ChatBridge: next sync ${formatClock(now + 30 * 60_000)}`);
 		p.settings.intervalMinutes = 0;
 		p.restartTimer();
 		assert.equal(status, '');
 		p.onunload();
-		console.log('Automatic 429 retry passed: visible countdown, persisted timer, restart, backoff, success, cancellation, login-error stop and idle auto-sync status.');
+		console.log('Automatic 429 retry passed: visible countdown, persisted timer, restart, backoff, success, cancellation, login-error stop and next-sync time.');
 	} finally {
 		Date.now = realNow;
 		GptApi.connect = connect;

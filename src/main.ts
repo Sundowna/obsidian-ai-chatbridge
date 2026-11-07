@@ -13,6 +13,8 @@ export default class AIChatBridge extends Plugin {
 	settings!: Settings;
 	private running = false;
 	private timer: number | null = null;
+	/** When the automatic sync timer fires next (ms), or null when it is off. */
+	private nextAutoAt: number | null = null;
 	private gptResumeTimer: number | null = null;
 	private showingGptCooldown = false;
 	private unloaded = false;
@@ -157,9 +159,10 @@ export default class AIChatBridge extends Plugin {
 		new Notice('Pending retry canceled. The cooldown still applies.');
 	}
 
-	/** Idle status bar text: a marker while automatic sync is on (and not paused after an error). */
+	/** Idle status bar text: the next automatic sync time while it is on (and not paused after an error). */
 	private idleStatus(): string {
-		return this.timer !== null && !this.autoPaused ? 'AI ChatBridge active' : '';
+		if (this.timer === null || this.nextAutoAt === null || this.autoPaused) return '';
+		return `AI ChatBridge: next sync ${formatClock(this.nextAutoAt)}`;
 	}
 
 	/** Refreshes the idle text when nothing is running or counting down. */
@@ -171,9 +174,16 @@ export default class AIChatBridge extends Plugin {
 	restartTimer() {
 		if (this.timer !== null) window.clearInterval(this.timer);
 		this.timer = null;
+		this.nextAutoAt = null;
 		const m = this.settings.intervalMinutes;
 		if (m >= MIN_INTERVAL_MINUTES) {
-			this.timer = window.setInterval(() => void this.syncAll('auto'), m * 60_000);
+			const every = m * 60_000;
+			this.nextAutoAt = Date.now() + every;
+			this.timer = window.setInterval(() => {
+				this.nextAutoAt = Date.now() + every;
+				this.refreshIdleStatus(); // shows the new time even if this run is skipped
+				void this.syncAll('auto');
+			}, every);
 			this.registerInterval(this.timer);
 		}
 		this.refreshIdleStatus();
@@ -293,4 +303,10 @@ export default class AIChatBridge extends Plugin {
 		this.settingsWrite = write.catch(() => undefined);
 		await write;
 	}
+}
+
+/** Local time as HH:MM (24-hour). */
+export function formatClock(ms: number): string {
+	const d = new Date(ms);
+	return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
