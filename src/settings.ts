@@ -8,6 +8,8 @@ import { Account, isLoggedIn, logout, openLogin } from './login';
 import type { AssetRetry, Capture } from './chatgpt/recovery';
 import { DEFAULT_OVERLAP_MINUTES, type Inventories } from './chatgpt/inventory';
 import type { ChatCounts } from './progress';
+import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
+import { claudeHome, codexHome, defaultRoots, nodeDesktopFs } from './desktop/scan';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -62,6 +64,8 @@ export interface Settings {
 	/** file_uuid -> vault path, so each file is downloaded once. */
 	fileIndex: Record<string, string>;
 	gpt: GptSettings;
+	/** Sessions saved on this computer by the Claude and ChatGPT/Codex desktop apps. */
+	desktop: DesktopSettings;
 }
 
 export const DEFAULT_GPT: GptSettings = {
@@ -73,6 +77,17 @@ export const DEFAULT_GPT: GptSettings = {
 	projects: [],
 	index: {},
 	fileIndex: {},
+};
+
+const desktopApp = (folder: string): DesktopAppSettings => ({ enabled: true, folder, extraFolders: [], index: {} });
+
+export const DEFAULT_DESKTOP: DesktopSettings = {
+	claude: desktopApp('AI Chats/Claude Desktop'),
+	codex: desktopApp('AI Chats/Codex'),
+	projectSubfolders: true,
+	keepRaw: false,
+	quietMinutes: 15,
+	includeSubagents: false,
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -92,12 +107,13 @@ export const DEFAULT_SETTINGS: Settings = {
 	index: {},
 	fileIndex: {},
 	gpt: DEFAULT_GPT,
+	desktop: DEFAULT_DESKTOP,
 };
 
 export const MIN_DELAY_SECONDS = 1;
 export const MIN_INTERVAL_MINUTES = 30;
 
-type Tab = 'claude' | 'openai';
+type Tab = 'claude' | 'openai' | 'desktop';
 
 export class AIChatBridgeSettingTab extends PluginSettingTab {
 	/** Which provider tab is open (kept while the settings window is open). */
@@ -126,6 +142,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const tabs: [Tab, string][] = [
 			['claude', 'Claude'],
 			['openai', 'OpenAI'],
+			['desktop', 'Desktop apps'],
 		];
 		for (const [id, label] of tabs) {
 			const btn = bar.createEl('button', { text: label, cls: 'ccs-tab' });
@@ -136,7 +153,8 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 			});
 		}
 		if (this.tab === 'claude') this.claudeSettings();
-		else this.openaiSettings();
+		else if (this.tab === 'openai') this.openaiSettings();
+		else this.desktopSettings();
 	}
 
 	/** Log in / Log out / Sync for one provider. `sync` null = not available yet. */
@@ -180,7 +198,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const s = this.plugin.settings;
 		new Setting(this.containerEl)
 			.setName('Sync all')
-			.setDesc(`Every provider you are logged in to. Synced so far: ${Object.keys(s.index).length} claude.ai chats, ${Object.keys(s.gpt.index).length} ChatGPT chats.`)
+			.setDesc(`Every provider you are logged in to, plus the desktop apps that are on. Synced so far: ${Object.keys(s.index).length} claude.ai chats, ${Object.keys(s.gpt.index).length} ChatGPT chats, ${Object.keys(s.desktop.claude.index).length + Object.keys(s.desktop.codex.index).length} desktop sessions.`)
 			.addButton((b) =>
 				b.setButtonText('Sync all').setCta().onClick(() => {
 					new Notice('Sync all: starting…');
@@ -291,6 +309,91 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 				new Notice('File delays reset for the next sync.');
 			}));
+	}
+
+	private desktopSettings(): void {
+		const d = this.plugin.settings.desktop;
+		const el = this.containerEl;
+		const save = () => this.plugin.saveSettings();
+		const fs = nodeDesktopFs();
+		new Setting(el)
+			.setName('Sync desktop apps')
+			.setDesc('Chats that exist only on this computer. Only reads the apps’ files; nothing outside the vault is changed. Regular claude.ai and ChatGPT chats come from the accounts above.')
+			.addButton((b) =>
+				b.setButtonText('Sync').setCta().onClick(() => {
+					new Notice('Desktop apps: sync starting…');
+					void this.plugin.syncDesktop('manual').then(() => this.display());
+				}),
+			);
+		const apps: { conf: DesktopAppSettings; heading: string; what: string; home: string }[] = [
+			{ conf: d.claude, heading: 'Claude', what: 'Claude Code and Cowork sessions from the Claude desktop app and the Claude Code CLI', home: fs ? claudeHome(fs) : '~/.claude' },
+			{ conf: d.codex, heading: 'ChatGPT', what: 'Codex threads from the ChatGPT/Codex desktop app and the Codex CLI', home: fs ? codexHome(fs) : '~/.codex' },
+		];
+		for (const { conf, heading, what, home } of apps) {
+			new Setting(el).setName(heading).setHeading();
+			const roots = fs ? defaultRoots(fs, conf === d.claude ? 'claude' : 'codex') : [home];
+			new Setting(el)
+				.setName(`Sync ${heading} desktop sessions`)
+				.setDesc(`${what}. Read from ${roots.join(' and ')}. ${Object.keys(conf.index).length} synced so far.`)
+				.addToggle((t) =>
+					t.setValue(conf.enabled).onChange(async (v) => {
+						conf.enabled = v;
+						await save();
+					}),
+				);
+			this.folderSetting(`${heading} desktop folder`, 'Where these sessions are saved. Created if missing.', () => conf.folder, (p) => (conf.folder = p));
+			new Setting(el)
+				.setName('Extra session folders')
+				.setDesc('Optional. One folder on this computer per line with more session .jsonl files (e.g. a copied profile or another app’s session folder). Subfolders are included.')
+				.addTextArea((t) =>
+					t.setPlaceholder('C:/Users/me/OtherProfile/.claude/projects').setValue(conf.extraFolders.join('\n')).onChange(async (v) => {
+						conf.extraFolders = v.split('\n').map((x) => x.trim()).filter(Boolean);
+						await save();
+					}),
+				);
+		}
+		new Setting(el).setName('How sessions are saved').setHeading();
+		new Setting(el)
+			.setName('Subfolder per working folder')
+			.setDesc('E.g. …/<folder>/BrainTest/ for a session run in D:\\BrainTest. Sessions without a project folder go to "Scratch".')
+			.addToggle((t) =>
+				t.setValue(d.projectSubfolders).onChange(async (v) => {
+					d.projectSubfolders = v;
+					await save();
+				}),
+			);
+		new Setting(el)
+			.setName('Keep the raw session file')
+			.setDesc('Also copy the app’s .jsonl next to each transcript. These files can be large (several MB) and contain tool output in full.')
+			.addToggle((t) =>
+				t.setValue(d.keepRaw).onChange(async (v) => {
+					d.keepRaw = v;
+					await save();
+				}),
+			);
+		new Setting(el)
+			.setName('Wait until a session is quiet (minutes)')
+			.setDesc('Sessions changed more recently than this are still running and are saved on a later sync. A session that continues later is saved again as "(updated …)".')
+			.addText((t) =>
+				t.setValue(String(d.quietMinutes)).onChange(async (v) => {
+					const n = Number(v);
+					if (!Number.isInteger(n) || n < 0 || n > 1440) return;
+					d.quietMinutes = n;
+					await save();
+				}),
+			);
+		new Setting(el)
+			.setName('Include helper sessions')
+			.setDesc('Also save background helper runs (e.g. Codex approval reviews). Off = only your own conversations.')
+			.addToggle((t) =>
+				t.setValue(d.includeSubagents).onChange(async (v) => {
+					d.includeSubagents = v;
+					// Look at skipped helper sessions again.
+					d.claude.ignored = {};
+					d.codex.ignored = {};
+					await save();
+				}),
+			);
 	}
 
 	/** Subfolders, files and project filter – the same options for every provider. */

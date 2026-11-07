@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-ai-chatbridge",
-	"version": "0.15.7",
+	"version": "0.16.0",
 	"description": "Obsidian plugin: sync claude.ai and ChatGPT chats into the vault as raw JSON plus a Markdown transcript",
 	"private": true,
 	"main": "main.js",
@@ -12,7 +12,8 @@
 		"lint": "eslint .",
 		"test:sync": "esbuild scripts/test-chatgpt-sync.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-chatgpt-sync.cjs && node scripts/.test-chatgpt-sync.cjs",
 		"test:inventory": "esbuild scripts/test-chatgpt-inventory.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-chatgpt-inventory.cjs && node scripts/.test-chatgpt-inventory.cjs",
-		"test:offline": "esbuild scripts/test-offline.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-offline.cjs && node scripts/.test-offline.cjs"
+		"test:offline": "esbuild scripts/test-offline.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-offline.cjs && node scripts/.test-offline.cjs",
+		"test:desktop": "esbuild scripts/test-desktop.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-desktop.cjs && node scripts/.test-desktop.cjs"
 	},
 	"keywords": [
 		"obsidian",

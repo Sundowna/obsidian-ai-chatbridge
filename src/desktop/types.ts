@@ -1,0 +1,78 @@
+// Chats that only exist on this computer: sessions saved by the Claude desktop app
+// (Claude Code, Cowork) and the ChatGPT/Codex desktop app. Pure types, no Obsidian.
+
+export type DesktopApp = 'claude' | 'codex';
+
+export const APP_LABEL: Record<DesktopApp, string> = {
+	claude: 'Claude desktop',
+	codex: 'ChatGPT desktop (Codex)',
+};
+
+/** Who speaks in the transcript headings. */
+export const ASSISTANT_NAME: Record<DesktopApp, string> = {
+	claude: 'Claude',
+	codex: 'Codex',
+};
+
+export interface DesktopTurn {
+	role: 'user' | 'assistant';
+	/** ISO time of the first record in this turn. */
+	time?: string;
+	/** Text pieces and tool-step counts, in order. */
+	parts: ({ text: string } | { tools: number })[];
+}
+
+export interface DesktopSession {
+	app: DesktopApp;
+	/** Session/thread ID from the file (stable across appends). */
+	id: string;
+	title: string;
+	/** ISO times of the first and last record. */
+	created: string;
+	updated: string;
+	/** Working folder the session ran in, if recorded. */
+	cwd?: string;
+	model?: string;
+	/** Codex: thread this one was forked from. */
+	forkedFrom?: string;
+	/** Helper runs (Claude subagents, Codex guardian reviews). Skipped by default. */
+	isSubagent: boolean;
+	turns: DesktopTurn[];
+}
+
+/** What we remember per desktop session in data.json (no secrets, no chat text). */
+export interface DesktopIndexEntry {
+	/** Last activity in the session (ISO) when it was last written. */
+	updated: string;
+	/** Source file size and modification time, to skip unchanged files without reading them. */
+	size: number;
+	mtime: number;
+	source: string;
+	md: string;
+	/** Copy of the source .jsonl, when "Keep the raw session file" is on. */
+	raw?: string;
+	synced: string;
+}
+
+export interface DesktopAppSettings {
+	enabled: boolean;
+	folder: string;
+	/** Extra folders with session .jsonl files (one per entry). The app's own folder is always scanned. */
+	extraFolders: string[];
+	index: Record<string, DesktopIndexEntry>;
+	/** Source files with no message from you, by lower-case path -> mtime, so they are not re-read every run. */
+	ignored?: Record<string, number>;
+}
+
+export interface DesktopSettings {
+	claude: DesktopAppSettings;
+	codex: DesktopAppSettings;
+	/** Put each session in a subfolder named after the folder it ran in. */
+	projectSubfolders: boolean;
+	/** Also copy the source .jsonl next to the transcript. */
+	keepRaw: boolean;
+	/** Leave sessions alone until they have been quiet this long (they are still being written). */
+	quietMinutes: number;
+	/** Include helper runs (subagents, guardian reviews). */
+	includeSubagents: boolean;
+}

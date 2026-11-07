@@ -1,5 +1,7 @@
 import { Notice, Plugin } from 'obsidian';
-import { AIChatBridgeSettingTab, DEFAULT_GPT, DEFAULT_SETTINGS, MIN_INTERVAL_MINUTES, Settings } from './settings';
+import { AIChatBridgeSettingTab, DEFAULT_DESKTOP, DEFAULT_GPT, DEFAULT_SETTINGS, MIN_INTERVAL_MINUTES, Settings } from './settings';
+import { anyDesktopEnabled, runDesktopSync } from './desktop/sync';
+import type { DesktopAppSettings } from './desktop/types';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
@@ -61,6 +63,12 @@ export default class AIChatBridge extends Plugin {
 				if (!checking) void this.cancelGptResume();
 				return true;
 			},
+		});
+
+		this.addCommand({
+			id: 'sync-desktop-app-chats',
+			name: 'Sync desktop app chats (Claude, Codex)',
+			callback: () => void this.syncDesktop('manual'),
 		});
 
 		this.addCommand({
@@ -199,18 +207,32 @@ export default class AIChatBridge extends Plugin {
 		await this.guarded(trigger, () => this.runOne('chatgpt', trigger, forceFull));
 	}
 
-	/** Every provider you are logged in to, one after the other. */
+	/** Desktop apps only (Claude Code / Cowork, Codex). */
+	async syncDesktop(trigger: 'manual' | 'auto') {
+		await this.guarded(trigger, async () => {
+			if (!anyDesktopEnabled(this)) {
+				if (trigger === 'manual') new Notice('Desktop apps: none is turned on. Turn them on in the plugin settings, "Desktop apps" tab.');
+				return;
+			}
+			await this.runOne('desktop', trigger);
+		});
+	}
+
+	/** Every provider you are logged in to, one after the other, then the desktop apps. */
 	async syncAll(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
 			const claude = (await isLoggedIn('claude')) || !!this.settings.secretId;
 			const gpt = await isLoggedIn('chatgpt');
-			if (!claude && !gpt) {
+			const desktop = anyDesktopEnabled(this);
+			if (!claude && !gpt && !desktop) {
 				if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
 				return;
 			}
 			if (claude && !(await this.runOne('claude', trigger))) return; // a stop pauses the rest too
 			const waiting = this.settings.gpt.resumeAfter429 || (this.settings.gpt.cooldownUntil ?? 0) > Date.now();
-			if (gpt && (trigger === 'manual' || !waiting)) await this.runOne('chatgpt', trigger);
+			// A ChatGPT cooldown only waits; the desktop apps still run.
+			if (gpt && (trigger === 'manual' || !waiting) && !(await this.runOne('chatgpt', trigger)) && this.autoPaused) return;
+			if (desktop) await this.runOne('desktop', trigger);
 		});
 	}
 
@@ -233,14 +255,16 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	/** Runs one provider and shows the result. Returns false if it stopped. */
-	private async runOne(which: 'claude' | 'chatgpt', trigger: SyncTrigger, forceFull = false): Promise<boolean> {
-		const label = which === 'claude' ? 'claude.ai' : 'ChatGPT';
+	private async runOne(which: 'claude' | 'chatgpt' | 'desktop', trigger: SyncTrigger, forceFull = false): Promise<boolean> {
+		const label = which === 'claude' ? 'claude.ai' : which === 'chatgpt' ? 'ChatGPT' : 'Desktop apps';
 		// Progress bar in a notice (manual syncs) and a percentage in the status bar (all syncs).
 		const progress = new SyncProgress(label, this.statusEl, trigger === 'manual',
 			which === 'chatgpt' ? () => chatCountStatus(this.settings.gpt.chatProgress) : undefined);
 		let r;
 		try {
-			r = which === 'claude' ? await runSync(this, progress.update) : await runGptSync(this, progress.update, forceFull);
+			r = which === 'claude' ? await runSync(this, progress.update)
+				: which === 'chatgpt' ? await runGptSync(this, progress.update, forceFull)
+				: await runDesktopSync(this, progress.update);
 		} finally {
 			progress.finish();
 		}
@@ -254,7 +278,8 @@ export default class AIChatBridge extends Plugin {
 			return false;
 		}
 		if (trigger === 'manual' || r.written.length || r.restored.length) {
-			const more = r.leftForLater ? `, ${r.leftForLater} left for next run` : '';
+			const active = 'active' in r && r.active ? `, ${r.active} still active` : '';
+			const more = (r.leftForLater ? `, ${r.leftForLater} left for next run` : '') + active;
 			const restored = r.restored.length ? `, ${r.restored.length} restored` : '';
 			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.`);
 		}
@@ -278,6 +303,7 @@ export default class AIChatBridge extends Plugin {
 			index: { ...(g?.index ?? {}) },
 			fileIndex: { ...(g?.fileIndex ?? {}) },
 		};
+		this.settings.desktop = mergeDesktop(loaded?.desktop, this.settings.chatFolder);
 		// Seed the status immediately when upgrading a vault with one unfiltered inventory.
 		const gpt = this.settings.gpt;
 		if (!gpt.chatProgress && (!gpt.onlyProjects || !gpt.projects.some((name) => name.trim()))) {
@@ -309,4 +335,26 @@ export default class AIChatBridge extends Plugin {
 export function formatClock(ms: number): string {
 	const d = new Date(ms);
 	return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Desktop settings from data.json over the defaults. A vault that never had them gets
+ * folders next to its Claude Chat folder (e.g. "30 Sources/AI Chats/Claude Desktop").
+ */
+export function mergeDesktop(saved: Partial<Settings['desktop']> | undefined, chatFolder: string): Settings['desktop'] {
+	const parent = chatFolder.split('/').slice(0, -1).join('/');
+	const app = (s: Partial<DesktopAppSettings> | undefined, def: DesktopAppSettings): DesktopAppSettings => ({
+		...def,
+		folder: parent ? `${parent}/${def.folder.split('/').pop()!}` : def.folder,
+		...s,
+		extraFolders: [...(s?.extraFolders ?? [])],
+		index: { ...(s?.index ?? {}) },
+		ignored: { ...(s?.ignored ?? {}) },
+	});
+	return {
+		...DEFAULT_DESKTOP,
+		...saved,
+		claude: app(saved?.claude, DEFAULT_DESKTOP.claude),
+		codex: app(saved?.codex, DEFAULT_DESKTOP.codex),
+	};
 }

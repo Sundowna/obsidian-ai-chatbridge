@@ -39,5 +39,19 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 			}
 		}
 	}
+	// Desktop app sessions: transcript and raw copy.
+	for (const conf of s.desktop ? [s.desktop.claude, s.desktop.codex] : []) {
+		for (const entry of Object.values(conf.index)) {
+			for (const key of ['md', 'raw'] as const) {
+				const previous = entry[key];
+				if (!previous) continue;
+				const next = fix(previous);
+				if (next !== previous) {
+					entry[key] = next;
+					changed++;
+				}
+			}
+		}
+	}
 	return changed;
 }
