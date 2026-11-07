@@ -1,5 +1,5 @@
-<p align="left"><img src="chatBridgeLogo.png" width="120" alt="Project logo"></p>  
-# AI ChatBridge
+<img src="chatBridgeLogo.png" width="120" alt="Project logo">  ## AI ChatBridge
+
 
 Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault.
 The idea is to mirror the chats and folders from your AI web & desktop interfaces to your Obsidian vault.
