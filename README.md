@@ -1,4 +1,8 @@
-<img src="chatBridgeLogo.png" width="120" alt="Project logo">  ## AI ChatBridge
+<p align="left">
+  <img src="chatBridgeLogo.png" width="120" alt="AI ChatBridge logo">
+</p>
+
+<h1 align="left">AI ChatBridge</h1>
 
 
 Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault.
