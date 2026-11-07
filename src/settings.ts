@@ -10,6 +10,7 @@ import { DEFAULT_OVERLAP_MINUTES, type Inventories } from './chatgpt/inventory';
 import type { ChatCounts } from './progress';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import { claudeHome, codexHome, defaultRoots, nodeDesktopFs } from './desktop/scan';
+import { layoutMoves } from './desktop/layout';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -69,7 +70,7 @@ export interface Settings {
 }
 
 export const DEFAULT_GPT: GptSettings = {
-	folder: 'AI Chats/ChatGPT',
+	folder: 'AI Chats/ChatGPT Desktop/Chat',
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
 	downloadFiles: true,
@@ -82,8 +83,8 @@ export const DEFAULT_GPT: GptSettings = {
 const desktopApp = (folder: string): DesktopAppSettings => ({ enabled: true, folder, extraFolders: [], index: {} });
 
 export const DEFAULT_DESKTOP: DesktopSettings = {
-	claude: desktopApp('AI Chats/Claude Desktop'),
-	codex: desktopApp('AI Chats/Codex'),
+	claude: desktopApp('AI Chats/Claude Desktop/Code'),
+	codex: desktopApp('AI Chats/ChatGPT Desktop/Codex'),
 	projectSubfolders: true,
 	keepRaw: false,
 	quietMinutes: 15,
@@ -98,8 +99,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	maxChatsPerRun: 3,
 	delaySeconds: 1.5,
 	intervalMinutes: 0,
-	chatFolder: 'AI Chats/Claude',
-	codeFolder: 'AI Chats/Claude Code',
+	chatFolder: 'AI Chats/Claude Desktop/Chat',
+	codeFolder: 'AI Chats/Claude Desktop/Code',
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
 	downloadFiles: true,
@@ -325,12 +326,29 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 					void this.plugin.syncDesktop('manual').then(() => this.display());
 				}),
 			);
-		const apps: { conf: DesktopAppSettings; heading: string; what: string; home: string }[] = [
-			{ conf: d.claude, heading: 'Claude', what: 'Claude Code and Cowork sessions from the Claude desktop app and the Claude Code CLI', home: fs ? claudeHome(fs) : '~/.claude' },
-			{ conf: d.codex, heading: 'ChatGPT', what: 'Codex threads from the ChatGPT/Codex desktop app and the Codex CLI', home: fs ? codexHome(fs) : '~/.codex' },
+		const s = this.plugin.settings;
+		const moves = layoutMoves(s);
+		const layout = new Setting(el)
+			.setName('App layout')
+			.setDesc(
+				moves.length
+					? `Move the synced chats so each app has one folder with Chat and Code inside, like the apps: ${moves.map((m) => `${m.label}: ${m.from} → ${m.to}`).join('; ')}. Uses Obsidian's own move, so links and the sync index follow.`
+					: 'The folders follow the app layout: Claude Desktop/Chat and /Code, ChatGPT Desktop/Chat and /Codex.',
+			);
+		if (moves.length) {
+			layout.addButton((b) =>
+				b.setButtonText('Move now').setWarning().onClick(() => {
+					void this.plugin.moveToAppLayout().then(() => this.display());
+				}),
+			);
+		}
+		const apps: { conf: DesktopAppSettings; heading: string; what: string; home: string; chat: [() => string, (p: string) => void] }[] = [
+			{ conf: d.claude, heading: 'Claude', what: 'Claude Code sessions from the Claude desktop app (Code tab) and the Claude Code CLI, in subfolders named after your sidebar groups (or the working folder)', home: fs ? claudeHome(fs) : '~/.claude', chat: [() => s.chatFolder, (p) => (s.chatFolder = p)] },
+			{ conf: d.codex, heading: 'ChatGPT', what: 'Codex threads from the ChatGPT/Codex desktop app and the Codex CLI, in subfolders named after their project (or Recent)', home: fs ? codexHome(fs) : '~/.codex', chat: [() => s.gpt.folder, (p) => (s.gpt.folder = p)] },
 		];
-		for (const { conf, heading, what, home } of apps) {
+		for (const { conf, heading, what, home, chat } of apps) {
 			new Setting(el).setName(heading).setHeading();
+			this.folderSetting(`${heading} chat folder`, `Where ${heading === 'Claude' ? 'claude.ai' : 'ChatGPT'} chats are saved (Recent/ and one folder per project). Same setting as on the ${heading === 'Claude' ? 'Claude' : 'OpenAI'} tab.`, chat[0], chat[1]);
 			const roots = fs ? defaultRoots(fs, conf === d.claude ? 'claude' : 'codex') : [home];
 			new Setting(el)
 				.setName(`Sync ${heading} desktop sessions`)
@@ -341,7 +359,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 						await save();
 					}),
 				);
-			this.folderSetting(`${heading} desktop folder`, 'Where these sessions are saved. Created if missing.', () => conf.folder, (p) => (conf.folder = p));
+			this.folderSetting(`${heading} ${heading === 'Claude' ? 'Code' : 'Codex'} folder`, 'Where these sessions are saved. Created if missing.', () => conf.folder, (p) => (conf.folder = p));
 			new Setting(el)
 				.setName('Extra session folders')
 				.setDesc('Optional. One folder on this computer per line with more session .jsonl files (e.g. a copied profile or another app’s session folder). Subfolders are included.')
@@ -354,8 +372,8 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		}
 		new Setting(el).setName('How sessions are saved').setHeading();
 		new Setting(el)
-			.setName('Subfolder per working folder')
-			.setDesc('E.g. …/<folder>/BrainTest/ for a session run in D:\\BrainTest. Sessions without a project folder go to "Scratch".')
+			.setName('Mirror the apps’ sidebar as subfolders')
+			.setDesc('Claude: one folder per sidebar group; sessions outside a group by working folder ("Scratch" for sessions without one); forks and side sessions inside a folder named after the session they came from. Codex: one folder per project, the rest in "Recent".')
 			.addToggle((t) =>
 				t.setValue(d.projectSubfolders).onChange(async (v) => {
 					d.projectSubfolders = v;

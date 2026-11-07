@@ -1,16 +1,20 @@
 // Desktop apps test: parsers, renderer, scanner and a full sync run on a fake vault
 // and a fake file system. Synthetic data only. Run: npm run test:desktop
-// Optional: DESKTOP_LIVE=1 also parses the real session files on this computer (read-only, prints counts only).
+// Optional: DESKTOP_LIVE=1 also runs a sync of the real session files on this computer into an
+// in-memory vault (read-only on disk) and prints where each session would be saved.
 
-import { claudeDesktopTitle, parseClaudeSession, cleanClaudePrompt } from '../src/desktop/claude-code';
+import { parseClaudeSession, cleanClaudePrompt } from '../src/desktop/claude-code';
 import { codexTitles, parseCodexSession } from '../src/desktop/codex';
 import { renderDesktopTranscript, sessionFolderName } from '../src/desktop/render';
-import { claudeDesktopMetaFiles, listSessionFiles, type DesktopFs } from '../src/desktop/scan';
+import { listSessionFiles, type DesktopFs } from '../src/desktop/scan';
 import { runDesktopSync } from '../src/desktop/sync';
+import { claudeGroups, claudePlacement, codexProjectFor, normFolder, parseClaudeMeta, parseCodexState } from '../src/desktop/sections';
+import { findLatestJson, lastJsonObject, snappyDecompress } from '../src/desktop/leveldb';
+import { layoutMoves, layoutRoot, moveToAppLayout } from '../src/desktop/layout';
 import { mergeDesktop } from '../src/main';
 import { followRename } from '../src/follow';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings';
-import { TFile } from 'obsidian';
+import { TFile, TFolder } from 'obsidian';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -97,7 +101,39 @@ expect('folder: last part of cwd', sessionFolderName('D:\\BrainTest\\SecondBrain
 expect('folder: scratch workspace', sessionFolderName('C:\\Users\\W\\AppData\\Local\\Claude\\Data\\x\\scratch\\workspaces\\abc', 'Other') === 'Scratch');
 expect('folder: codex scratch thread', sessionFolderName('C:/Users/W/Documents/Codex/2026-11-03/find-the-gpu', 'Other') === 'Scratch');
 expect('claude: app title wins', parseClaudeSession(claudeFile, SID, new Map([[SID, 'From app']]))!.title === 'From app');
-expect('claude: desktop title file', claudeDesktopTitle(JSON.stringify({ cliSessionId: 'a', title: 'T' }))?.title === 'T' && claudeDesktopTitle('{}') === null);
+// --- sections ------------------------------------------------------------
+const metaA = parseClaudeMeta(JSON.stringify({ sessionId: 'local_a', cliSessionId: 'cli-a', priorCliSessionIds: ['cli-a0'], title: 'Parent' }))!;
+const metaB = parseClaudeMeta(JSON.stringify({ sessionId: 'local_b', cliSessionId: 'cli-b', title: 'Fork', forkedFromSessionId: 'local_a' }))!;
+const metaC = parseClaudeMeta(JSON.stringify({ sessionId: 'local_c', cliSessionId: 'cli-c', title: 'Side', spawnedFrom: { sessionId: 'local_b' } }))!;
+expect('meta: ids, prior ids, title', metaA.localId === 'local_a' && metaA.cliIds.join() === 'cli-a,cli-a0' && metaA.title === 'Parent');
+expect('meta: parent from fork or spawn', metaB.parentLocalId === 'local_a' && metaC.parentLocalId === 'local_b' && parseClaudeMeta('{}') === null);
+const groupsValue = { 'acc/org': { groups: [{ id: 'g1', name: 'Obsidian', mode: 'code' }], assignments: { 'code:local_a': 'g1', 'code:local_x': 'gone' }, order: {} } };
+const groups = claudeGroups(groupsValue);
+expect('groups: assignment -> name, unknown group ignored', groups.get('local_a') === 'Obsidian' && groups.size === 1);
+const metas = new Map([metaA, metaB, metaC].map((m) => [m.localId, m]));
+expect('placement: own group, no parent', JSON.stringify(claudePlacement('local_a', metas, groups)) === JSON.stringify({ group: 'Obsidian' }));
+const pc = claudePlacement('local_c', metas, groups);
+expect('placement: grandchild inherits group, nested under its parent', pc.group === 'Obsidian' && pc.parentTitle === 'Fork');
+expect('placement: no group', claudePlacement('local_z', metas, groups).group === undefined);
+const codexState = parseCodexState(JSON.stringify({
+	'local-projects': { p1: { name: '2nd Brain', rootPaths: ['D:\\BrainTest\\SecondBrain\\Open'] }, p2: { name: 'Sub', rootPaths: ['D:\\BrainTest\\SecondBrain\\Open\\Sub'] } },
+	'thread-project-assignments': { t9: { projectKind: 'local', projectId: 'p2' } },
+}));
+expect('codex: project by folder (\\\\?\\ prefix, case)', codexProjectFor(codexState, 't1', String.raw`\\?\d:\braintest\secondbrain\open`) === '2nd Brain');
+expect('codex: deepest project folder wins', codexProjectFor(codexState, 't1', 'D:/BrainTest/SecondBrain/Open/Sub/x') === 'Sub');
+expect('codex: assignment wins over folder', codexProjectFor(codexState, 't9', 'C:/elsewhere') === 'Sub');
+expect('codex: no project', codexProjectFor(codexState, 't1', 'C:/Users/W/Documents/Codex/2026-11-03/x') === undefined && normFolder('C:\\A\\') === 'c:/a');
+
+// --- leveldb -------------------------------------------------------------
+const lit = (s: string) => new TextEncoder().encode(s);
+// Snappy: literal "abcd" then a copy of 4 bytes from offset 4 -> "abcdabcd".
+expect('snappy: literal + copy', new TextDecoder().decode(snappyDecompress(new Uint8Array([8, 3 << 2, 97, 98, 99, 100, 0x01, 4]))) === 'abcdabcd');
+expect('json: last parseable copy wins', JSON.stringify(lastJsonObject('x"k":{"a":1}y"k":{"a":2,"s":"}"}z"k":{broken', 'k')) === '{"a":2,"s":"}"}');
+const logA = lit(`junk "customGroupsByScope":${JSON.stringify({ old: { groups: [], assignments: {} } })}`);
+const logB = lit(`\u0001"customGroupsByScope":${JSON.stringify(groupsValue)} tail`);
+expect('leveldb: newest file wins', claudeGroups(findLatestJson([['000005.log', logA], ['000158.log', logB]], 'customGroupsByScope')).get('local_a') === 'Obsidian');
+const utf16 = new Uint8Array(Array.from(`"customGroupsByScope":${JSON.stringify(groupsValue)}`).flatMap((c) => [c.charCodeAt(0), 0]));
+expect('leveldb: UTF-16 value', claudeGroups(findLatestJson([['000009.log', utf16]], 'customGroupsByScope')).size === 1);
 expect('folder: drive root and missing', sessionFolderName('D:\\', 'Other') === 'Other' && sessionFolderName(undefined, 'Other') === 'Other');
 const md = renderDesktopTranscript(cs, { source: 'C:\\Users\\W\\.claude\\projects\\D--BrainTest\\x.jsonl', rawFileName: 'x.jsonl' });
 expect('render: frontmatter', md.startsWith('---\napp: "Claude desktop"\nsession: ' + SID) && md.includes('source: "C:/Users/W/.claude/projects/D--BrainTest/x.jsonl"') && md.includes('raw: "[[x.jsonl]]"') && md.includes('unread: true'));
@@ -128,6 +164,10 @@ class FakeFs implements DesktopFs {
 	async readText(p: string) {
 		return this.files.get(p)?.text ?? null;
 	}
+	async readBytes(p: string) {
+		const f = this.files.get(p);
+		return f ? new TextEncoder().encode(f.text) : null;
+	}
 }
 
 const vaultFiles = new Map<string, string>();
@@ -143,8 +183,13 @@ const vault = {
 };
 const settings: Settings = { ...DEFAULT_SETTINGS, maxChatsPerRun: 0, chatFolder: '30 Sources/AI Chats/Claude Chat', logPath: 'log.md' } as Settings;
 settings.desktop = mergeDesktop(undefined, settings.chatFolder);
-expect('settings: default folders next to Claude Chat', settings.desktop.claude.folder === '30 Sources/AI Chats/Claude Desktop' && settings.desktop.codex.folder === '30 Sources/AI Chats/Codex');
+expect('settings: app layout next to Claude Chat', settings.desktop.claude.folder === '30 Sources/AI Chats/Claude Desktop/Code' && settings.desktop.codex.folder === '30 Sources/AI Chats/ChatGPT Desktop/Codex');
 expect('settings: saved values win', mergeDesktop({ claude: { enabled: false, folder: 'X', extraFolders: [], index: {} } } as never, 'A/B').claude.folder === 'X');
+const from016 = mergeDesktop({ claude: { enabled: true, folder: 'S/Claude Desktop', extraFolders: [], index: {} }, codex: { enabled: true, folder: 'S/Codex', extraFolders: [], index: {} } } as never, 'S/Claude Chat');
+expect('settings: unused 0.16.0 folders move to the app layout', from016.claude.folder === 'S/Claude Desktop/Code' && from016.codex.folder === 'S/ChatGPT Desktop/Codex');
+const used016 = mergeDesktop({ codex: { enabled: true, folder: 'S/Codex', extraFolders: [], index: { t: {} } } } as never, 'S/Claude Chat');
+expect('settings: used 0.16.0 folder is kept', used016.codex.folder === 'S/Codex');
+expect('layout: root next to or above the chat folder', layoutRoot('S/Claude Chat') === 'S' && layoutRoot('S/Claude Desktop/Chat') === 'S' && layoutRoot('Claude Chat') === '');
 const plugin = { app: { vault, fileManager: { processFrontMatter: async () => undefined } }, settings, saveSettings: async () => undefined } as never;
 
 (async () => {
@@ -159,26 +204,36 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	fs.put('C:/Users/W/.codex/sessions/2026/11/06/rollout-a.jsonl', codexFile, old);
 	fs.put('C:/Users/W/.codex/sessions/2026/11/07/rollout-g.jsonl', jl({ timestamp: '2026-11-07T08:00:00Z', type: 'session_meta', payload: { id: 'g1', source: { subagent: 'x' } } }, { timestamp: '2026-11-07T08:00:01Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Judge' }] } }), old);
 	fs.put('C:/Users/W/.codex/session_index.jsonl', jl({ id: TID, thread_name: 'Fix ChatBridge sync' }), old);
-	fs.put(`C:/Users/W/AppData/Local/Claude-Data/claude_x/claude-code-sessions/acc/org/local_abc.json`, JSON.stringify({ cliSessionId: SID, title: 'Sidebar title', titleSource: 'user' }), old);
+	const appData = 'C:/Users/W/AppData/Local/Claude-Data/claude_x';
+	fs.put(`${appData}/claude-code-sessions/acc/org/local_abc.json`, JSON.stringify({ sessionId: 'local_abc', cliSessionId: SID, title: 'Sidebar title', titleSource: 'user' }), old);
+	fs.put(`${appData}/claude-code-sessions/acc/org/local_fork.json`, JSON.stringify({ sessionId: 'local_fork', cliSessionId: 'fork-1', title: 'Sidebar title (fork)', forkedFromSessionId: 'local_abc' }), old);
+	fs.put(`${appData}/Local Storage/leveldb/000003.log`, `"customGroupsByScope":${JSON.stringify({ 'acc/org': { groups: [{ id: 'g1', name: 'Obsidian' }], assignments: { 'code:local_abc': 'g1' } } })}`, old);
+	fs.put('C:/Users/W/.claude/projects/D--BrainTest/fork-1.jsonl', claudeFile.replace(new RegExp(SID, 'g'), 'fork-1'), old);
+	fs.put('C:/Users/W/.codex/.codex-global-state.json', JSON.stringify({ 'local-projects': { p: { name: '2nd Brain', rootPaths: ['D:\\BrainTest\\SecondBrain\\Open'] } } }), old);
 	fs.put('E:/Cowork/s1.jsonl', claudeFile.replace(new RegExp(SID, 'g'), 'cowork-1'), old);
 
 	const listed = await listSessionFiles(fs, 'claude', []);
-	expect('scan: subagents folder skipped', listed.length === 3 && !listed.some((f) => f.path.includes('subagents')), listed.map((f) => f.path).join());
+	expect('scan: subagents folder skipped', listed.length === 4 && !listed.some((f) => f.path.includes('subagents')), listed.map((f) => f.path).join());
 	expect('scan: codex index file is not a session', (await listSessionFiles(fs, 'codex', [])).length === 2);
 
 	settings.desktop.claude.extraFolders = ['E:\\Cowork'];
 	const r1 = await runDesktopSync(plugin, undefined, fs, NOW);
 	expect('sync 1: no stop', !r1.stopped, r1.stopped);
-	expect('sync 1: 3 new (claude, codex, extra folder)', r1.newCount === 3, JSON.stringify(r1));
+	expect('sync 1: 4 new (claude, fork, codex, extra folder)', r1.newCount === 4, JSON.stringify(r1));
 	expect('sync 1: active session waits', r1.active === 1);
 	expect('sync 1: empty + guardian skipped', r1.empty === 2);
-	const claudeMd = '30 Sources/AI Chats/Claude Desktop/BrainTest/2026-11-06 Sidebar title.md';
-	expect('sync 1: claude transcript path', vaultFiles.has(claudeMd), [...vaultFiles.keys()].join(' | '));
-	expect('sync 1: codex transcript path', vaultFiles.has('30 Sources/AI Chats/Codex/Open/2026-11-06 Fix ChatBridge sync.md'));
+	const code = '30 Sources/AI Chats/Claude Desktop/Code';
+	const claudeMd = `${code}/Obsidian/2026-11-06 Sidebar title.md`;
+	expect('sync 1: claude session in its sidebar group', vaultFiles.has(claudeMd), [...vaultFiles.keys()].join(' | '));
+	expect('sync 1: fork nested under its parent in the same group', vaultFiles.has(`${code}/Obsidian/Sidebar title/2026-11-06 Sidebar title (fork).md`));
+	expect('sync 1: session outside a group by working folder', vaultFiles.has(`${code}/BrainTest/2026-11-06 My title.md`));
+	expect('sync 1: codex thread in its project', vaultFiles.has('30 Sources/AI Chats/ChatGPT Desktop/Codex/2nd Brain/2026-11-06 Fix ChatBridge sync.md'));
+	expect('sync 1: section in frontmatter', vaultFiles.get(claudeMd)!.includes('section: "Obsidian"'));
 	expect('sync 1: no raw copy by default', ![...vaultFiles.keys()].some((p) => p.endsWith('.jsonl')));
 
 	const r2 = await runDesktopSync(plugin, undefined, fs, NOW);
-	expect('sync 2: nothing new, unchanged counted', r2.newCount === 0 && r2.changedCount === 0 && r2.unchanged === 3, JSON.stringify(r2));
+	expect('sync 2: nothing new, unchanged counted', r2.newCount === 0 && r2.changedCount === 0 && r2.unchanged === 4, JSON.stringify(r2));
+	expect('sync 2: groups cached for when the app storage is unreadable', settings.desktop.claude.groupCache?.local_abc === 'Obsidian');
 
 	// Session continues: new transcript as "(updated …)", old one kept.
 	fs.put(cPath, claudeFile + '\n' + jl({ type: 'user', timestamp: '2026-11-07T09:00:00.000Z', message: { role: 'user', content: 'One more thing' } }), old + 1000);
@@ -203,7 +258,7 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	expect('sync 5: deleted transcript restored', r5.restored.length === 1 && vaultFiles.has(codexMd));
 
 	// Moving the folder in Obsidian updates the desktop index.
-	const n = followRename(settings, '30 Sources/AI Chats/Codex', '30 Sources/AI Chats/OpenAI Codex');
+	const n = followRename(settings, '30 Sources/AI Chats/ChatGPT Desktop/Codex', '30 Sources/AI Chats/OpenAI Codex');
 	expect('rename: desktop index follows', n === 1 && settings.desktop.codex.index[TID]!.md.startsWith('30 Sources/AI Chats/OpenAI Codex/'));
 
 	settings.desktop.claude.enabled = false;
@@ -211,12 +266,81 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	const r6 = await runDesktopSync(plugin, undefined, fs, NOW);
 	expect('disabled: nothing read', r6.listed === 0);
 
+	await layoutTest();
 	if (process.env.DESKTOP_LIVE) await live();
 	console.log(failures ? `\n${failures} FAILED` : '\nAll desktop tests passed.');
 	process.exit(failures ? 1 : 0);
 })();
 
-/** Read-only pass over the real session folders: counts only, nothing written. */
+/** Moving an existing vault into the app layout, on a small in-memory folder tree. */
+async function layoutTest() {
+	type Node = (TFile | TFolder) & { name: string; parent?: TFolder };
+	const nodes = new Map<string, Node>();
+	const named = <T extends TFile | TFolder>(n: T, path: string) => Object.assign(n, { path, name: path.split('/').pop()! }) as T & Node;
+	const parentPath = (p: string) => p.split('/').slice(0, -1).join('/');
+	const add = (path: string, folder: boolean): Node => {
+		const existing = nodes.get(path);
+		if (existing) return existing;
+		const pp = parentPath(path);
+		const parent = pp ? (add(pp, true) as TFolder & Node) : undefined;
+		const n = folder ? named(new TFolder(path), path) : named(new TFile(path, { size: 1 }), path);
+		n.parent = parent;
+		parent?.children.push(n);
+		nodes.set(path, n);
+		return n;
+	};
+	const renamed: [string, string][] = [];
+	const app = {
+		vault: {
+			getAbstractFileByPath: (p: string) => nodes.get(p) ?? null,
+			createFolder: async (p: string) => void add(p, true),
+		},
+		fileManager: {
+			renameFile: async (n: Node, to: string) => {
+				if (nodes.has(to)) throw new Error('exists ' + to);
+				const from = n.path;
+				renamed.push([from, to]);
+				const parent = add(parentPath(to), true) as TFolder & Node;
+				n.parent!.children.splice(n.parent!.children.indexOf(n), 1);
+				parent.children.push(n);
+				n.parent = parent;
+				for (const [p, x] of [...nodes]) {
+					if (p !== from && !p.startsWith(`${from}/`)) continue;
+					nodes.delete(p);
+					const np = to + p.slice(from.length);
+					named(x, np);
+					nodes.set(np, x);
+				}
+			},
+			trashFile: async (n: Node) => {
+				n.parent!.children.splice(n.parent!.children.indexOf(n), 1);
+				nodes.delete(n.path);
+			},
+		},
+	};
+	const R = '30 Sources/AI Chats';
+	add(`${R}/Claude Chat/2nd Brain/2026-11-05 a.md`, false);
+	add(`${R}/Claude Chat/Recent/2026-11-01 b.json`, false);
+	add(`${R}/ChatGPT Chat/Recent/Artifacts/2026-10-01 c/img.png`, false);
+	add(`${R}/ChatGPT Chat/Recent/2026-10-01 c.md`, false);
+	add(`${R}/Claude Desktop/Chat`, true);
+	add(`${R}/ChatGPT Desktop/Chat`, true);
+	add(`${R}/ChatGPT Desktop/Codex`, true);
+	const s = { ...DEFAULT_SETTINGS, chatFolder: `${R}/Claude Chat`, codeFolder: `${R}/Claude Code`, gpt: { ...DEFAULT_SETTINGS.gpt, folder: `${R}/ChatGPT Chat`, index: { x: { updated_at: '', json: '', md: `${R}/ChatGPT Chat/Recent/2026-10-01 c.md`, synced: '' } }, fileIndex: { f: `${R}/ChatGPT Chat/Recent/Artifacts/2026-10-01 c/img.png` } }, index: { y: { updated_at: '', json: `${R}/Claude Chat/Recent/2026-11-01 b.json`, md: '', synced: '' } }, fileIndex: {} } as Settings;
+	s.desktop = mergeDesktop({ claude: { enabled: true, folder: `${R}/Claude Desktop`, extraFolders: [], index: {} }, codex: { enabled: true, folder: `${R}/Codex`, extraFolders: [], index: {} } } as never, s.chatFolder);
+	const moves = layoutMoves(s);
+	expect('layout: planned moves', moves.map((m) => m.label).join() === 'claude.ai chats,Claude Code chats listed on claude.ai,ChatGPT chats', moves.map((m) => `${m.label}: ${m.from} -> ${m.to}`).join(' | '));
+	const r = await moveToAppLayout(app as never, s, async () => undefined);
+	expect('layout: chats moved into Claude Desktop/Chat', nodes.has(`${R}/Claude Desktop/Chat/2nd Brain/2026-11-05 a.md`) && nodes.has(`${R}/Claude Desktop/Chat/Recent/2026-11-01 b.json`));
+	expect('layout: ChatGPT chats and their files moved', nodes.has(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/2026-10-01 c/img.png`));
+	expect('layout: emptied old folders removed', !nodes.has(`${R}/Claude Chat`) && !nodes.has(`${R}/ChatGPT Chat`));
+	expect('layout: whole subfolders moved in one rename each', r.moved === 3 && r.conflicts.length === 0, JSON.stringify(renamed));
+	expect('layout: settings point at the new folders', s.chatFolder === `${R}/Claude Desktop/Chat` && s.codeFolder === `${R}/Claude Desktop/Code` && s.gpt.folder === `${R}/ChatGPT Desktop/Chat` && s.desktop.claude.folder === `${R}/Claude Desktop/Code` && s.desktop.codex.folder === `${R}/ChatGPT Desktop/Codex`);
+	expect('layout: indexes follow the move', s.index.y!.json.startsWith(`${R}/Claude Desktop/Chat/Recent/`) && s.gpt.index.x!.md.startsWith(`${R}/ChatGPT Desktop/Chat/`) && s.gpt.fileIndex.f!.startsWith(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/`));
+	expect('layout: nothing left to move', layoutMoves(s).length === 0);
+}
+
+/** Real session files -> in-memory vault: shows where each session would be saved. Nothing on disk changes. */
 async function live() {
 	const nodeFs = await import('node:fs/promises');
 	const os = await import('node:os');
@@ -226,28 +350,20 @@ async function live() {
 		readDir: async (d) => (await nodeFs.readdir(d, { withFileTypes: true }).catch(() => [])).map((e) => ({ name: e.name, dir: e.isDirectory() })),
 		stat: async (p) => nodeFs.stat(p).then((s) => ({ size: s.size, mtimeMs: s.mtimeMs })).catch(() => null),
 		readText: async (p) => nodeFs.readFile(p, 'utf8').catch(() => null),
+		readBytes: async (p) => nodeFs.readFile(p).then((b) => new Uint8Array(b)).catch(() => null),
 	};
-	const appTitles = new Map<string, string>();
-	for (const f of await claudeDesktopMetaFiles(real)) {
-		const t = claudeDesktopTitle((await real.readText(f)) ?? '');
-		if (t) appTitles.set(t.id, t.title);
-	}
-	expect('live: Claude desktop titles found', appTitles.size > 0, `${appTitles.size} titles`);
-	const titlesReal = codexTitles((await real.readText(`${real.home}/.codex/session_index.jsonl`)) ?? '');
-	for (const app of ['claude', 'codex'] as const) {
-		const files = await listSessionFiles(real, app, []);
-		let ok = 0, empty = 0, sub = 0, turns = 0;
-		for (const f of files) {
-			const text = (await real.readText(f.path)) ?? '';
-			const s = app === 'claude' ? parseClaudeSession(text, f.path.split('/').pop()!.replace('.jsonl', ''), appTitles) : parseCodexSession(text, titlesReal);
-			if (!s) empty++;
-			else if (s.isSubagent) sub++;
-			else {
-				ok++;
-				turns += s.turns.length;
-				console.log(`  ${app}: ${s.created.slice(0, 10)} ${s.title.slice(0, 60)} → ${sessionFolderName(s.cwd, 'Other')} (${s.turns.length} turns)`);
-			}
-		}
-		expect(`live ${app}: every file parsed or skipped`, ok + empty + sub === files.length, `${files.length} files: ${ok} sessions, ${sub} helper, ${empty} empty, ${turns} turns`);
-	}
+	const files = new Map<string, string>();
+	const memVault = {
+		getAbstractFileByPath: (p: string) => (files.has(p) ? Object.assign(new TFile(p, { size: 0 }), { path: p }) : null),
+		createFolder: async () => undefined,
+		create: async (p: string, d: string) => void files.set(p, d),
+		process: async () => undefined,
+	};
+	const s = { ...DEFAULT_SETTINGS, maxChatsPerRun: 0, chatFolder: '30 Sources/AI Chats/Claude Desktop/Chat', logPath: 'log.md' } as Settings;
+	s.desktop = { ...mergeDesktop(undefined, s.chatFolder), quietMinutes: 0 };
+	const p = { app: { vault: memVault, fileManager: { processFrontMatter: async () => undefined } }, settings: s, saveSettings: async () => undefined } as never;
+	const r = await runDesktopSync(p, undefined, real);
+	for (const path of [...files.keys()].filter((x) => x.endsWith('.md')).sort()) console.log('  ' + path.replace('30 Sources/AI Chats/', ''));
+	expect('live: real sync ran', !r.stopped && r.newCount > 0, `${r.listed} files: ${r.newCount} saved, ${r.empty} empty/helper, stopped: ${r.stopped ?? 'no'}`);
+	expect('live: Claude sidebar groups read', Object.keys(s.desktop.claude.groupCache ?? {}).length > 0, `${Object.keys(s.desktop.claude.groupCache ?? {}).length} assignments`);
 }

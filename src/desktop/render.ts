@@ -30,6 +30,7 @@ export interface DesktopRenderMeta {
 
 export function renderDesktopTranscript(s: DesktopSession, meta: DesktopRenderMeta): string {
 	const fm = ['---', `app: ${y(APP_LABEL[s.app])}`, `session: ${s.id}`, `title: ${y(s.title)}`, `created: ${s.created}`, `updated: ${s.updated}`];
+	if (s.section) fm.push(`section: ${y(s.section)}`);
 	if (s.cwd) fm.push(`cwd: ${y(s.cwd)}`);
 	if (s.model) fm.push(`model: ${y(s.model)}`);
 	if (s.forkedFrom) fm.push(`forked_from: ${s.forkedFrom}`);

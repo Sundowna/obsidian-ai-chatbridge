@@ -11,6 +11,7 @@ export interface DesktopFs {
 	readDir(dir: string): Promise<{ name: string; dir: boolean }[]>;
 	stat(path: string): Promise<{ size: number; mtimeMs: number } | null>;
 	readText(path: string): Promise<string | null>;
+	readBytes(path: string): Promise<Uint8Array | null>;
 }
 
 export interface SourceFile {
@@ -101,6 +102,26 @@ export async function claudeDesktopMetaFiles(fs: DesktopFs): Promise<string[]> {
 	return [...new Set(out)];
 }
 
+/**
+ * The Claude desktop app's Local Storage files (*.log, *.ldb), where its sidebar groups are
+ * kept. Read as a snapshot; the app may be writing at the same time, so a read can miss.
+ */
+export async function claudeLocalStorageFiles(fs: DesktopFs): Promise<[string, Uint8Array][]> {
+	const out: [string, Uint8Array][] = [];
+	const subdirs = async (dir: string) => (await fs.readDir(dir)).filter((e) => e.dir).map((e) => join(dir, e.name));
+	for (const root of claudeAppDataRoots(fs)) {
+		for (const base of [root, ...(await subdirs(root))]) {
+			const dir = join(base, 'Local Storage/leveldb');
+			for (const e of await fs.readDir(dir)) {
+				if (e.dir || !/\.(log|ldb)$/.test(e.name)) continue;
+				const bytes = await fs.readBytes(join(dir, e.name));
+				if (bytes) out.push([e.name, bytes]);
+			}
+		}
+	}
+	return out;
+}
+
 /** Node's fs through Obsidian's desktop require; null on mobile. */
 export function nodeDesktopFs(): DesktopFs | null {
 	const req = (window as unknown as { require?: (m: string) => unknown }).require;
@@ -109,7 +130,7 @@ export function nodeDesktopFs(): DesktopFs | null {
 	const fsp = (req('fs') as { promises: {
 		readdir(p: string, o: { withFileTypes: true }): Promise<Dirent[]>;
 		stat(p: string): Promise<{ size: number; mtimeMs: number; isFile(): boolean }>;
-		readFile(p: string, enc: 'utf8'): Promise<string>;
+		readFile(p: string, enc?: 'utf8'): Promise<string & Uint8Array>;
 	} }).promises;
 	const os = req('os') as { homedir(): string };
 	const proc = (req('process') as { env: Record<string, string | undefined> });
@@ -134,6 +155,13 @@ export function nodeDesktopFs(): DesktopFs | null {
 		readText: async (p) => {
 			try {
 				return await fsp.readFile(p, 'utf8');
+			} catch {
+				return null;
+			}
+		},
+		readBytes: async (p) => {
+			try {
+				return new Uint8Array(await fsp.readFile(p));
 			} catch {
 				return null;
 			}

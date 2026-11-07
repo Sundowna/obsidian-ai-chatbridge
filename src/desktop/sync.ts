@@ -6,14 +6,16 @@
 import { TFile } from 'obsidian';
 import type AIChatBridge from '../main';
 import { appendLog } from '../log';
-import { baseName, dailyNoteName, localStamp } from '../naming';
+import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
 import { createNew, ensureFolder } from '../vaultio';
-import { claudeDesktopTitle, parseClaudeSession } from './claude-code';
+import { parseClaudeSession } from './claude-code';
 import { codexTitles, parseCodexSession } from './codex';
+import { findLatestJson } from './leveldb';
 import { renderDesktopTranscript, sessionFolderName } from './render';
-import { claudeDesktopMetaFiles, codexHome, listSessionFiles, nodeDesktopFs, type DesktopFs, type SourceFile } from './scan';
+import { claudeDesktopMetaFiles, claudeLocalStorageFiles, codexHome, listSessionFiles, nodeDesktopFs, type DesktopFs, type SourceFile } from './scan';
+import { claudeGroups, claudePlacement, codexProjectFor, parseClaudeMeta, parseCodexState, type ClaudeDesktopMeta, type CodexProjects } from './sections';
 import { APP_LABEL, type DesktopApp, type DesktopSession } from './types';
 
 export interface DesktopSyncResult {
@@ -34,6 +36,14 @@ export interface DesktopSyncResult {
 const APPS: DesktopApp[] = ['claude', 'codex'];
 /** Folder for sessions without a recorded working folder. */
 const NO_FOLDER = 'Other';
+/** Codex threads outside a project, like the app's "Recents". */
+const RECENT = 'Recent';
+
+interface ClaudeApp {
+	metas: Map<string, ClaudeDesktopMeta>;
+	byCli: Map<string, ClaudeDesktopMeta>;
+	groups: Map<string, string>;
+}
 
 export function anyDesktopEnabled(plugin: AIChatBridge): boolean {
 	const d = plugin.settings.desktop;
@@ -75,15 +85,32 @@ export async function runDesktopSync(
 		if (!fs) throw new Error('Desktop app chats can only be read on a computer.');
 		const todo: Todo[] = [];
 		let codexTitleMap: Map<string, string> | null = null;
-		let claudeTitleMap: Map<string, string> | null = null;
-		/** The titles shown in the Claude desktop app's sidebar, by session ID. */
-		const loadClaudeTitles = async (): Promise<Map<string, string>> => {
-			const map = new Map<string, string>();
+		let codexProjects: CodexProjects | null = null;
+		let claude: ClaudeApp | null = null;
+		/** The Code tab's titles, groups and nesting, as the Claude desktop app shows them. */
+		const loadClaude = async (): Promise<ClaudeApp> => {
+			const metas = new Map<string, ClaudeDesktopMeta>();
+			const byCli = new Map<string, ClaudeDesktopMeta>();
 			for (const p of await claudeDesktopMetaFiles(fs)) {
-				const t = claudeDesktopTitle((await fs.readText(p)) ?? '');
-				if (t) map.set(t.id, t.title);
+				const m = parseClaudeMeta((await fs.readText(p)) ?? '');
+				if (!m) continue;
+				metas.set(m.localId, m);
+				for (const id of m.cliIds) if (!byCli.has(id)) byCli.set(id, m);
 			}
-			return map;
+			const conf = d.claude;
+			let groups = claudeGroups(findLatestJson(await claudeLocalStorageFiles(fs), 'customGroupsByScope'));
+			// The app may be mid-write: then use the groups seen last time.
+			if (groups.size) conf.groupCache = Object.fromEntries(groups);
+			else groups = new Map(Object.entries(conf.groupCache ?? {}));
+			return { metas, byCli, groups };
+		};
+		/** Subfolder inside the app's folder: the sidebar section (and parent session, if nested). */
+		const sectionOf = (session: DesktopSession): string => {
+			if (session.app === 'codex') return codexProjectFor(codexProjects!, session.id, session.cwd) ?? RECENT;
+			const meta = claude!.byCli.get(session.id);
+			const place = meta ? claudePlacement(meta.localId, claude!.metas, claude!.groups) : {};
+			const section = place.group ? safeTitle(place.group) : sessionFolderName(session.cwd, NO_FOLDER);
+			return place.parentTitle ? `${section}/${safeTitle(place.parentTitle)}` : section;
 		};
 
 		for (const which of APPS) {
@@ -114,12 +141,15 @@ export async function runDesktopSync(
 				if (text === null) continue; // vanished or locked: try again next run
 				let session: DesktopSession | null;
 				if (which === 'claude') {
-					claudeTitleMap ??= await loadClaudeTitles();
-					session = parseClaudeSession(text, (file.path.split('/').pop() ?? '').replace(/\.jsonl$/, ''), claudeTitleMap);
+					claude ??= await loadClaude();
+					const titles = new Map([...claude.byCli].flatMap(([id, m]) => (m.title ? [[id, m.title] as [string, string]] : [])));
+					session = parseClaudeSession(text, (file.path.split('/').pop() ?? '').replace(/\.jsonl$/, ''), titles);
 				} else {
 					codexTitleMap ??= codexTitles((await fs.readText(`${codexHome(fs)}/session_index.jsonl`)) ?? '');
+					codexProjects ??= parseCodexState((await fs.readText(`${codexHome(fs)}/.codex-global-state.json`)) ?? '');
 					session = parseCodexSession(text, codexTitleMap);
 				}
+				if (session) session.section = sectionOf(session);
 				if (!session || (session.isSubagent && !d.includeSubagents)) {
 					conf.ignored[key] = file.mtime;
 					result.empty++;
@@ -156,7 +186,7 @@ export async function runDesktopSync(
 			progress(`${i + 1} of ${Math.min(limit, todo.length)} sessions: ${session.title}`, i, Math.min(limit, todo.length));
 			const conf = d[session.app];
 			const base = cleanFolder(conf.folder)!;
-			const folder = d.projectSubfolders ? `${base}/${sessionFolderName(session.cwd, NO_FOLDER)}` : base;
+			const folder = d.projectSubfolders && session.section ? `${base}/${session.section}` : base;
 			await ensureFolder(app, folder);
 			let stem = baseName(session.created, session.title);
 			if (isUpdate) stem = `${stem} (updated ${localStamp(session.updated)})`;

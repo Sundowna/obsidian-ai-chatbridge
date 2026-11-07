@@ -11,7 +11,7 @@ Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault. Each cha
 - Optionally download files the AI created (to `Artifacts/`) and files you uploaded (to `Attachments/`) next to each chat.
 - Mirror your claude.ai / ChatGPT projects as subfolders, or sync only the projects you list.
 - Keep Claude Code sessions listed on claude.ai in a separate folder.
-- **Desktop apps:** also save the chats that exist only on this computer: Claude Code sessions from the Claude desktop app and CLI (`~/.claude/projects`), and Codex threads from the ChatGPT/Codex desktop app and CLI (`~/.codex/sessions`). Each app has its own target folder, with optional subfolders per working folder. Titles match the apps' sidebars. Sessions still being written wait for a quiet period. Cowork sessions are kept in the cloud, not on this computer, so they cannot be read locally. If you have session `.jsonl` files elsewhere, add their folders under **Extra session folders**.
+- **Desktop apps:** also save the chats that exist only on this computer: Claude Code sessions from the Claude desktop app and CLI (`~/.claude/projects`), and Codex threads from the ChatGPT/Codex desktop app and CLI (`~/.codex/sessions`). Titles and folders match the apps' sidebars: Claude Code sessions go into one folder per sidebar group (otherwise per working folder), with forks and side sessions nested under the session they came from. Codex threads go into one folder per project, or `Recent`. Sessions still being written wait for a quiet period. Cowork sessions are kept in the cloud, not on this computer, so they cannot be read locally. If you have session `.jsonl` files elsewhere, add their folders under **Extra session folders**.
 - Only new or changed chats are written again; moving or renaming synced notes inside Obsidian is tracked.
 - Optional automatic sync (every 30 minutes or more), which pauses itself after an error.
 - Read-only: the plugin never creates, changes or deletes anything on claude.ai or ChatGPT.
@@ -23,6 +23,7 @@ Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault. Each cha
 | **Sync Claude chats** | Sync claude.ai only |
 | **Sync ChatGPT chats** | Sync ChatGPT only |
 | **Sync desktop app chats (Claude, Codex)** | Save local Claude Code and Codex sessions |
+| **Move synced chats into the app layout (Claude Desktop, ChatGPT Desktop)** | Move existing synced folders to `Claude Desktop/Chat`, `Claude Desktop/Code`, `ChatGPT Desktop/Chat` and `ChatGPT Desktop/Codex`. Links and the sync index follow |
 | **Sync all chats** | Sync every provider you are logged in to, then the desktop apps that are on |
 | **Diagnose: save claude.ai answers for the open chat** | Save the raw API answers for the open chat, for bug reports |
 
@@ -46,7 +47,7 @@ This plugin needs network access to work. Please read this before using it.
 - **Where logins are stored:** in the login window's own Electron storage on this computer, outside the vault. Logins are never written to `data.json`, to notes or to logs. **Log out** in the settings removes them.
 - **Session key fallback (claude.ai):** if the login window does not work, you can paste your `sessionKey` cookie. It is kept in Obsidian's secret storage on this computer, not in the vault.
 - **What is written:** chat JSON, Markdown transcripts, downloaded files and a sync log, only inside the vault folders you choose. The sync index in `data.json` holds chat IDs and paths, no content and no secrets.
-- **Files outside the vault (desktop apps only):** when a desktop app is turned on in the **Desktop apps** tab, the plugin *reads* that app's session files on this computer (`~/.claude/projects`, the Claude desktop app's session list for titles, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl`, and any extra folders you add). It never changes or deletes them, and sends nothing over the network. Turn an app off to stop this.
+- **Files outside the vault (desktop apps only):** when a desktop app is turned on in the **Desktop apps** tab, the plugin *reads* that app's session files on this computer (`~/.claude/projects`, the Claude desktop app's session list and Local Storage for titles and sidebar groups, `~/.codex/.codex-global-state.json` for Codex projects, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl`, and any extra folders you add). It never changes or deletes them, and sends nothing over the network. Turn an app off to stop this.
 - **Terms of service:** automated access may be limited by the providers' terms. Use a reasonable delay between requests and your own judgment.
 
 ## Requirements

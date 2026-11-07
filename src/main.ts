@@ -2,6 +2,7 @@ import { Notice, Plugin } from 'obsidian';
 import { AIChatBridgeSettingTab, DEFAULT_DESKTOP, DEFAULT_GPT, DEFAULT_SETTINGS, MIN_INTERVAL_MINUTES, Settings } from './settings';
 import { anyDesktopEnabled, runDesktopSync } from './desktop/sync';
 import type { DesktopAppSettings } from './desktop/types';
+import { CHATGPT_APP, CLAUDE_APP, layoutMoves, layoutRoot, moveToAppLayout } from './desktop/layout';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
@@ -69,6 +70,12 @@ export default class AIChatBridge extends Plugin {
 			id: 'sync-desktop-app-chats',
 			name: 'Sync desktop app chats (Claude, Codex)',
 			callback: () => void this.syncDesktop('manual'),
+		});
+
+		this.addCommand({
+			id: 'move-to-app-layout',
+			name: 'Move synced chats into the app layout (Claude Desktop, ChatGPT Desktop)',
+			callback: () => void this.moveToAppLayout(),
 		});
 
 		this.addCommand({
@@ -218,6 +225,24 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
+	/** Moves the synced folders into Claude Desktop/{Chat,Code} and ChatGPT Desktop/{Chat,Codex}. */
+	async moveToAppLayout(): Promise<void> {
+		await this.guarded('manual', async () => {
+			if (!layoutMoves(this.settings).length) {
+				new Notice('AI ChatBridge: the folders already follow the app layout.');
+				return;
+			}
+			const notice = new Notice('AI ChatBridge: moving synced chats…', 0);
+			try {
+				const r = await moveToAppLayout(this.app, this.settings, () => this.saveSettings());
+				const left = r.conflicts.length ? ` ${r.conflicts.length} files left in place (same name already there): ${r.conflicts.slice(0, 5).join(', ')}` : '';
+				new Notice(`AI ChatBridge: moved ${r.moved} folders and files into the app layout.${left}`, 15_000);
+			} finally {
+				notice.hide();
+			}
+		});
+	}
+
 	/** Every provider you are logged in to, one after the other, then the desktop apps. */
 	async syncAll(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
@@ -338,23 +363,32 @@ export function formatClock(ms: number): string {
 }
 
 /**
- * Desktop settings from data.json over the defaults. A vault that never had them gets
- * folders next to its Claude Chat folder (e.g. "30 Sources/AI Chats/Claude Desktop").
+ * Desktop settings from data.json over the defaults. A vault that never had them gets the
+ * app layout next to its Claude Chat folder (e.g. "30 Sources/AI Chats/Claude Desktop/Code").
  */
 export function mergeDesktop(saved: Partial<Settings['desktop']> | undefined, chatFolder: string): Settings['desktop'] {
+	const root = layoutRoot(chatFolder);
 	const parent = chatFolder.split('/').slice(0, -1).join('/');
-	const app = (s: Partial<DesktopAppSettings> | undefined, def: DesktopAppSettings): DesktopAppSettings => ({
-		...def,
-		folder: parent ? `${parent}/${def.folder.split('/').pop()!}` : def.folder,
-		...s,
-		extraFolders: [...(s?.extraFolders ?? [])],
-		index: { ...(s?.index ?? {}) },
-		ignored: { ...(s?.ignored ?? {}) },
-	});
+	const under = (r: string, rest: string) => (r ? `${r}/${rest}` : rest);
+	const app = (s: Partial<DesktopAppSettings> | undefined, def: DesktopAppSettings, rest: string, before016: string): DesktopAppSettings => {
+		const folder = under(root, rest);
+		// 0.16.0 used ".../Claude Desktop" and ".../Codex"; nothing written there yet -> the new layout.
+		const unused = !Object.keys(s?.index ?? {}).length && s?.folder === under(parent, before016);
+		return {
+			...def,
+			folder,
+			...s,
+			...(unused ? { folder } : {}),
+			extraFolders: [...(s?.extraFolders ?? [])],
+			index: { ...(s?.index ?? {}) },
+			ignored: { ...(s?.ignored ?? {}) },
+			groupCache: { ...(s?.groupCache ?? {}) },
+		};
+	};
 	return {
 		...DEFAULT_DESKTOP,
 		...saved,
-		claude: app(saved?.claude, DEFAULT_DESKTOP.claude),
-		codex: app(saved?.codex, DEFAULT_DESKTOP.codex),
+		claude: app(saved?.claude, DEFAULT_DESKTOP.claude, `${CLAUDE_APP}/Code`, 'Claude Desktop'),
+		codex: app(saved?.codex, DEFAULT_DESKTOP.codex, `${CHATGPT_APP}/Codex`, 'Codex'),
 	};
 }

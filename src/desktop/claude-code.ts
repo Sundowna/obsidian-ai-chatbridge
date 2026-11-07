@@ -31,21 +31,6 @@ export function cleanClaudePrompt(text: string): string {
 	return t.trim();
 }
 
-/**
- * Titles the Claude desktop app shows in its sidebar, by Claude Code session ID. They live in
- * <app data>/claude-code-sessions/<account>/<org>/local_<id>.json as { cliSessionId, title }.
- */
-export function claudeDesktopTitle(metaText: string): { id: string; title: string } | null {
-	try {
-		const o = obj(JSON.parse(metaText));
-		const id = str(o?.cliSessionId);
-		const title = str(o?.title)?.trim();
-		return id && title ? { id, title } : null;
-	} catch {
-		return null;
-	}
-}
-
 export function parseClaudeSession(text: string, fileId: string, appTitles: Map<string, string> = new Map()): DesktopSession | null {
 	const records = jsonLines(text);
 	const b = new TurnBuilder();

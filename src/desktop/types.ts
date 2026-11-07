@@ -37,6 +37,8 @@ export interface DesktopSession {
 	forkedFrom?: string;
 	/** Helper runs (Claude subagents, Codex guardian reviews). Skipped by default. */
 	isSubagent: boolean;
+	/** Sidebar section in the app (group/project, and parent session if nested): the subfolder. */
+	section?: string;
 	turns: DesktopTurn[];
 }
 
@@ -62,6 +64,8 @@ export interface DesktopAppSettings {
 	index: Record<string, DesktopIndexEntry>;
 	/** Source files with no message from you, by lower-case path -> mtime, so they are not re-read every run. */
 	ignored?: Record<string, number>;
+	/** Claude: last sidebar groups read (app session ID -> group), used while the app's storage is unreadable. */
+	groupCache?: Record<string, string>;
 }
 
 export interface DesktopSettings {
