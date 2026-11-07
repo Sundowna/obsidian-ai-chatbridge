@@ -1,4 +1,4 @@
-<p align="center"><img src="chatBridgeLogo.png" width="120" alt="Project logo"></p>
+<p align="left"><img src="chatBridgeLogo.png" width="120" alt="Project logo"></p>
 
 # AI ChatBridge
 
