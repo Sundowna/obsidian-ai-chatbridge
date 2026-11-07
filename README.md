@@ -1,12 +1,19 @@
-<p align="left">
-  <img src="chatBridgeLogo.png" width="120" alt="AI ChatBridge logo">
-<h1 align="left">AI ChatBridge</h1>
-</p>
+<img src="chatBridgeLogo.png" width="120" alt="AI ChatBridge logo"><h1 align="left">AI ChatBridge</h1>
 
 Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault.
-The idea is to mirror the chats and folders from your AI web & desktop interfaces to your Obsidian vault.
-This way it looks and feels the same way as the GUIs that you are used - minimum barrier-to-entry and context switching.
+The idea is to mirror the chats and folders from your AI web & desktop interfaces to your Obsidian vault, **including media, files and artifacts.**
+This way it looks and feels the same way as the GUIs that you are used to - minimum barrier-to-entry and context switching.
 Each chat is saved as the raw JSON the website returns, plus a readable Markdown transcript, so your AI conversations live next to the rest of your notes.
+
+### Overview:
+- Sync chats from Claude and ChatGPTs web & desktop interfaces (other models coming)
+- Includes downloads of everything you put in and got out of AI - all media, files and artifacts.
+- Background sync job with timer
+- Automatic retry for large imports i.e. HTTP 429 - Too many requests error (no waiting for days for OpenAI to send you your data)
+- Local indexing with Newest-to-Oldest + Overlap indexing strategy
+
+### Note:
+<font color="#c00000">Large imports (i.e. couple of hundred chats) may take a while due to "429 - Too many request" errors from provider servers.</font> It can become frustrating...
 
 > **Unofficial.** This plugin is not affiliated with, endorsed by, or supported by Anthropic or OpenAI. It reads the same web endpoints your browser uses, which can change without notice.
 
