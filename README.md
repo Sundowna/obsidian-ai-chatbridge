@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="120" alt="Project logo"></p>
+
 # AI ChatBridge
 
 Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault.
