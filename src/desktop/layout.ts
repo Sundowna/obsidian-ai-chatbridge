@@ -32,17 +32,36 @@ export interface LayoutMove {
 	set: (s: Settings, path: string) => void;
 }
 
-export function layoutMoves(s: Settings): LayoutMove[] {
+/**
+ * What to move. Besides each folder setting, the older default folder names next to the app
+ * folders count too while they still exist: a setting may already point at the new folder
+ * (changed by hand) with the synced chats still sitting in the old one.
+ */
+export function layoutMoves(s: Settings, exists: (path: string) => boolean = () => false): LayoutMove[] {
 	const root = layoutRoot(s.chatFolder);
-	const all: LayoutMove[] = [
-		{ label: 'claude.ai chats', from: s.chatFolder, to: join(root, `${CLAUDE_APP}/Chat`), set: (x, p) => (x.chatFolder = p) },
-		{ label: 'Claude Code chats listed on claude.ai', from: s.codeFolder, to: join(root, `${CLAUDE_APP}/Code`), set: (x, p) => (x.codeFolder = p) },
-		{ label: 'Claude desktop Code sessions', from: s.desktop.claude.folder, to: join(root, `${CLAUDE_APP}/Code`), set: (x, p) => (x.desktop.claude.folder = p) },
-		{ label: 'ChatGPT chats', from: s.gpt.folder, to: join(root, `${CHATGPT_APP}/Chat`), set: (x, p) => (x.gpt.folder = p) },
-		{ label: 'Codex threads', from: s.desktop.codex.folder, to: join(root, `${CHATGPT_APP}/Codex`), set: (x, p) => (x.desktop.codex.folder = p) },
+	const targets: { label: string; setting: string; legacy: string[]; to: string; set: LayoutMove['set'] }[] = [
+		{ label: 'claude.ai chats', setting: s.chatFolder, legacy: ['Claude Chat', 'Claude'], to: `${CLAUDE_APP}/Chat`, set: (x, p) => (x.chatFolder = p) },
+		{ label: 'Claude Code chats listed on claude.ai', setting: s.codeFolder, legacy: ['Claude Code'], to: `${CLAUDE_APP}/Code`, set: (x, p) => (x.codeFolder = p) },
+		{ label: 'Claude desktop Code sessions', setting: s.desktop.claude.folder, legacy: [], to: `${CLAUDE_APP}/Code`, set: (x, p) => (x.desktop.claude.folder = p) },
+		{ label: 'ChatGPT chats', setting: s.gpt.folder, legacy: ['ChatGPT Chat', 'ChatGPT'], to: `${CHATGPT_APP}/Chat`, set: (x, p) => (x.gpt.folder = p) },
+		{ label: 'Codex threads', setting: s.desktop.codex.folder, legacy: ['Codex'], to: `${CHATGPT_APP}/Codex`, set: (x, p) => (x.desktop.codex.folder = p) },
 	];
-	return all.filter((m) => normalizePath(m.from) !== normalizePath(m.to));
+	const out: LayoutMove[] = [];
+	const seen = new Set<string>();
+	for (const t of targets) {
+		const to = join(root, t.to);
+		const sources = [t.setting, ...t.legacy.map((name) => join(root, name)).filter(exists)];
+		for (const from of sources) {
+			const key = `${normalizePath(from)}>${normalizePath(to)}`;
+			if (normalizePath(from) === normalizePath(to) || seen.has(key)) continue;
+			seen.add(key);
+			out.push({ label: t.label, from, to, set: t.set });
+		}
+	}
+	return out;
 }
+
+export const folderExists = (app: App) => (path: string): boolean => app.vault.getAbstractFileByPath(normalizePath(path)) instanceof TFolder;
 
 export interface MoveResult {
 	moved: number;
@@ -72,7 +91,7 @@ async function moveInto(app: App, s: Settings, src: TAbstractFile, destPath: str
 /** Moves each synced folder into the app layout and points the settings there. */
 export async function moveToAppLayout(app: App, s: Settings, save: () => Promise<void>): Promise<MoveResult> {
 	const r: MoveResult = { moved: 0, conflicts: [] };
-	for (const m of layoutMoves(s)) {
+	for (const m of layoutMoves(s, folderExists(app))) {
 		const src = app.vault.getAbstractFileByPath(normalizePath(m.from));
 		// Nested: the old folder is inside the new one (or the other way round) – only switch the setting.
 		const nested = m.to.startsWith(`${m.from}/`) || m.from.startsWith(`${m.to}/`);

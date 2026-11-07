@@ -10,7 +10,7 @@ import { DEFAULT_OVERLAP_MINUTES, type Inventories } from './chatgpt/inventory';
 import type { ChatCounts } from './progress';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import { claudeHome, codexHome, defaultRoots, nodeDesktopFs } from './desktop/scan';
-import { layoutMoves } from './desktop/layout';
+import { folderExists, layoutMoves } from './desktop/layout';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -327,7 +327,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 				}),
 			);
 		const s = this.plugin.settings;
-		const moves = layoutMoves(s);
+		const moves = layoutMoves(s, folderExists(this.app));
 		const layout = new Setting(el)
 			.setName('App layout')
 			.setDesc(

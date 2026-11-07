@@ -266,14 +266,16 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	const r6 = await runDesktopSync(plugin, undefined, fs, NOW);
 	expect('disabled: nothing read', r6.listed === 0);
 
-	await layoutTest();
+	await layoutTest(false);
+	await layoutTest(true);
 	if (process.env.DESKTOP_LIVE) await live();
 	console.log(failures ? `\n${failures} FAILED` : '\nAll desktop tests passed.');
 	process.exit(failures ? 1 : 0);
 })();
 
 /** Moving an existing vault into the app layout, on a small in-memory folder tree. */
-async function layoutTest() {
+async function layoutTest(handEdited: boolean) {
+	const tag = handEdited ? 'layout (settings already changed by hand)' : 'layout';
 	type Node = (TFile | TFolder) & { name: string; parent?: TFolder };
 	const nodes = new Map<string, Node>();
 	const named = <T extends TFile | TFolder>(n: T, path: string) => Object.assign(n, { path, name: path.split('/').pop()! }) as T & Node;
@@ -328,16 +330,22 @@ async function layoutTest() {
 	add(`${R}/ChatGPT Desktop/Codex`, true);
 	const s = { ...DEFAULT_SETTINGS, chatFolder: `${R}/Claude Chat`, codeFolder: `${R}/Claude Code`, gpt: { ...DEFAULT_SETTINGS.gpt, folder: `${R}/ChatGPT Chat`, index: { x: { updated_at: '', json: '', md: `${R}/ChatGPT Chat/Recent/2026-10-01 c.md`, synced: '' } }, fileIndex: { f: `${R}/ChatGPT Chat/Recent/Artifacts/2026-10-01 c/img.png` } }, index: { y: { updated_at: '', json: `${R}/Claude Chat/Recent/2026-11-01 b.json`, md: '', synced: '' } }, fileIndex: {} } as Settings;
 	s.desktop = mergeDesktop({ claude: { enabled: true, folder: `${R}/Claude Desktop`, extraFolders: [], index: {} }, codex: { enabled: true, folder: `${R}/Codex`, extraFolders: [], index: {} } } as never, s.chatFolder);
-	const moves = layoutMoves(s);
-	expect('layout: planned moves', moves.map((m) => m.label).join() === 'claude.ai chats,Claude Code chats listed on claude.ai,ChatGPT chats', moves.map((m) => `${m.label}: ${m.from} -> ${m.to}`).join(' | '));
+	if (handEdited) {
+		// What happened in the real vault: the chat folder fields were switched to the new folders, nothing moved.
+		s.chatFolder = `${R}/Claude Desktop/Chat`;
+		s.gpt.folder = `${R}/ChatGPT Desktop/Chat`;
+	}
+	const isFolder = (p: string) => nodes.get(p) instanceof TFolder;
+	const moves = layoutMoves(s, isFolder);
+	expect(`${tag}: planned moves`, moves.map((m) => m.label).join() === 'claude.ai chats,Claude Code chats listed on claude.ai,ChatGPT chats' && moves[0]!.from === `${R}/Claude Chat` && moves[2]!.from === `${R}/ChatGPT Chat`, moves.map((m) => `${m.label}: ${m.from} -> ${m.to}`).join(' | '));
 	const r = await moveToAppLayout(app as never, s, async () => undefined);
-	expect('layout: chats moved into Claude Desktop/Chat', nodes.has(`${R}/Claude Desktop/Chat/2nd Brain/2026-11-05 a.md`) && nodes.has(`${R}/Claude Desktop/Chat/Recent/2026-11-01 b.json`));
-	expect('layout: ChatGPT chats and their files moved', nodes.has(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/2026-10-01 c/img.png`));
-	expect('layout: emptied old folders removed', !nodes.has(`${R}/Claude Chat`) && !nodes.has(`${R}/ChatGPT Chat`));
-	expect('layout: whole subfolders moved in one rename each', r.moved === 3 && r.conflicts.length === 0, JSON.stringify(renamed));
-	expect('layout: settings point at the new folders', s.chatFolder === `${R}/Claude Desktop/Chat` && s.codeFolder === `${R}/Claude Desktop/Code` && s.gpt.folder === `${R}/ChatGPT Desktop/Chat` && s.desktop.claude.folder === `${R}/Claude Desktop/Code` && s.desktop.codex.folder === `${R}/ChatGPT Desktop/Codex`);
-	expect('layout: indexes follow the move', s.index.y!.json.startsWith(`${R}/Claude Desktop/Chat/Recent/`) && s.gpt.index.x!.md.startsWith(`${R}/ChatGPT Desktop/Chat/`) && s.gpt.fileIndex.f!.startsWith(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/`));
-	expect('layout: nothing left to move', layoutMoves(s).length === 0);
+	expect(`${tag}: chats moved into Claude Desktop/Chat`, nodes.has(`${R}/Claude Desktop/Chat/2nd Brain/2026-11-05 a.md`) && nodes.has(`${R}/Claude Desktop/Chat/Recent/2026-11-01 b.json`));
+	expect(`${tag}: ChatGPT chats and their files moved`, nodes.has(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/2026-10-01 c/img.png`));
+	expect(`${tag}: emptied old folders removed`, !nodes.has(`${R}/Claude Chat`) && !nodes.has(`${R}/ChatGPT Chat`));
+	expect(`${tag}: whole subfolders moved in one rename each`, r.moved === 3 && r.conflicts.length === 0, JSON.stringify(renamed));
+	expect(`${tag}: settings point at the new folders`, s.chatFolder === `${R}/Claude Desktop/Chat` && s.codeFolder === `${R}/Claude Desktop/Code` && s.gpt.folder === `${R}/ChatGPT Desktop/Chat` && s.desktop.claude.folder === `${R}/Claude Desktop/Code` && s.desktop.codex.folder === `${R}/ChatGPT Desktop/Codex`);
+	expect(`${tag}: indexes follow the move`, s.index.y!.json.startsWith(`${R}/Claude Desktop/Chat/Recent/`) && s.gpt.index.x!.md.startsWith(`${R}/ChatGPT Desktop/Chat/`) && s.gpt.fileIndex.f!.startsWith(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/`));
+	expect(`${tag}: nothing left to move`, layoutMoves(s, isFolder).length === 0);
 }
 
 /** Real session files -> in-memory vault: shows where each session would be saved. Nothing on disk changes. */

@@ -2,7 +2,7 @@ import { Notice, Plugin } from 'obsidian';
 import { AIChatBridgeSettingTab, DEFAULT_DESKTOP, DEFAULT_GPT, DEFAULT_SETTINGS, MIN_INTERVAL_MINUTES, Settings } from './settings';
 import { anyDesktopEnabled, runDesktopSync } from './desktop/sync';
 import type { DesktopAppSettings } from './desktop/types';
-import { CHATGPT_APP, CLAUDE_APP, layoutMoves, layoutRoot, moveToAppLayout } from './desktop/layout';
+import { CHATGPT_APP, CLAUDE_APP, folderExists, layoutMoves, layoutRoot, moveToAppLayout } from './desktop/layout';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
@@ -228,7 +228,7 @@ export default class AIChatBridge extends Plugin {
 	/** Moves the synced folders into Claude Desktop/{Chat,Code} and ChatGPT Desktop/{Chat,Codex}. */
 	async moveToAppLayout(): Promise<void> {
 		await this.guarded('manual', async () => {
-			if (!layoutMoves(this.settings).length) {
+			if (!layoutMoves(this.settings, folderExists(this.app)).length) {
 				new Notice('AI ChatBridge: the folders already follow the app layout.');
 				return;
 			}
