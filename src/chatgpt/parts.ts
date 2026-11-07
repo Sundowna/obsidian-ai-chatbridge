@@ -2,13 +2,26 @@
 // Each is saved unchanged; this joins them into one chat for the transcript. Pure, testable offline.
 
 import type { GptChat } from './types';
+import { ShapeError } from '../schema';
 
 type Page = Pick<GptChat, 'messages'>;
 
 /** The whole chat: oldest part first, the chat's own (newest) messages last; each message once. */
 export function joinParts(main: GptChat, olderNewestFirst: Page[]): GptChat {
-	const seen = new Set<string>();
-	const messages = [...olderNewestFirst].reverse().flatMap((p) => p.messages).concat(main.messages).filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)));
+	const seen = new Map<string, GptChat['messages'][number]>();
+	const canonical = (m: GptChat['messages'][number]) => JSON.stringify(m, (_key, value: unknown) => {
+		if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+		return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+	});
+	const messages = [...olderNewestFirst].reverse().flatMap((p) => p.messages).concat(main.messages).filter((m) => {
+		const previous = seen.get(m.id);
+		if (previous === undefined) {
+			seen.set(m.id, m);
+			return true;
+		}
+		if (canonical(previous) !== canonical(m)) throw new ShapeError('ChatGPT message changed between pages. Try syncing the chat again.');
+		return false;
+	});
 	return { ...main, messages };
 }
 

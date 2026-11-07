@@ -6,9 +6,11 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
-import { cookieHeader, cookieValue, isLoggedIn, loginUserAgent } from '../login';
+import { cookieHeader, cookieValue, isLoggedIn, loginFetch, loginUserAgent } from '../login';
 import { isChatId, isFileId, isMessageId } from './schema';
-import { describePage, findAccessToken, maskSecrets } from './token';
+import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
+import { sandboxPath } from './files';
+import { describePage, findAccessToken, inventoryIdentity, maskSecrets } from './token';
 
 const ORIGIN = 'https://chatgpt.com';
 
@@ -48,6 +50,7 @@ function header(headers: Record<string, string>, name: string): string {
 }
 
 export class GptApi {
+	inventoryKey = '';
 	private constructor(
 		private readonly cookie: string,
 		private readonly deviceId: string | null,
@@ -65,6 +68,12 @@ export class GptApi {
 			throw new StopError(`chatgpt.com did not hand out a login key – log in again in the plugin settings. If that does not help, send this to Claude: ${api.redact(describePage(page.text))}`);
 		}
 		api.token = token;
+		// Use the workspace cookie from the same snapshot used for requests.
+		const workspace = /(?:^|;\s*)_account=([^;]+)/.exec(api.cookie)?.[1] ?? null;
+		const identity = inventoryIdentity(token, workspace);
+		api.inventoryKey = identity
+			? 'account:' + fingerprint(JSON.stringify(identity))
+			: 'session:' + fingerprint(JSON.stringify([token, workspace]));
 		return api;
 	}
 
@@ -78,12 +87,16 @@ export class GptApi {
 	}
 
 	/** One page of the chat list. `tpp` = the second list ChatGPT keeps separately. */
-	listPath(offset: number, tpp: boolean): string {
+	listPath(offset: number, tpp: boolean, archived = false): string {
 		const origin = tpp ? 'conversation_origin=tpp' : 'exclude_conversation_origin=tpp';
-		return `/backend-api/conversations?${origin}&expand=false&hide_snorlax=false&is_archived=false&is_starred=false&limit=20&order=updated&offset=${offset}`;
+		return `/backend-api/conversations?${origin}&expand=false&hide_snorlax=false&is_archived=${archived}&is_starred=false&limit=20&order=updated&offset=${offset}`;
 	}
 
 	readonly sidebarPath = '/backend-api/gizmos/snorlax/sidebar?conversations_per_gizmo=5&limit=20&owned_only=false';
+
+	projectPagePath(cursor?: string): string {
+		return cursor ? `${this.sidebarPath}&cursor=${encodeURIComponent(cursor)}` : this.sidebarPath;
+	}
 
 	chatPath(id: string): string {
 		if (!isChatId(id)) throw new StopError('Refusing to fetch: ChatGPT chat ID has an odd format.');
@@ -136,13 +149,14 @@ export class GptApi {
 		// The place without the query (which carries the signature), for the log.
 		const where = `${url.host}${url.pathname.split('/').slice(0, 3).join('/')}/…`;
 		if (url.origin !== ORIGIN) {
-			if (url.protocol !== 'https:') throw new BlockedLinkError(`${where} (not https)`);
+			if (url.protocol !== 'https:' || url.username || url.password) throw new BlockedLinkError(`${where} (unsafe URL)`);
 			let res;
 			try {
 				res = await requestUrl({ url: url.toString(), method: 'GET', headers: { 'User-Agent': this.ua }, throw: false });
-			} catch (e) {
-				throw new BlockedLinkError(`${where} (network error: ${maskSecrets(e instanceof Error ? e.message : String(e)).slice(0, 120)})`);
+			} catch {
+				throw new BlockedLinkError(`${where} (network error)`);
 			}
+			if (res.status === 429) throw new GptRateLimitError(retryDeadline(header(res.headers, 'retry-after')));
 			if (res.status === 404) return null;
 			if (res.status !== 200) throw new BlockedLinkError(`${where} (answered ${res.status})`);
 			return res.arrayBuffer;
@@ -150,6 +164,45 @@ export class GptApi {
 		if (url.pathname !== '/backend-api/estuary/content') throw new BlockedLinkError(where);
 		const res = await this.request(url.pathname + url.search, '*/*', true, true);
 		return res ? res.arrayBuffer : null;
+	}
+
+	/** Browser-observed generated-file route, separate from file-ID downloads. */
+	async sandboxBytes(chatId: string, messageId: string, path: string): Promise<ArrayBuffer | null> {
+		if (!isChatId(chatId) || !isMessageId(messageId) || sandboxPath('sandbox:' + encodeURIComponent(path)) !== path) {
+			throw new BlockedLinkError('invalid generated-file reference');
+		}
+		const url = new URL(`/backend-api/conversation/${chatId}/interpreter/download`, ORIGIN);
+		url.search = new URLSearchParams({ message_id: messageId, sandbox_path: path, download_intent: 'true' }).toString();
+		let res: Response;
+		try {
+			res = await loginFetch('chatgpt', url.href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual', signal: AbortSignal.timeout(120_000) });
+		} catch {
+			throw new BlockedLinkError('generated-file request failed');
+		}
+		if (res.status === 429) throw new GptRateLimitError(retryDeadline(res.headers.get('retry-after') ?? ''));
+		if (res.status === 401) throw new StopError('ChatGPT login expired. Log in again in the plugin settings.');
+		if (res.status === 404 || res.status === 410) return null;
+		if (res.status >= 300 && res.status < 400) {
+			const location = res.headers.get('location');
+			if (!location) throw new BlockedLinkError('generated-file redirect had no usable location');
+			return this.fileBytes(location);
+		}
+		const type = res.headers.get('content-type') ?? '';
+		const attachment = /attachment/i.test(res.headers.get('content-disposition') ?? '');
+		if (!res.ok || (!attachment && /text\/html|application\/json/i.test(type))) {
+			throw new BlockedLinkError(`generated-file download returned ${res.status} or a preview`);
+		}
+		return res.arrayBuffer();
+	}
+
+	private headers(accept: string, auth: boolean): Record<string, string> {
+		const headers: Record<string, string> = { Accept: accept, Cookie: this.cookie, 'User-Agent': this.ua, 'OAI-Language': 'en-US' };
+		if (this.deviceId) headers['OAI-Device-Id'] = this.deviceId;
+		if (auth) {
+			if (!this.token) throw new StopError('No ChatGPT login key.');
+			headers.Authorization = `Bearer ${this.token}`;
+		}
+		return headers;
 	}
 
 	/** The single GET used by everything above. Stops on anything but 200 (and 404 if allowed). */
@@ -160,12 +213,7 @@ export class GptApi {
 		if (url.origin !== ORIGIN || !ALLOWED.some((re) => re.test(url.pathname))) {
 			throw new StopError('Blocked a request to a chatgpt.com address the plugin does not use.');
 		}
-		const headers: Record<string, string> = { Accept: accept, Cookie: this.cookie, 'User-Agent': this.ua, 'OAI-Language': 'en-US' };
-		if (this.deviceId) headers['OAI-Device-Id'] = this.deviceId;
-		if (auth) {
-			if (!this.token) throw new StopError('No ChatGPT login key.');
-			headers.Authorization = `Bearer ${this.token}`;
-		}
+		const headers = this.headers(accept, auth);
 		let res;
 		try {
 			res = await requestUrl({ url: url.toString(), method: 'GET', headers, throw: false });
@@ -175,7 +223,7 @@ export class GptApi {
 		const s = res.status;
 		if (s === 401) throw new StopError('chatgpt.com answered 401 (not logged in). Log in to ChatGPT again in the plugin settings.');
 		if (s === 403) throw new StopError('chatgpt.com answered 403 (forbidden). Login expired, or Cloudflare blocked the request – log in again.');
-		if (s === 429) throw new StopError('chatgpt.com answered 429 (too many requests). Wait a while before syncing again.');
+		if (s === 429) throw new GptRateLimitError(retryDeadline(header(res.headers, 'retry-after')));
 		if (s === 404 && notFoundOk) return null;
 		if (s !== 200) {
 			let why = '';

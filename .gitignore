@@ -20,7 +20,7 @@ data.json
 
 # Local test data: real chat exports, never published
 samples/
-scripts/.test-offline.cjs
+scripts/.test-*.cjs
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store

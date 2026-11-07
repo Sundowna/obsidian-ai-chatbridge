@@ -38,6 +38,7 @@ interface Cookie {
 	value: string;
 }
 interface Session {
+	fetch?(url: string, init: RequestInit): Promise<Response>;
 	cookies: { get(filter: { url: string }): Promise<Cookie[]> };
 	clearStorageData(): Promise<void>;
 	setUserAgent(ua: string): void;
@@ -77,6 +78,13 @@ function plainUserAgent(ses: Session): string {
 /** The browser name the login window uses – requests must send the same one (Cloudflare checks it). */
 export function loginUserAgent(account: Account): string {
 	return plainUserAgent(session(account));
+}
+
+/** Use the login window's Chromium transport with redirects under caller control. */
+export async function loginFetch(account: Account, url: string, init: RequestInit): Promise<Response> {
+	const ses = session(account);
+	if (!ses.fetch) throw new Error('This Obsidian build does not support controlled downloads.');
+	return ses.fetch(url, init);
 }
 
 const open = new Map<Account, Win>();

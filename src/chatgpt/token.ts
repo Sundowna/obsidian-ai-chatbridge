@@ -2,7 +2,25 @@
 // (found 2026-11-06 with DevTools search: "accessToken" is in the HTML of chatgpt.com pages).
 // Pure functions, testable offline. The key is never stored or logged.
 
+import { Buffer } from 'buffer';
+
 const JWT = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
+
+/** Decode identifiers for cache partitioning only. Requests still authenticate on the server. */
+export function inventoryIdentity(token: string, selectedWorkspace: string | null): [string, string] | null {
+	try {
+		const payload = token.split('.')[1];
+		if (!payload) return null;
+		const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
+		const auth = claims['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
+		const user = claims.sub ?? auth?.chatgpt_user_id ?? auth?.user_id;
+		const workspace = selectedWorkspace || auth?.chatgpt_account_id;
+		return typeof user === 'string' && user !== '' && typeof workspace === 'string' && workspace !== ''
+			? [user, workspace] : null;
+	} catch {
+		return null;
+	}
+}
 
 /**
  * The key: first the key-shaped value right after an "accessToken" label; if the page

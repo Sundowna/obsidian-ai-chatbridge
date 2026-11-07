@@ -5,6 +5,9 @@ import type { IndexEntry } from './types';
 import { isUuid } from './schema';
 import { FolderSuggest } from './folder-suggest';
 import { Account, isLoggedIn, logout, openLogin } from './login';
+import type { AssetRetry, Capture } from './chatgpt/recovery';
+import { DEFAULT_OVERLAP_MINUTES, type Inventories } from './chatgpt/inventory';
+import type { ChatCounts } from './progress';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -23,6 +26,14 @@ export interface GptSettings {
 	projects: string[];
 	index: Record<string, IndexEntry>;
 	fileIndex: Record<string, string>;
+	includeArchived?: boolean;
+	cooldownUntil?: number;
+	resumeAfter429?: { consecutive: number; forceFull: boolean } | null;
+	assetRetries?: Record<string, AssetRetry>;
+	pendingCaptures?: Record<string, Capture>;
+	inventories?: Inventories;
+	overlapMinutes?: number;
+	chatProgress?: ChatCounts & { inventoryKey: string; scope: string };
 }
 
 // Everything here is saved in data.json, which syncs with the vault.
@@ -255,6 +266,31 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const g = this.plugin.settings.gpt;
 		this.folderSetting('ChatGPT folder', 'Where ChatGPT chats are saved. Created if missing.', () => g.folder, (p) => (g.folder = p));
 		this.folderOptions('ChatGPT', g);
+		new Setting(this.containerEl)
+			.setName('Incremental sync overlap (minutes)')
+			.setDesc('Check recent changes again on each run. A full inventory runs on the next sync after seven days.')
+			.addText((input) => input.setValue(String(g.overlapMinutes ?? DEFAULT_OVERLAP_MINUTES)).onChange(async (value) => {
+				const minutes = Number(value);
+				if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) return;
+				g.overlapMinutes = minutes;
+				await this.plugin.saveSettings();
+			}));
+		new Setting(this.containerEl)
+			.setName('Include archived chats')
+			.setDesc('Also check archived conversations during sync.')
+			.addToggle((toggle) => toggle.setValue(g.includeArchived ?? false).onChange(async (value) => {
+				g.includeArchived = value;
+				await this.plugin.saveSettings();
+			}));
+		new Setting(this.containerEl)
+			.setName('Retry missing files')
+			.setDesc('Make delayed downloads eligible on the next sync. The account cooldown still applies.')
+			.addButton((button) => button.setButtonText('Reset file delays').onClick(async () => {
+				const retries = g.assetRetries ?? {};
+				for (const id of Object.keys(retries)) delete retries[id];
+				await this.plugin.saveSettings();
+				new Notice('File delays reset for the next sync.');
+			}));
 	}
 
 	/** Subfolders, files and project filter – the same options for every provider. */

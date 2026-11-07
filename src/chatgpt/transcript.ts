@@ -3,7 +3,7 @@
 // message (tool steps collapsed to one line, generated images embedded).
 
 import { localDateTime } from '../naming';
-import { imageParts, pointerId } from './files';
+import { fallbackMarkdown, imageParts, pointerId, sandboxKey, sandboxLinks } from './files';
 import type { GptChat, GptMessage } from './types';
 
 export const isoFromUnix = (s: number): string => new Date(s * 1000).toISOString();
@@ -21,8 +21,31 @@ type Piece = { kind: 'text'; md: string } | { kind: 'tool' };
  * U+E200 type U+E202 arg U+E202 arg … U+E201 (seen 2026-11-06). Names and links are
  * kept as plain text, sources (internal numbers only) and image searches are dropped.
  */
-export function cleanMarkers(text: string): string {
-	return text.replace(/([^]*)((?:[^]*)*)/g, (_m, kind: string, rest: string) => {
+function asRecord(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+export function cleanMarkers(text: string, references?: unknown): string {
+	const citations = new Map<string, string>();
+	if (Array.isArray(references)) {
+		for (const value of references as unknown[]) {
+			const ref = asRecord(value);
+			if (typeof ref.matched_text !== 'string' || !ref.matched_text.includes('\uE200')) continue;
+			const candidates = [ref.url];
+			for (const field of [ref.items, ref.sources, ref.fallback_items]) {
+				if (Array.isArray(field)) for (const item of field as unknown[]) candidates.push(asRecord(item).url);
+			}
+			if (typeof ref.alt === 'string') {
+				for (const match of ref.alt.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)) candidates.push(match[1]);
+			}
+			const urls = [...new Set(candidates.filter((url): url is string =>
+				typeof url === 'string' && /^https?:\/\/[^<>\s]+$/i.test(url)))];
+			if (urls.length) citations.set(ref.matched_text, urls.map((url, i) => '[Source' + (urls.length > 1 ? ' ' + (i + 1) : '') + '](<' + url + '>)').join(', '));
+		}
+	}
+	return text.replace(/([^]*)((?:[^]*)*)/g, (marker, kind: string, rest: string) => {
+		const citation = citations.get(marker);
+		if (citation) return citation;
 		const args = rest.split('').slice(1);
 		if (kind === 'entity') {
 			try {
@@ -34,7 +57,8 @@ export function cleanMarkers(text: string): string {
 			return '';
 		}
 		if (kind === 'url' && args.length >= 2 && /^https?:\/\//.test(args[1] ?? '')) return `[${args[0]}](${args[1]})`;
-		return ''; // cite, image_group and anything unknown
+		if (kind === 'cite' && references !== undefined) return '[Unresolved source]';
+		return '';
 	});
 }
 
@@ -42,17 +66,20 @@ export function cleanMarkers(text: string): string {
  * ChatGPT's newer answers mix layout code (<box>, <AsyncImage>, …) into the text and add
  * a clean Markdown version in metadata.model_dil_v2.fallbackMarkdown. Use that when present.
  */
-function fallbackMarkdown(m: GptMessage): string | null {
-	const dil = m.metadata?.model_dil_v2;
-	const fb = typeof dil === 'object' && dil !== null ? (dil as { fallbackMarkdown?: unknown }).fallbackMarkdown : undefined;
-	return typeof fb === 'string' && fb.trim() ? fb : null;
-}
-
 /** What one message adds to the transcript. */
-function pieces(m: GptMessage, filePaths: Map<string, string>): Piece[] {
+function pieces(m: GptMessage, chatId: string, filePaths: Map<string, string>): Piece[] {
 	const out: Piece[] = [];
 	const c = m.content;
 	const role = m.author.role;
+	const renderText = (value: string): string => {
+		const clean = cleanMarkers(value, m.metadata?.content_references ?? []).trim();
+		if (role !== 'assistant') return clean;
+		return sandboxLinks(clean, (label, path) => {
+			const local = filePaths.get(sandboxKey(chatId, m.id, path));
+			const name = label.replace(/[[|\]]/g, '') || 'Generated file';
+			return local ? '[[' + local + '|' + name + ']]' : name + ' *(generated file not downloaded)*';
+		});
+	};
 	// A message to a tool (e.g. the image generator's settings) is a tool step.
 	if (role === 'assistant' && m.recipient && m.recipient !== 'all') return [{ kind: 'tool' }];
 	switch (c.content_type) {
@@ -60,28 +87,28 @@ function pieces(m: GptMessage, filePaths: Map<string, string>): Piece[] {
 		case 'multimodal_text': {
 			const clean = fallbackMarkdown(m);
 			if (clean) {
-				const t = cleanMarkers(clean).trim();
+				const t = renderText(clean);
 				if (t) out.push({ kind: 'text', md: t });
 			}
-			for (const p of c.parts ?? []) {
+			for (const p of Array.isArray(c.parts) ? c.parts : []) {
 				if (typeof p === 'string') {
 					if (clean) continue; // the clean version above replaces the text parts
-					const t = cleanMarkers(p).trim();
+					const t = renderText(p);
 					if (t) out.push({ kind: 'text', md: t });
 					continue;
 				}
-				if (p.content_type === 'image_asset_pointer') {
+				if (p?.content_type === 'image_asset_pointer') {
 					const id = pointerId(p.asset_pointer);
 					const path = id ? filePaths.get(id) : undefined;
 					out.push({ kind: 'text', md: path ? `![[${path}]]` : '*[image – not downloaded]*' });
-				} else if (typeof p.content_type === 'string') {
+				} else if (typeof p?.content_type === 'string') {
 					out.push({ kind: 'text', md: `*[${p.content_type} – see raw JSON]*` });
 				}
 			}
 			// Uploaded files that are not images: link them.
 			const shown = new Set(imageParts(m).map((p) => pointerId(p.asset_pointer)));
-			for (const a of m.metadata?.attachments ?? []) {
-				if (!a.id || shown.has(a.id)) continue;
+			for (const a of Array.isArray(m.metadata?.attachments) ? m.metadata.attachments : []) {
+				if (!a?.id || shown.has(a.id)) continue;
 				const path = filePaths.get(a.id);
 				if (path) out.push({ kind: 'text', md: IMAGE_EXT.test(path) ? `![[${path}]]` : `📎 [[${path}|${a.name ?? 'file'}]]` });
 				else if (a.name) out.push({ kind: 'text', md: `*Attachment: ${a.name}*` });
@@ -152,7 +179,7 @@ export function renderGptTranscript(chat: GptChat, meta: GptTranscriptMeta): str
 			when = typeof m.create_time === 'number' ? ` · ${localDateTime(isoFromUnix(m.create_time))}` : '';
 		}
 		answerFinished = who === 'ChatGPT' && m.channel === 'final';
-		for (const p of pieces(m, filePaths)) {
+		for (const p of pieces(m, chat.conversation_id, filePaths)) {
 			if (p.kind === 'tool') tools++;
 			else {
 				flushTools();

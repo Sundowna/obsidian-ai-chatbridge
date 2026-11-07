@@ -13,10 +13,13 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 	const sets: { index: Settings['index']; fileIndex: Settings['fileIndex'] }[] = [s];
 	if (s.gpt) sets.push(s.gpt);
 	for (const set of sets) {
-		for (const entry of Object.values(set.index)) {
-			for (const key of ['json', 'md'] as const) {
-				const next = fix(entry[key]);
-				if (next !== entry[key]) {
+		const pending = set === s.gpt ? Object.values(s.gpt.pendingCaptures ?? {}) : [];
+		for (const entry of [...Object.values(set.index), ...pending]) {
+			for (const key of ['json', 'md', 'view'] as const) {
+				const previous = entry[key];
+				if (!previous) continue;
+				const next = fix(previous);
+				if (next !== previous) {
 					entry[key] = next;
 					changed++;
 				}

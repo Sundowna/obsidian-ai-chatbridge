@@ -74,4 +74,8 @@ export interface IndexEntry {
 	outputsChecked?: string;
 	/** ChatGPT long chats: the older parts, each saved unchanged ("… (older 1).json" = just before the main file). */
 	older?: string[];
+	/** ChatGPT capture integrity and most recent derived transcript. */
+	pageHashes?: string[];
+	view?: string;
+	viewHash?: string;
 }

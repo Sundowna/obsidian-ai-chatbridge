@@ -22,6 +22,10 @@ export function checkGptList(x: unknown): GptListPage {
 	if (!isObj(x) || !Array.isArray(x.items) || typeof x.total !== 'number' || typeof x.offset !== 'number') {
 		throw new ShapeError('ChatGPT chat list: expected { items: [...], total, offset }');
 	}
+	if (!Number.isSafeInteger(x.total) || !Number.isSafeInteger(x.offset) || x.total < 0 || x.offset < 0 ||
+		(x.items.length > 0 && x.total < x.offset + x.items.length)) {
+		throw new ShapeError('ChatGPT chat list: invalid pagination counts');
+	}
 	x.items.forEach((it: unknown, i: number) => {
 		const where = `ChatGPT chat list item ${i}`;
 		if (!isObj(it)) throw new ShapeError(`${where}: not an object`);
@@ -34,7 +38,7 @@ export function checkGptList(x: unknown): GptListPage {
 }
 
 /** Project names from GET /backend-api/gizmos/snorlax/sidebar. `more` = the answer says there are more projects. */
-export function checkGptSidebar(x: unknown): { projects: GptProject[]; more: boolean } {
+export function checkGptSidebar(x: unknown): { projects: GptProject[]; more: boolean; cursor?: string } {
 	if (!isObj(x) || !Array.isArray(x.items)) throw new ShapeError('ChatGPT projects: expected { items: [...] }');
 	const projects: GptProject[] = [];
 	x.items.forEach((it: unknown, i: number) => {
@@ -43,14 +47,16 @@ export function checkGptSidebar(x: unknown): { projects: GptProject[]; more: boo
 		if (!g || !isProjectId(g.id) || typeof name !== 'string') throw new ShapeError(`ChatGPT project ${i}: expected gizmo.gizmo { id, display.name }`);
 		projects.push({ id: g.id, name });
 	});
-	return { projects, more: typeof x.cursor === 'string' && x.cursor !== '' };
+	const cursor = typeof x.cursor === 'string' && x.cursor !== '' ? x.cursor : undefined;
+	return { projects, more: cursor !== undefined, cursor };
 }
 
 export function checkGptChat(x: unknown, expectedId: string): GptChat {
 	if (!isObj(x)) throw new ShapeError('ChatGPT chat: not an object');
 	if (x.conversation_id !== expectedId) throw new ShapeError('ChatGPT chat: "conversation_id" does not match the chat we asked for');
-	if (typeof x.create_time !== 'number' || typeof x.update_time !== 'number') throw new ShapeError('ChatGPT chat: missing times');
+	if (typeof x.create_time !== 'number' || !Number.isFinite(x.create_time) || typeof x.update_time !== 'number' || !Number.isFinite(x.update_time)) throw new ShapeError('ChatGPT chat: missing times');
 	checkMessages(x.messages, 'ChatGPT chat');
+	checkPageInfo(x.page_info);
 	return x as unknown as GptChat;
 }
 
@@ -68,6 +74,15 @@ function checkMessages(list: unknown, what: string): void {
 /** A message ID as used for "before=" (seen: "d4de2201-a361-410f-a40f-3e3f547f334f"). */
 export const isMessageId = (x: unknown): x is string => typeof x === 'string' && /^[0-9A-Za-z-]{8,64}$/.test(x);
 
+function checkPageInfo(info: unknown): void {
+	if (!isObj(info) || typeof info.has_previous_page !== 'boolean') {
+		throw new ShapeError('ChatGPT pagination: missing boolean has_previous_page');
+	}
+	if (info.has_previous_page && !isMessageId(info.start_cursor)) {
+		throw new ShapeError('ChatGPT pagination: missing cursor for older messages');
+	}
+}
+
 /**
  * GET /backend-api/conversations/<id>/messages?before=<message-id>&num_turns=10 (seen 2026-11-06):
  * the older part of a long chat. Expected like the chat answer: { messages: [...], page_info: {...} }.
@@ -75,7 +90,7 @@ export const isMessageId = (x: unknown): x is string => typeof x === 'string' &&
 export function checkGptOlderPage(x: unknown): Pick<GptChat, 'messages' | 'page_info'> {
 	if (!isObj(x)) throw new ShapeError('ChatGPT older messages: not an object');
 	checkMessages(x.messages, 'ChatGPT older messages');
-	if (!isObj(x.page_info)) throw new ShapeError('ChatGPT older messages: missing "page_info"');
+	checkPageInfo(x.page_info);
 	return x as unknown as Pick<GptChat, 'messages' | 'page_info'>;
 }
 

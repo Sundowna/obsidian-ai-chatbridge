@@ -5,12 +5,17 @@ import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
 import { closeLoginWindows, isLoggedIn } from './login';
 import { runGptSync } from './chatgpt/sync';
-import { SyncProgress } from './progress';
+import { chatCountStatus, SyncProgress } from './progress';
+
+type SyncTrigger = 'manual' | 'auto' | 'resume';
 
 export default class AIChatBridge extends Plugin {
 	settings!: Settings;
 	private running = false;
 	private timer: number | null = null;
+	private gptResumeTimer: number | null = null;
+	private showingGptCooldown = false;
+	private unloaded = false;
 	/** After an error, the automatic sync waits until you sync by hand. */
 	private autoPaused = false;
 
@@ -18,7 +23,14 @@ export default class AIChatBridge extends Plugin {
 	private statusEl: HTMLElement | null = null;
 
 	async onload() {
+		this.unloaded = false;
 		await this.loadSettings();
+		const gpt = this.settings.gpt;
+		// Pick up an active cooldown saved by a version that had no automatic retry.
+		if (gpt.resumeAfter429 === undefined && (gpt.cooldownUntil ?? 0) > Date.now()) {
+			gpt.resumeAfter429 = { consecutive: 1, forceFull: false };
+			await this.saveSettings();
+		}
 		this.statusEl = this.addStatusBarItem();
 
 		this.addCommand({
@@ -31,6 +43,22 @@ export default class AIChatBridge extends Plugin {
 			id: 'sync-chatgpt-chats',
 			name: 'Sync ChatGPT chats',
 			callback: () => void this.syncGpt('manual'),
+		});
+
+		this.addCommand({
+			id: 'reconcile-chatgpt-chats',
+			name: 'Reconcile all ChatGPT chats',
+			callback: () => void this.syncGpt('manual', true),
+		});
+
+		this.addCommand({
+			id: 'cancel-chatgpt-retry',
+			name: 'Cancel pending chat sync retry',
+			checkCallback: (checking) => {
+				if (this.running || !this.settings.gpt.resumeAfter429) return false;
+				if (!checking) void this.cancelGptResume();
+				return true;
+			},
 		});
 
 		this.addCommand({
@@ -48,6 +76,7 @@ export default class AIChatBridge extends Plugin {
 		this.addSettingTab(new AIChatBridgeSettingTab(this.app, this));
 		this.app.workspace.onLayoutReady(() => {
 			this.restartTimer();
+			this.scheduleGptResume();
 			// Moves/renames in Obsidian update the index (registered after load, so the
 			// vault's start-up scan is not mistaken for renames).
 			this.registerEvent(
@@ -69,12 +98,74 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	onunload() {
+		this.unloaded = true;
+		this.clearGptResumeTimer();
+		this.statusEl?.setText('');
 		closeLoginWindows();
 		if (this.timer !== null) window.clearInterval(this.timer);
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);
 			void this.saveSettings(); // don't lose a pending index update
 		}
+	}
+
+	private clearGptResumeTimer(): void {
+		if (this.gptResumeTimer !== null) window.clearTimeout(this.gptResumeTimer);
+		this.gptResumeTimer = null;
+		if (this.showingGptCooldown) this.statusEl?.setText('');
+		this.showingGptCooldown = false;
+	}
+
+	private scheduleGptResume(): void {
+		this.clearGptResumeTimer();
+		const gpt = this.settings.gpt;
+		if (this.unloaded || this.running) return;
+		// Idle: nothing running or waiting.
+		if (!gpt.resumeAfter429) {
+			this.statusEl?.setText(this.idleStatus());
+			return;
+		}
+		const count = chatCountStatus(gpt.chatProgress);
+		const delay = Math.max(0, (gpt.cooldownUntil ?? 0) - Date.now());
+		if (delay > 0) {
+			const seconds = Math.ceil(delay / 1000);
+			const minutes = String(Math.floor(seconds / 60)).padStart(2, '0');
+			const remainder = String(seconds % 60).padStart(2, '0');
+			this.statusEl?.setText(`${count ? count + ' ·' : 'ChatGPT'} retry in ${minutes}:${remainder}`);
+			this.showingGptCooldown = true;
+		}
+		this.gptResumeTimer = window.setTimeout(() => {
+			this.gptResumeTimer = null;
+			// A running sync will re-arm the timer when it releases the guard.
+			if (this.unloaded || this.running || !gpt.resumeAfter429) return;
+			if ((gpt.cooldownUntil ?? 0) > Date.now()) {
+				this.scheduleGptResume();
+				return;
+			}
+			void this.guarded('resume', () => this.runOne('chatgpt', 'resume')).catch(() => {
+				this.clearGptResumeTimer();
+				new Notice('The sync retry could not finish. Check the settings and try again.');
+			});
+		}, Math.min(delay, 1000));
+	}
+
+	private async cancelGptResume(): Promise<void> {
+		this.clearGptResumeTimer();
+		this.settings.gpt.resumeAfter429 = null;
+		await this.saveSettings();
+		this.scheduleGptResume();
+		new Notice('Pending retry canceled. The cooldown still applies.');
+	}
+
+	/** Idle status bar text: a marker while automatic sync is on (and not paused after an error). */
+	private idleStatus(): string {
+		return this.timer !== null && !this.autoPaused ? 'AI ChatBridge active' : '';
+	}
+
+	/** Refreshes the idle text when nothing is running or counting down. */
+	private refreshIdleStatus(): void {
+		if (this.unloaded || this.running || this.showingGptCooldown || this.settings.gpt.resumeAfter429) return;
+		this.statusEl?.setText(this.idleStatus());
 	}
 
 	restartTimer() {
@@ -85,6 +176,7 @@ export default class AIChatBridge extends Plugin {
 			this.timer = window.setInterval(() => void this.syncAll('auto'), m * 60_000);
 			this.registerInterval(this.timer);
 		}
+		this.refreshIdleStatus();
 	}
 
 	/** claude.ai only. */
@@ -93,8 +185,8 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	/** ChatGPT only. */
-	async syncGpt(trigger: 'manual' | 'auto') {
-		await this.guarded(trigger, () => this.runOne('chatgpt', trigger));
+	async syncGpt(trigger: 'manual' | 'auto', forceFull = false) {
+		await this.guarded(trigger, () => this.runOne('chatgpt', trigger, forceFull));
 	}
 
 	/** Every provider you are logged in to, one after the other. */
@@ -107,38 +199,46 @@ export default class AIChatBridge extends Plugin {
 				return;
 			}
 			if (claude && !(await this.runOne('claude', trigger))) return; // a stop pauses the rest too
-			if (gpt) await this.runOne('chatgpt', trigger);
+			const waiting = this.settings.gpt.resumeAfter429 || (this.settings.gpt.cooldownUntil ?? 0) > Date.now();
+			if (gpt && (trigger === 'manual' || !waiting)) await this.runOne('chatgpt', trigger);
 		});
 	}
 
 	/** One sync at a time; after an error the automatic sync waits until you sync by hand. */
-	private async guarded(trigger: 'manual' | 'auto', fn: () => Promise<unknown>) {
+	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>) {
 		if (trigger === 'auto' && this.autoPaused) return;
 		if (this.running) {
 			if (trigger === 'manual') new Notice('A sync is already running.');
 			return;
 		}
+		this.clearGptResumeTimer();
 		this.running = true;
 		if (trigger === 'manual') this.autoPaused = false;
 		try {
 			await fn();
 		} finally {
 			this.running = false;
+			this.scheduleGptResume();
 		}
 	}
 
 	/** Runs one provider and shows the result. Returns false if it stopped. */
-	private async runOne(which: 'claude' | 'chatgpt', trigger: 'manual' | 'auto'): Promise<boolean> {
+	private async runOne(which: 'claude' | 'chatgpt', trigger: SyncTrigger, forceFull = false): Promise<boolean> {
 		const label = which === 'claude' ? 'claude.ai' : 'ChatGPT';
 		// Progress bar in a notice (manual syncs) and a percentage in the status bar (all syncs).
-		const progress = new SyncProgress(label, this.statusEl, trigger === 'manual');
+		const progress = new SyncProgress(label, this.statusEl, trigger === 'manual',
+			which === 'chatgpt' ? () => chatCountStatus(this.settings.gpt.chatProgress) : undefined);
 		let r;
 		try {
-			r = which === 'claude' ? await runSync(this, progress.update) : await runGptSync(this, progress.update);
+			r = which === 'claude' ? await runSync(this, progress.update) : await runGptSync(this, progress.update, forceFull);
 		} finally {
 			progress.finish();
 		}
 		if (r.stopped) {
+			if ('resumeAt' in r && typeof r.resumeAt === 'number') {
+				new Notice(`${label} sync waiting: ${r.stopped}`, 15_000);
+				return false;
+			}
 			this.autoPaused = true;
 			new Notice(`${label} sync stopped: ${r.stopped}`, 15_000);
 			return false;
@@ -168,9 +268,29 @@ export default class AIChatBridge extends Plugin {
 			index: { ...(g?.index ?? {}) },
 			fileIndex: { ...(g?.fileIndex ?? {}) },
 		};
+		// Seed the status immediately when upgrading a vault with one unfiltered inventory.
+		const gpt = this.settings.gpt;
+		if (!gpt.chatProgress && (!gpt.onlyProjects || !gpt.projects.some((name) => name.trim()))) {
+			const states = Object.entries(gpt.inventories?.accounts ?? {});
+			const session = gpt.inventories?.session;
+			if (session) states.push([session.key, session.inventory]);
+			const state = states.length === 1 ? states[0] : undefined;
+			if (state) {
+				const [inventoryKey, inventory] = state;
+				const scope = JSON.stringify([gpt.includeArchived === true, [], '', []]);
+				if (inventory.scope === scope) {
+					const rows = Object.values(inventory.known).filter((row) => row.generation === inventory.generation);
+					gpt.chatProgress = { inventoryKey, scope, total: rows.length, saved: rows.filter((row) => gpt.index[row.item.id]).length };
+				}
+			}
+		}
 	}
 
+	private settingsWrite: Promise<void> = Promise.resolve();
+
 	async saveSettings() {
-		await this.saveData(this.settings);
+		const write = this.settingsWrite.then(() => this.saveData(this.settings));
+		this.settingsWrite = write.catch(() => undefined);
+		await write;
 	}
 }
