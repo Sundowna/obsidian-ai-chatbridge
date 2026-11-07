@@ -1,6 +1,8 @@
 # AI ChatBridge
 
-Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault. Each chat is saved as the raw JSON the website returns, plus a readable Markdown transcript, so your AI conversations live next to the rest of your notes.
+Sync your **claude.ai** and **ChatGPT** chats into your Obsidian vault. The idea is to mirror the chats and folders from your AI web & desktop interfaces to your Obsidian vault.
+This way it looks and feels the same way as the GUIs that you are used - minimum barrier-to-entry and context switching.
+Each chat is saved as the raw JSON the website returns, plus a readable Markdown transcript, so your AI conversations live next to the rest of your notes.
 
 > **Unofficial.** This plugin is not affiliated with, endorsed by, or supported by Anthropic or OpenAI. It reads the same web endpoints your browser uses, which can change without notice.
 
