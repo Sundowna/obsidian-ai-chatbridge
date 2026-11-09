@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { StopError } from '../api';
 import type { IndexEntry } from '../types';
 
@@ -12,8 +11,10 @@ export interface AssetRetry {
 	reason: string;
 }
 
-export function fingerprint(value: string | ArrayBuffer): string {
-	return createHash('sha256').update(typeof value === 'string' ? value : new Uint8Array(value)).digest('hex');
+export async function fingerprint(value: string | ArrayBuffer): Promise<string> {
+	const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+	const digest = await crypto.subtle.digest('SHA-256', bytes);
+	return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function retryAsset(previous: AssetRetry | undefined, reason: string, now = Date.now()): AssetRetry {

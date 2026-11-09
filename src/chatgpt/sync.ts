@@ -111,7 +111,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	};
 	const transcript = (chat: GptChat, item: ListItem, stem: string) =>
 		renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: `${stem}.json`, filePaths: savedPaths(chat) });
-	const viewHash = (value: string): string => fingerprint(value.replace(/^(---\r?\n[\s\S]*?\r?\n)unread: false(?=\r?\n)/, '$1unread: true'));
+	const viewHash = (value: string): Promise<string> => fingerprint(value.replace(/^(---\r?\n[\s\S]*?\r?\n)unread: false(?=\r?\n)/, '$1unread: true'));
 
 	const sameContent = async (bytes: ArrayBuffer, folder: string, stem: string): Promise<string | null> => {
 		for (const kindFolder of Object.values(KIND_FOLDER)) {
@@ -325,7 +325,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				for (const [i, path] of paths.entries()) {
 					if (!more || !exists(path)) return null;
 					const rawPage = await app.vault.adapter.readBinary(path);
-					if (entry.pageHashes && fingerprint(rawPage) !== entry.pageHashes[i]) return null;
+					if (entry.pageHashes && (await fingerprint(rawPage)) !== entry.pageHashes[i]) return null;
 					const payload: unknown = JSON.parse(new TextDecoder().decode(rawPage));
 					if (i === 0) {
 						main = checkGptChat(payload, item.uuid);
@@ -354,11 +354,11 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				const loaded = await loadChat(item);
 				if (!loaded) return null;
 				chat = loaded.chat;
-				const hashes = loaded.bytes.map(fingerprint);
+				const hashes = await Promise.all(loaded.bytes.map((bytes) => fingerprint(bytes)));
 				if (entry && JSON.stringify(entry.pageHashes) !== JSON.stringify(hashes)) entry = undefined;
 				if (entry) {
 					for (const [i, path] of [entry.json, ...(entry.older ?? [])].entries()) {
-						if (exists(path) && fingerprint(await app.vault.adapter.readBinary(path)) !== hashes[i]) {
+						if (exists(path) && (await fingerprint(await app.vault.adapter.readBinary(path))) !== hashes[i]) {
 							entry = undefined;
 							break;
 						}
@@ -387,7 +387,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			const view = transcript(chat, item, stemOf(entry.json));
 			if (!exists(entry.md)) await createNew(app, entry.md, view);
 			const isNew = !g.index[item.uuid];
-			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: viewHash(await app.vault.adapter.read(entry.md)) };
+			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(await app.vault.adapter.read(entry.md)) };
 			if (isNew && catalogIds.has(item.uuid)) counts.saved++;
 			delete pending[item.uuid];
 			await plugin.saveSettings();
@@ -396,15 +396,15 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 
 		const refreshView = async (chat: GptChat, item: ListItem, entry: IndexEntry): Promise<void> => {
 			const view = transcript(chat, item, stemOf(entry.json));
-			const hash = viewHash(view);
+			const hash = await viewHash(view);
 			const latest = entry.view ?? entry.md;
-			if (exists(entry.md) && exists(latest) && (entry.viewHash === hash || viewHash(await app.vault.adapter.read(latest)) === hash)) return;
+			if (exists(entry.md) && exists(latest) && (entry.viewHash === hash || (await viewHash(await app.vault.adapter.read(latest))) === hash)) return;
 			const path = !exists(entry.md) ? entry.md : `${dirOf(entry.json)}/${stemOf(entry.json)} (transcript ${hash.slice(0, 16)}).md`;
 			if (!exists(path)) {
 				await createNew(app, path, view);
 				if (path === entry.md) result.restored.push(stemOf(path));
 				else result.refreshedViews++;
-			} else if (viewHash(await app.vault.adapter.read(path)) !== hash) {
+			} else if ((await viewHash(await app.vault.adapter.read(path))) !== hash) {
 				throw new Error('ChatGPT derived transcript path is occupied by different content.');
 			}
 			entry.view = path;

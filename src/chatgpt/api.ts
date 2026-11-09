@@ -76,8 +76,8 @@ export class GptApi {
 		const identity = inventoryIdentity(token, workspace);
 		api.workspaceId = identity?.[1];
 		api.inventoryKey = identity
-			? 'account:' + fingerprint(JSON.stringify(identity))
-			: 'session:' + fingerprint(JSON.stringify([token, workspace]));
+			? 'account:' + await fingerprint(JSON.stringify(identity))
+			: 'session:' + await fingerprint(JSON.stringify([token, workspace]));
 		return api;
 	}
 
