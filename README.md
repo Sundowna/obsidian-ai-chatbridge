@@ -13,7 +13,7 @@ Each chat is saved as the raw JSON the website returns, plus a readable Markdown
 - Local indexing with Newest-to-Oldest + Overlap indexing strategy
 
 ### Note:
-<font color="#c00000">Large imports (i.e. couple of hundred chats) may take a while due to "429 - Too many request" errors from provider servers.</font> It can become frustrating...
+Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many request" errors from provider servers - but still a lot faster than OpenAI's response to data request :)
 
 > **Unofficial.** This plugin is not affiliated with, endorsed by, or supported by Anthropic or OpenAI. It reads the same web endpoints your browser uses, which can change without notice.
 
