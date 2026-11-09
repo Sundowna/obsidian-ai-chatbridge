@@ -6,7 +6,9 @@ import type { Provider } from '../login';
 import type { AnyAccount } from '../accounts';
 import { BROWSE_MESSAGES, browseForVaultFolder } from '../folder-dialog';
 import { FolderSuggest } from '../folder-suggest';
+import type { ProjectCatalog } from '../project-catalog';
 import { cleanFolder } from '../settings';
+import { projectPicker } from './project-picker';
 
 export interface PanelContext {
 	app: App;
@@ -71,10 +73,11 @@ export interface ProjectOptions {
 	downloadFiles: boolean;
 	onlyProjects: boolean;
 	projects: string[];
+	projectCatalog?: ProjectCatalog;
 }
 
 /** How chats are filed. */
-export function filingOptions(ctx: PanelContext, el: HTMLElement, site: string, o: ProjectOptions): void {
+export function filingOptions(ctx: PanelContext, el: HTMLElement, site: string, o: Pick<ProjectOptions, 'projectSubfolders' | 'recentFolderName'>): void {
 	const save = () => ctx.plugin.saveSettings();
 	new Setting(el)
 		.setName('Use project subfolders')
@@ -99,7 +102,7 @@ export function filingOptions(ctx: PanelContext, el: HTMLElement, site: string, 
 }
 
 /** What gets synced. */
-export function contentOptions(ctx: PanelContext, el: HTMLElement, site: string, o: ProjectOptions): void {
+export function contentOptions(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, o: ProjectOptions): void {
 	const save = () => ctx.plugin.saveSettings();
 	new Setting(el)
 		.setName('Download files and images')
@@ -110,9 +113,15 @@ export function contentOptions(ctx: PanelContext, el: HTMLElement, site: string,
 				await save();
 			}),
 		);
+	projectFilterOptions(ctx, el, provider, account, o);
+}
+
+/** Which projects get synced. */
+export function projectFilterOptions(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, o: Pick<ProjectOptions, 'recentFolderName' | 'onlyProjects' | 'projects' | 'projectCatalog'>): void {
+	const save = () => ctx.plugin.saveSettings();
 	new Setting(el)
 		.setName('Only sync selected projects')
-		.setDesc('Off syncs every chat.')
+		.setDesc('Off syncs every chat. On syncs only what you select below, and new projects stay unselected until you select them.')
 		.addToggle((t) =>
 			t.setValue(o.onlyProjects).onChange(async (v) => {
 				o.onlyProjects = v;
@@ -120,14 +129,5 @@ export function contentOptions(ctx: PanelContext, el: HTMLElement, site: string,
 				ctx.refresh(); // shows or hides the list
 			}),
 		);
-	if (!o.onlyProjects) return;
-	new Setting(el)
-		.setName('Projects')
-		.setDesc(`One ${site} project name or ID per line. Add "${o.recentFolderName}" for chats without a project.`)
-		.addTextArea((t) =>
-			t.setValue(o.projects.join('\n')).onChange(async (v) => {
-				o.projects = v.split('\n').map((x) => x.trim()).filter(Boolean);
-				await save();
-			}),
-		);
+	if (o.onlyProjects) projectPicker(ctx, el, provider, account, o);
 }

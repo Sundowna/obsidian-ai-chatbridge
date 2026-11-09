@@ -1,5 +1,5 @@
 import { Notice, Plugin } from 'obsidian';
-import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type Settings } from './settings';
+import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type LumoAccount, type Settings } from './settings';
 import { accountsOf, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
 import { AIChatBridgeSettingTab } from './ui/settings-tab';
@@ -9,7 +9,9 @@ import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
 import { closeLoginWindows, isLoggedIn, type Provider } from './login';
+import { StopError } from './api';
 import { runGptSync } from './chatgpt/sync';
+import { runLumoSync } from './lumo/sync';
 import { chatCountStatus, SyncProgress } from './progress';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
@@ -18,6 +20,7 @@ type SyncTrigger = 'manual' | 'auto' | 'resume';
 type Target =
 	| { kind: 'claude'; account: ClaudeAccount }
 	| { kind: 'chatgpt'; account: ChatgptAccount; forceFull?: boolean }
+	| { kind: 'lumo'; account: LumoAccount }
 	| { kind: 'desktop'; only?: DesktopOnly; label?: string };
 
 export type Surface = 'web' | 'desktop';
@@ -25,6 +28,8 @@ export type Surface = 'web' | 'desktop';
 export default class AIChatBridge extends Plugin {
 	settings!: Settings;
 	private running = false;
+	/** The running work is a project-list fetch, not a sync. */
+	private fetchingList = false;
 	private timer: number | null = null;
 	/** When the automatic sync timer fires next (ms), or null when it is off. */
 	private nextAutoAt: number | null = null;
@@ -61,6 +66,12 @@ export default class AIChatBridge extends Plugin {
 			id: 'sync-chatgpt-chats',
 			name: 'Sync ChatGPT chats',
 			callback: () => void this.syncGpt('manual'),
+		});
+
+		this.addCommand({
+			id: 'sync-lumo-chats',
+			name: 'Sync Lumo chats',
+			callback: () => void this.syncLumo('manual'),
 		});
 
 		this.addCommand({
@@ -268,6 +279,15 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
+	/** Every Lumo account. */
+	async syncLumo(trigger: 'manual' | 'auto') {
+		await this.guarded(trigger, async () => {
+			const accounts = await this.webAccounts('lumo', this.settings.lumo);
+			if (!accounts.length) this.notLoggedIn('lumo', trigger);
+			for (const account of accounts) await this.runOne({ kind: 'lumo', account }, trigger);
+		});
+	}
+
 	/** Desktop apps only (Claude Code / Cowork, Codex). */
 	async syncDesktop(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
@@ -286,6 +306,7 @@ export default class AIChatBridge extends Plugin {
 				const label = withAccount(provider === 'claude' ? 'Claude desktop' : 'Codex', accountsOf(this.settings, provider), account);
 				await this.runOne({ kind: 'desktop', only: { provider, id: account.id }, label }, 'manual');
 			} else if (provider === 'claude') await this.runOne({ kind: 'claude', account: account as ClaudeAccount }, 'manual');
+			else if (provider === 'lumo') await this.runOne({ kind: 'lumo', account: account as LumoAccount }, 'manual');
 			else await this.runOne({ kind: 'chatgpt', account: account as ChatgptAccount }, 'manual');
 		});
 	}
@@ -315,8 +336,10 @@ export default class AIChatBridge extends Plugin {
 			for (const a of this.settings.claude) if (await this.canSyncWeb('claude', a)) claude.push(a);
 			const gpt: ChatgptAccount[] = [];
 			for (const a of this.settings.chatgpt) if (await this.canSyncWeb('chatgpt', a)) gpt.push(a);
+			const lumo: LumoAccount[] = [];
+			for (const a of this.settings.lumo) if (await this.canSyncWeb('lumo', a)) lumo.push(a);
 			const desktop = anyDesktopEnabled(this);
-			if (!claude.length && !gpt.length && !desktop) {
+			if (!claude.length && !gpt.length && !lumo.length && !desktop) {
 				if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
 				return;
 			}
@@ -329,6 +352,7 @@ export default class AIChatBridge extends Plugin {
 				if (trigger !== 'manual' && waiting) continue;
 				if (!(await this.runOne({ kind: 'chatgpt', account }, trigger)) && this.autoPaused) return;
 			}
+			for (const account of lumo) if (!(await this.runOne({ kind: 'lumo', account }, trigger)) && this.autoPaused) return;
 			if (desktop) await this.runOne({ kind: 'desktop' }, trigger);
 		});
 	}
@@ -337,7 +361,7 @@ export default class AIChatBridge extends Plugin {
 	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>) {
 		if (trigger === 'auto' && this.autoPaused) return;
 		if (this.running) {
-			if (trigger === 'manual') new Notice('A sync is already running.');
+			if (trigger === 'manual') new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is already running.');
 			return;
 		}
 		this.clearGptResumeTimer();
@@ -351,9 +375,30 @@ export default class AIChatBridge extends Plugin {
 		}
 	}
 
+	/** A sync or a project-list fetch is under way. */
+	get busy(): boolean {
+		return this.running;
+	}
+
+	/** Runs work that must not overlap a sync, such as fetching the project list. */
+	async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+		if (this.running) throw new StopError('A sync is running. Try again when it has finished.');
+		this.clearGptResumeTimer();
+		this.running = true;
+		this.fetchingList = true;
+		try {
+			return await fn();
+		} finally {
+			this.running = false;
+			this.fetchingList = false;
+			this.scheduleGptResume();
+		}
+	}
+
 	private targetLabel(target: Target): string {
 		if (target.kind === 'claude') return withAccount('claude.ai', this.settings.claude, target.account);
 		if (target.kind === 'chatgpt') return this.gptLabel(target.account);
+		if (target.kind === 'lumo') return withAccount('Lumo', this.settings.lumo, target.account);
 		return target.label ?? 'Desktop apps';
 	}
 
@@ -367,9 +412,14 @@ export default class AIChatBridge extends Plugin {
 		try {
 			r = target.kind === 'claude' ? await runSync(this, target.account, progress.update)
 				: target.kind === 'chatgpt' ? await runGptSync(this, target.account, progress.update, target.forceFull)
+				: target.kind === 'lumo' ? await runLumoSync(this, target.account, progress.update)
 				: await runDesktopSync(this, progress.update, undefined, undefined, target.only);
 		} finally {
 			progress.finish();
+		}
+		if ('nothingSelected' in r && r.nothingSelected) {
+			if (trigger === 'manual') new Notice(`${label}: no projects selected, so nothing was synced. Select some in the plugin settings.`);
+			return true;
 		}
 		if (r.stopped) {
 			if ('resumeAt' in r && typeof r.resumeAt === 'number') {

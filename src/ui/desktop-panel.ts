@@ -1,7 +1,7 @@
 // The Desktop surface of an account: sessions the desktop app and CLI saved on this computer.
 
 import { Setting } from 'obsidian';
-import type { AnyAccount } from '../accounts';
+import type { DesktopAccount } from '../accounts';
 import { defaultRoots, nodeDesktopFs } from '../desktop/scan';
 import type { DesktopApp } from '../desktop/types';
 import type { Provider } from '../login';
@@ -9,7 +9,7 @@ import type { ChatgptAccount, ClaudeAccount } from '../settings';
 import { advanced, count, folderSetting, type PanelContext } from './fields';
 
 /** How this account's sessions are told apart from another account's. */
-function matchText(provider: Provider, account: AnyAccount, isFirst: boolean, several: boolean): string {
+function matchText(provider: Provider, account: DesktopAccount, isFirst: boolean, several: boolean): string {
 	if (!several) return '';
 	const [idName, id] = provider === 'claude'
 		? ['organization ID', (account as ClaudeAccount).web.orgId]
@@ -20,7 +20,7 @@ function matchText(provider: Provider, account: AnyAccount, isFirst: boolean, se
 		: ` Sessions are matched by ${idName}, which is filled in once this account has logged in and synced. Until then none come here.`;
 }
 
-export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, list: readonly AnyAccount[]): void {
+export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provider, account: DesktopAccount, list: readonly DesktopAccount[]): void {
 	const conf = account.desktop;
 	const save = () => ctx.plugin.saveSettings();
 	const app: DesktopApp = provider === 'claude' ? 'claude' : 'codex';

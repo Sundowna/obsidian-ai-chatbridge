@@ -24,9 +24,12 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 
 	const web = surfaceLine(card, 'globe', 'Web');
 	const chats = Object.keys(account.web.index).length;
-	const desktop = surfaceLine(card, 'monitor', 'Desktop');
-	desktop.dot.toggleClass('is-on', account.desktop.enabled);
-	desktop.text.setText(account.desktop.enabled ? count(Object.keys(account.desktop.index).length, 'session') : 'Off');
+	const app = 'desktop' in account ? account.desktop : null;
+	if (app) {
+		const desktop = surfaceLine(card, 'monitor', 'Desktop');
+		desktop.dot.toggleClass('is-on', app.enabled);
+		desktop.text.setText(app.enabled ? count(Object.keys(app.index).length, 'session') : 'Off');
+	}
 
 	const sync = head.createEl('button', { text: 'Sync', cls: 'ccs-card-sync' });
 	void isLoggedIn(loginRef(provider, account)).then((ok) => {
@@ -37,7 +40,7 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 		void (async () => {
 			new Notice(`${account.label}: sync starting…`);
 			if (await ctx.plugin.canSyncWeb(provider, account)) await ctx.plugin.syncAccount(provider, account, 'web');
-			if (account.desktop.enabled) await ctx.plugin.syncAccount(provider, account, 'desktop');
+			if (app?.enabled) await ctx.plugin.syncAccount(provider, account, 'desktop');
 			ctx.refresh();
 		})();
 	});
@@ -47,7 +50,7 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 	const s = ctx.plugin.settings;
 	const hero = el.createDiv({ cls: 'ccs-hero' });
 	const words = hero.createDiv();
-	const chats = [...s.claude, ...s.chatgpt].reduce((n, a) => n + Object.keys(a.web.index).length, 0);
+	const chats = [...s.claude, ...s.chatgpt, ...s.lumo].reduce((n, a) => n + Object.keys(a.web.index).length, 0);
 	const sessions = [...s.claude, ...s.chatgpt].reduce((n, a) => n + Object.keys(a.desktop.index).length, 0);
 	words.createDiv({ cls: 'ccs-hero-title', text: 'Sync all accounts' });
 	words.createDiv({ cls: 'ccs-hero-desc', text: `${count(chats, 'chat')} and ${count(sessions, 'desktop session')} saved so far.` });
@@ -57,7 +60,7 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 		void ctx.plugin.syncAll('manual').then(ctx.refresh);
 	});
 
-	for (const provider of ['claude', 'chatgpt'] as const) {
+	for (const provider of ['claude', 'chatgpt', 'lumo'] as const) {
 		const head = el.createDiv({ cls: 'ccs-provider-head' });
 		providerIcon(head, provider);
 		head.createDiv({ cls: 'ccs-provider-name', text: PROVIDER_LABEL[provider] });

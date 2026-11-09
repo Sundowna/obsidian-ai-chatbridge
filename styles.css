@@ -288,6 +288,144 @@
 	margin-bottom: 8px;
 }
 
+/* Project picker. */
+.ccs-picker {
+	margin: 4px 0 12px;
+	padding: 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.ccs-picker .ccs-picker-hidden {
+	display: none;
+}
+
+.ccs-picker-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.ccs-picker-summary {
+	min-width: 0;
+}
+
+.ccs-picker-count {
+	font-weight: var(--font-medium);
+}
+
+.ccs-picker-meta,
+.ccs-picker-hint,
+.ccs-picker-chats,
+.ccs-picker-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-picker-status {
+	margin-top: 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-picker-error {
+	color: var(--text-error);
+}
+
+.ccs-picker-tools {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 4px;
+	margin-top: 10px;
+}
+
+.ccs-picker-tools .ccs-picker-filter {
+	flex: 1;
+	min-width: 0;
+	margin-right: 8px;
+}
+
+.ccs-settings .ccs-picker-link {
+	height: auto;
+	padding: 2px 6px;
+	background: none;
+	border: none;
+	box-shadow: none;
+	color: var(--text-accent);
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+}
+
+.ccs-settings .ccs-picker-link:hover {
+	text-decoration: underline;
+}
+
+.ccs-picker-list {
+	max-height: 280px;
+	margin-top: 8px;
+	overflow-y: auto;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.ccs-picker-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 4px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+
+.ccs-picker-row:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ccs-picker-row input[type='checkbox'] {
+	flex: none;
+	margin: 0;
+}
+
+.ccs-picker-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ccs-picker-chats {
+	flex: none;
+}
+
+.ccs-picker-tag {
+	flex: none;
+	padding: 0 6px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.ccs-picker-tag.is-new {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.ccs-picker-empty {
+	padding: 10px 4px 2px;
+}
+
+.ccs-picker-foot:not(:empty) {
+	margin-top: 8px;
+}
+
+.ccs-picker-warning {
+	color: var(--text-warning);
+	font-size: var(--font-ui-small);
+}
+
 /* Add / rename dialog. */
 .ccs-name-input {
 	width: 100%;

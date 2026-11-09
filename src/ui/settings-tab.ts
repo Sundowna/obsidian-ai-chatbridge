@@ -8,6 +8,7 @@ import type { PanelContext } from './fields';
 import { generalTab } from './general-tab';
 import { providerIcon } from './icons';
 import { overviewTab } from './overview-tab';
+import { forgetProjectLists } from './project-picker';
 import { providerTab, type ProviderState } from './provider-tab';
 
 type Tab = 'overview' | Provider | 'general';
@@ -18,11 +19,17 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 	private readonly providers: Record<Provider, ProviderState> = {
 		claude: { accountId: '', surface: 'web' },
 		chatgpt: { accountId: '', surface: 'web' },
+		lumo: { accountId: '', surface: 'web' },
 	};
 	private readonly openSections = new Set<string>();
 
 	constructor(app: App, private readonly plugin: AIChatBridge) {
 		super(app, plugin);
+	}
+
+	hide(): void {
+		forgetProjectLists();
+		super.hide();
 	}
 
 	private go(tab: Tab): void {
@@ -35,7 +42,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const active = id === this.tab;
 		const b = bar.createEl('button', { cls: 'ccs-tab', attr: { role: 'tab', 'aria-selected': String(active) } });
 		b.toggleClass('is-active', active);
-		if (id === 'claude' || id === 'chatgpt') providerIcon(b, id);
+		if (id === 'claude' || id === 'chatgpt' || id === 'lumo') providerIcon(b, id);
 		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : 'sliders-horizontal');
 		b.createSpan({ text: label });
 		b.addEventListener('click', () => this.go(id));
@@ -51,6 +58,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		this.tabButton(bar, 'overview', 'Overview');
 		this.tabButton(bar, 'claude', 'Claude');
 		this.tabButton(bar, 'chatgpt', 'ChatGPT');
+		this.tabButton(bar, 'lumo', 'Lumo');
 		this.tabButton(bar, 'general', 'General');
 
 		const ctx: PanelContext = {

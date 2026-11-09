@@ -8,6 +8,7 @@ import type { AssetRetry, Capture } from './chatgpt/recovery';
 import type { Inventories } from './chatgpt/inventory';
 import type { ChatCounts } from './progress';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
+import type { ProjectCatalog } from './project-catalog';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -24,6 +25,7 @@ export interface ClaudeWebSettings {
 	secretId: string;
 	onlyProjects: boolean;
 	projects: string[];
+	projectCatalog?: ProjectCatalog;
 	/** Folder for normal claude.ai chats (platform CLAUDE_AI). */
 	chatFolder: string;
 	/** Folder for Claude Code sessions (any other platform). */
@@ -47,6 +49,7 @@ export interface GptSettings {
 	downloadFiles: boolean;
 	onlyProjects: boolean;
 	projects: string[];
+	projectCatalog?: ProjectCatalog;
 	index: Record<string, IndexEntry>;
 	fileIndex: Record<string, string>;
 	/** The workspace the login belongs to (not secret); matches Codex sessions to this account. */
@@ -59,6 +62,19 @@ export interface GptSettings {
 	inventories?: Inventories;
 	overlapMinutes?: number;
 	chatProgress?: ChatCounts & { inventoryKey: string; scope: string };
+}
+
+/** One Lumo login: its folders and what has been synced. No keys: those exist only during a sync. */
+export interface LumoSettings {
+	folder: string;
+	projectSubfolders: boolean;
+	recentFolderName: string;
+	onlyProjects: boolean;
+	projects: string[];
+	projectCatalog?: ProjectCatalog;
+	index: Record<string, IndexEntry>;
+	/** The Proton account behind this login (not secret), to notice the same login twice. */
+	userId?: string;
 }
 
 /** One person's login at a provider, with its two surfaces: the website and the desktop app. */
@@ -76,6 +92,13 @@ export interface ChatgptAccount {
 	desktop: DesktopAppSettings;
 }
 
+/** Lumo is a website only, so its accounts have no desktop side. */
+export interface LumoAccount {
+	id: string;
+	label: string;
+	web: LumoSettings;
+}
+
 export interface Settings {
 	maxChatsPerRun: number;
 	delaySeconds: number;
@@ -84,6 +107,7 @@ export interface Settings {
 	/** Always at least one. The first account also receives desktop sessions no account claims. */
 	claude: ClaudeAccount[];
 	chatgpt: ChatgptAccount[];
+	lumo: LumoAccount[];
 	/** How desktop sessions are saved, for every account. */
 	desktop: DesktopSettings;
 }
@@ -113,6 +137,15 @@ export const DEFAULT_GPT: GptSettings = {
 	fileIndex: {},
 };
 
+export const DEFAULT_LUMO: LumoSettings = {
+	folder: 'AI Chats/Lumo/Chat',
+	projectSubfolders: true,
+	recentFolderName: 'Recent',
+	onlyProjects: false,
+	projects: [],
+	index: {},
+};
+
 export const desktopApp = (folder: string): DesktopAppSettings => ({ enabled: true, folder, extraFolders: [], index: {} });
 
 export const DEFAULT_DESKTOP: DesktopSettings = {
@@ -133,6 +166,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	logPath: 'AI Chats/AI ChatBridge log.md',
 	claude: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_CLAUDE_WEB, desktop: desktopApp('AI Chats/Claude Desktop/Code') }],
 	chatgpt: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GPT, desktop: desktopApp('AI Chats/ChatGPT Desktop/Codex') }],
+	lumo: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_LUMO }],
 	desktop: DEFAULT_DESKTOP,
 };
 

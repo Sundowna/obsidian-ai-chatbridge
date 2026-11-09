@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-ai-chatbridge",
-	"version": "0.18.1",
-	"description": "Obsidian plugin: sync claude.ai and ChatGPT chats into the vault as raw JSON plus a Markdown transcript",
+	"version": "0.19.0",
+	"description": "Obsidian plugin: sync claude.ai, ChatGPT and Proton Lumo chats into the vault as raw JSON plus a Markdown transcript",
 	"private": true,
 	"main": "main.js",
 	"type": "module",
@@ -10,10 +10,11 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
-		"test:sync": "esbuild scripts/test-chatgpt-sync.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-chatgpt-sync.cjs && node scripts/.test-chatgpt-sync.cjs",
+		"test:sync": "esbuild scripts/test-chatgpt-sync.ts --bundle --platform=node --conditions=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-chatgpt-sync.cjs && node scripts/.test-chatgpt-sync.cjs",
 		"test:inventory": "esbuild scripts/test-chatgpt-inventory.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-chatgpt-inventory.cjs && node scripts/.test-chatgpt-inventory.cjs",
 		"test:offline": "esbuild scripts/test-offline.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-offline.cjs && node scripts/.test-offline.cjs",
-		"test:desktop": "esbuild scripts/test-desktop.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-desktop.cjs && node scripts/.test-desktop.cjs"
+		"test:desktop": "esbuild scripts/test-desktop.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-desktop.cjs && node scripts/.test-desktop.cjs",
+		"test:lumo": "esbuild scripts/test-lumo.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-lumo.cjs && node scripts/.test-lumo.cjs"
 	},
 	"keywords": [
 		"obsidian",
@@ -42,6 +43,7 @@
 		"globals": "^17.6.0",
 		"jiti": "^2.6.1",
 		"obsidian": "latest",
+		"openpgp": "6.3.2",
 		"typescript": "^5.8.3",
 		"typescript-eslint": "^8.59.1"
 	}

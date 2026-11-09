@@ -4,12 +4,13 @@
 import type { LoginRef, Provider } from './login';
 import { CHATGPT_APP, CLAUDE_APP, layoutRoot } from './desktop/layout';
 import { safeTitle } from './naming';
-import { DEFAULT_CLAUDE_WEB, DEFAULT_GPT, desktopApp, type ChatgptAccount, type ClaudeAccount, type Settings } from './settings';
+import { DEFAULT_CLAUDE_WEB, DEFAULT_GPT, DEFAULT_LUMO, desktopApp, type ChatgptAccount, type ClaudeAccount, type LumoAccount, type Settings } from './settings';
 
-export type AnyAccount = ClaudeAccount | ChatgptAccount;
+export type DesktopAccount = ClaudeAccount | ChatgptAccount;
+export type AnyAccount = DesktopAccount | LumoAccount;
 
-export const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', chatgpt: 'ChatGPT' };
-export const SITE_LABEL: Record<Provider, string> = { claude: 'claude.ai', chatgpt: 'ChatGPT' };
+export const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', chatgpt: 'ChatGPT', lumo: 'Lumo' };
+export const SITE_LABEL: Record<Provider, string> = { claude: 'claude.ai', chatgpt: 'ChatGPT', lumo: 'Lumo' };
 
 export function accountsOf(s: Settings, provider: Provider): AnyAccount[] {
 	return s[provider];
@@ -55,6 +56,11 @@ export function addAccount(s: Settings, provider: Provider, label: string): AnyA
 		s.claude.push(account);
 		return account;
 	}
+	if (provider === 'lumo') {
+		const account: LumoAccount = { id: newId(), label: name, web: { ...DEFAULT_LUMO, projects: [], index: {}, folder: under(root, `Lumo (${name})/Chat`) } };
+		s.lumo.push(account);
+		return account;
+	}
 	const app = under(root, `${CHATGPT_APP} (${name})`);
 	const account: ChatgptAccount = {
 		id: newId(),
@@ -70,6 +76,7 @@ export function addAccount(s: Settings, provider: Provider, label: string): AnyA
 export function removeAccount(s: Settings, provider: Provider, account: AnyAccount): boolean {
 	if (s[provider].length <= 1) return false;
 	if (provider === 'claude') s.claude = s.claude.filter((a) => a !== account);
+	else if (provider === 'lumo') s.lumo = s.lumo.filter((a) => a !== account);
 	else s.chatgpt = s.chatgpt.filter((a) => a !== account);
 	return true;
 }

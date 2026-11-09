@@ -9,12 +9,15 @@ import { activeBranch, renderTranscript } from '../src/transcript';
 import { chatFiles, mergeFiles, numbered, safeFileName, visibleFiles } from '../src/files';
 import { decodeMessage, encodeStrings } from '../src/proto';
 import { followRename } from '../src/follow';
+import { nothingSelected, NO_PROJECT } from '../src/select';
+import { isSelected, markNew, onlySelected, pickerRows, rowsFromChats, rowsFromProjects, setRows } from '../src/project-catalog';
 import type { IndexEntry } from '../src/types';
 
 /** Settings with one account holding this index, for the rename tests. */
 const oneAccount = (web: object, provider: 'claude' | 'chatgpt') => ({
 	claude: provider === 'claude' ? [{ web, desktop: { index: {} } }] : [],
 	chatgpt: provider === 'chatgpt' ? [{ web, desktop: { index: {} } }] : [],
+	lumo: [],
 } as unknown as Parameters<typeof followRename>[0]);
 import { checkGptChat, checkGptFileInfo, checkGptList, checkGptOlderPage, checkGptSidebar } from '../src/chatgpt/schema';
 import { joinParts, olderPartPath } from '../src/chatgpt/parts';
@@ -36,6 +39,42 @@ const brain = filterByProjects(list.data, ['2nd Brain']);
 expect('filter "2nd Brain" keeps 1 of 3', brain.length === 1 && brain[0]!.name === 'Second brain setup - test run');
 expect('filter by project uuid works', filterByProjects(list.data, ['01a1a5fa-40cf-731e-abcb-9e29e2c0e5ba']).length === 1);
 expect('empty filter keeps all', filterByProjects(list.data, []).length === 3);
+
+// Project picker.
+{
+	const chat = (uuid: string, project: { name: string; uuid: string } | null) => ({ uuid, name: uuid, created_at: '', updated_at: '', project });
+	const alpha = { name: 'alpha', uuid: 'id-a' };
+	const beta = { name: 'Beta', uuid: 'id-b' };
+	const chats = [chat('1', beta), chat('2', alpha), chat('3', beta), chat('4', null)];
+	const rows = rowsFromChats(chats);
+	expect('picker: no-project row first, then sorted', rows.map((r) => r.id).join() === `${NO_PROJECT},id-a,id-b`);
+	expect('picker: counts chats per project', rows[0]!.chats === 1 && rows[2]!.chats === 2);
+	const withEmpty = rowsFromChats(chats, [alpha, { name: 'Empty', uuid: 'id-e' }]);
+	expect('picker: a project with no chats is listed with 0', withEmpty.find((r) => r.id === 'id-e')?.chats === 0);
+	expect('picker: a known project is not counted twice', withEmpty.filter((r) => r.id === 'id-a').length === 1 && withEmpty.find((r) => r.id === 'id-a')?.chats === 1);
+	expect('picker: project list has no counts', rowsFromProjects([{ id: 'x', name: 'X' }])[1]!.chats === undefined);
+	expect('picker: first fetch marks nothing new', !markNew(rows, undefined).some((r) => r.isNew));
+	const later = markNew(rowsFromProjects([{ id: 'id-a', name: 'alpha' }, { id: 'id-c', name: 'C' }]), { fetchedAt: '', rows });
+	expect('picker: only unseen projects are new', later.filter((r) => r.isNew).map((r) => r.id).join() === 'id-c');
+
+	const catalog = { fetchedAt: '', rows };
+	const kept = onlySelected({ fetchedAt: 't', rows: [{ ...rows[1]!, isNew: true }, rows[2]!], note: 'n' }, ['id-a'], 'Recent');
+	expect('saved list holds only selected names', kept?.rows.length === 1 && kept.rows[0]!.name === 'alpha' && kept.rows[0]!.isNew === undefined);
+	expect('saved list is dropped when nothing is selected', onlySelected(catalog, [], 'Recent') === undefined);
+	expect('picker: typed names tick their rows', isSelected(rows[2]!, ['beta'], 'Recent') && isSelected(rows[0]!, ['Recent'], 'Recent'));
+	const typed = pickerRows(catalog, ['Beta', 'Gone'], 'Recent');
+	expect('picker: selected but unlisted stays visible', typed.length === 4 && typed[3]!.orphan === true && typed[3]!.name === 'Gone');
+	expect('picker: before a fetch, selection shows without warning', pickerRows(undefined, ['Recent', 'Beta'], 'Recent').every((r) => !r.orphan));
+
+	const next = setRows(['Beta', 'Gone'], typed, 'Recent', [NO_PROJECT], true);
+	expect('picker: ticking turns names into IDs and keeps unlisted', next.join() === `id-b,Gone,${NO_PROJECT}`);
+	expect('picker: unticking removes a row chosen by name', setRows(['Beta'], typed, 'Recent', ['id-b'], false).length === 0);
+	expect('picker: unticking an unlisted entry removes it', setRows(['Gone'], typed, 'Recent', ['Gone'], false).length === 0);
+	expect('filter: IDs and no-project entry select the right chats', filterByProjects(chats, next).map((c) => c.uuid).join() === '1,3,4');
+	expect('filter: no-project survives renaming the folder', filterByProjects(chats, [NO_PROJECT], 'Loose').length === 1);
+
+	expect('nothing selected only counts when the filter is on', nothingSelected({ onlyProjects: true, projects: [' '] }) && !nothingSelected({ onlyProjects: false, projects: [] }) && !nothingSelected({ onlyProjects: true, projects: ['x'] }));
+}
 
 const first = list.data[0]!;
 expect('new chat is picked', pickTodo(list.data, {}).length === 3);
