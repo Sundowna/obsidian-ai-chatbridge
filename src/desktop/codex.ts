@@ -110,6 +110,7 @@ export function parseCodexSession(text: string, titles: Map<string, string> = ne
 		model,
 		forkedFrom: str(meta?.forked_from_id),
 		isSubagent,
+		ownerId: str(meta?.creator_account_id),
 		turns,
 	};
 }

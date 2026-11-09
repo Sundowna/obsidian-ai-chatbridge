@@ -3,7 +3,13 @@
 // encrypted by Windows) – never in data.json, never in a note, never logged.
 // The plugin reads them in memory only, when it needs them for a sync.
 
-export type Account = 'claude' | 'chatgpt';
+export type Provider = 'claude' | 'chatgpt';
+
+/** Which login window: the account's id picks its own separate cookie storage. */
+export interface LoginRef {
+	provider: Provider;
+	id: string;
+}
 
 interface Site {
 	start: string;
@@ -14,7 +20,7 @@ interface Site {
 	loginCookie: string | null;
 }
 
-export const SITES: Record<Account, Site> = {
+export const SITES: Record<Provider, Site> = {
 	claude: {
 		start: 'https://claude.ai/login',
 		origin: 'https://claude.ai',
@@ -23,7 +29,8 @@ export const SITES: Record<Account, Site> = {
 		loginCookie: 'sessionKey',
 	},
 	chatgpt: {
-		start: 'https://chatgpt.com/',
+		// The dedicated sign-in page, not the chat screen (checked 2026-11-09).
+		start: 'https://chatgpt.com/auth/login',
 		origin: 'https://chatgpt.com',
 		partition: 'persist:claude-chat-sync-chatgpt',
 		title: 'Log in to ChatGPT',
@@ -64,10 +71,16 @@ function remote(): Remote | null {
 	return r?.BrowserWindow && r.session ? (r as Remote) : null;
 }
 
-function session(account: Account): Session {
+/** The first account keeps the storage it always had, so upgrading does not log you out. */
+function partition(login: LoginRef): string {
+	const base = SITES[login.provider].partition;
+	return login.id === 'default' ? base : `${base}-${login.id}`;
+}
+
+function session(login: LoginRef): Session {
 	const r = remote();
 	if (!r) throw new Error('Login windows are not available in this Obsidian (desktop only).');
-	return r.session.fromPartition(SITES[account].partition);
+	return r.session.fromPartition(partition(login));
 }
 
 /** Obsidian's browser name without the "Electron/…" and "obsidian/…" parts (some logins refuse those). */
@@ -76,18 +89,18 @@ function plainUserAgent(ses: Session): string {
 }
 
 /** The browser name the login window uses – requests must send the same one (Cloudflare checks it). */
-export function loginUserAgent(account: Account): string {
-	return plainUserAgent(session(account));
+export function loginUserAgent(login: LoginRef): string {
+	return plainUserAgent(session(login));
 }
 
 /** Use the login window's Chromium transport with redirects under caller control. */
-export async function loginFetch(account: Account, url: string, init: RequestInit): Promise<Response> {
-	const ses = session(account);
+export async function loginFetch(login: LoginRef, url: string, init: RequestInit): Promise<Response> {
+	const ses = session(login);
 	if (!ses.fetch) throw new Error('This Obsidian build does not support controlled downloads.');
 	return ses.fetch(url, init);
 }
 
-const open = new Map<Account, Win>();
+const open = new Map<string, Win>();
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 const MAX_WAIT_MS = 15 * 60_000;
 
@@ -97,25 +110,26 @@ export type LoginResult = 'logged-in' | 'closed';
  * Opens the website's login page in its own window and waits. Ends when the login
  * cookie appears (window closes itself) or when you close the window.
  */
-export async function openLogin(account: Account): Promise<LoginResult> {
-	const existing = open.get(account);
+export async function openLogin(login: LoginRef, accountLabel?: string): Promise<LoginResult> {
+	const windowKey = partition(login);
+	const existing = open.get(windowKey);
 	if (existing && !existing.isDestroyed()) {
 		existing.focus();
 		return 'closed';
 	}
 	const r = remote();
 	if (!r) throw new Error('Login windows are not available in this Obsidian (desktop only).');
-	const site = SITES[account];
-	const ses = r.session.fromPartition(site.partition);
+	const site = SITES[login.provider];
+	const ses = r.session.fromPartition(windowKey);
 	ses.setUserAgent(plainUserAgent(ses));
 	const win = new r.BrowserWindow({
 		width: 1000,
 		height: 800,
-		title: site.title,
+		title: accountLabel ? `${site.title} (${accountLabel})` : site.title,
 		autoHideMenuBar: true,
-		webPreferences: { partition: site.partition, nodeIntegration: false, contextIsolation: true, sandbox: true },
+		webPreferences: { partition: windowKey, nodeIntegration: false, contextIsolation: true, sandbox: true },
 	});
-	open.set(account, win);
+	open.set(windowKey, win);
 	// Obsidian hands every jump to another website to your default browser (it does this
 	// for all its windows). Logins jump between sites (e.g. chatgpt.com -> auth.openai.com),
 	// so this window – and only this one – keeps those jumps inside itself.
@@ -134,7 +148,7 @@ export async function openLogin(account: Account): Promise<LoginResult> {
 		while (!win.isDestroyed()) {
 			await sleep(1000);
 			if (win.isDestroyed()) break;
-			if (site.loginCookie && (await isLoggedIn(account))) {
+			if (site.loginCookie && (await isLoggedIn(login))) {
 				win.close();
 				return 'logged-in';
 			}
@@ -145,19 +159,19 @@ export async function openLogin(account: Account): Promise<LoginResult> {
 		}
 		return 'closed';
 	} finally {
-		open.delete(account);
+		open.delete(windowKey);
 	}
 }
 
 /** The site's cookies, read in memory. Never store or log the values. */
-async function cookies(account: Account): Promise<Cookie[]> {
-	const list = await session(account).cookies.get({ url: SITES[account].origin });
+async function cookies(login: LoginRef): Promise<Cookie[]> {
+	const list = await session(login).cookies.get({ url: SITES[login.provider].origin });
 	return Array.from(list, (c) => ({ name: String(c.name), value: String(c.value) }));
 }
 
-export async function cookieValue(account: Account, name: string): Promise<string | null> {
+export async function cookieValue(login: LoginRef, name: string): Promise<string | null> {
 	try {
-		const c = (await cookies(account)).find((x) => x.name === name);
+		const c = (await cookies(login)).find((x) => x.name === name);
 		return c?.value ? c.value : null;
 	} catch {
 		return null;
@@ -165,33 +179,33 @@ export async function cookieValue(account: Account, name: string): Promise<strin
 }
 
 /** Names only (not secret) – shown in settings so you can see what the login left. */
-export async function cookieNames(account: Account): Promise<string[]> {
+export async function cookieNames(login: LoginRef): Promise<string[]> {
 	try {
-		return (await cookies(account)).map((c) => c.name).sort();
+		return (await cookies(login)).map((c) => c.name).sort();
 	} catch {
 		return [];
 	}
 }
 
 /** "name=value; …" for a request to the site. In memory only. */
-export async function cookieHeader(account: Account): Promise<string> {
-	return (await cookies(account)).map((c) => `${c.name}=${c.value}`).join('; ');
+export async function cookieHeader(login: LoginRef): Promise<string> {
+	return (await cookies(login)).map((c) => `${c.name}=${c.value}`).join('; ');
 }
 
 /** The login cookie is there – also when the site splits it into parts ("name.0", "name.1"). */
-export async function isLoggedIn(account: Account): Promise<boolean> {
-	const want = SITES[account].loginCookie;
-	if (!want) return (await cookieNames(account)).length > 0;
+export async function isLoggedIn(login: LoginRef): Promise<boolean> {
+	const want = SITES[login.provider].loginCookie;
+	if (!want) return (await cookieNames(login)).length > 0;
 	try {
-		return (await cookies(account)).some((c) => (c.name === want || c.name.startsWith(`${want}.`)) && c.value !== '');
+		return (await cookies(login)).some((c) => (c.name === want || c.name.startsWith(`${want}.`)) && c.value !== '');
 	} catch {
 		return false;
 	}
 }
 
 /** Forgets the login: clears that window's cookies and storage. */
-export async function logout(account: Account): Promise<void> {
-	await session(account).clearStorageData();
+export async function logout(login: LoginRef): Promise<void> {
+	await session(login).clearStorageData();
 }
 
 export function closeLoginWindows(): void {

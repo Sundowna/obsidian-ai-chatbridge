@@ -6,7 +6,7 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
-import { cookieHeader, cookieValue, isLoggedIn, loginFetch, loginUserAgent } from '../login';
+import { cookieHeader, cookieValue, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
 import { isChatId, isFileId, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
@@ -51,7 +51,10 @@ function header(headers: Record<string, string>, name: string): string {
 
 export class GptApi {
 	inventoryKey = '';
+	/** The workspace of this login, if the key names one. Not secret. */
+	workspaceId: string | undefined;
 	private constructor(
+		private readonly login: LoginRef,
 		private readonly cookie: string,
 		private readonly deviceId: string | null,
 		private readonly ua: string,
@@ -59,9 +62,9 @@ export class GptApi {
 	) {}
 
 	/** Reads the login window's cookies and gets the page key. Stops if not logged in. */
-	static async connect(): Promise<GptApi> {
-		if (!(await isLoggedIn('chatgpt'))) throw new StopError('Not logged in to ChatGPT. Use "Log in" next to ChatGPT in the plugin settings.');
-		const api = new GptApi(await cookieHeader('chatgpt'), await cookieValue('chatgpt', 'oai-did'), loginUserAgent('chatgpt'), null);
+	static async connect(login: LoginRef): Promise<GptApi> {
+		if (!(await isLoggedIn(login))) throw new StopError('Not logged in to ChatGPT. Select "Log in" for this account in the plugin settings.');
+		const api = new GptApi(login, await cookieHeader(login), await cookieValue(login, 'oai-did'), loginUserAgent(login), null);
 		const page = await api.request('/', 'text/html', false, false);
 		const token = findAccessToken(page.text);
 		if (!token) {
@@ -71,6 +74,7 @@ export class GptApi {
 		// Use the workspace cookie from the same snapshot used for requests.
 		const workspace = /(?:^|;\s*)_account=([^;]+)/.exec(api.cookie)?.[1] ?? null;
 		const identity = inventoryIdentity(token, workspace);
+		api.workspaceId = identity?.[1];
 		api.inventoryKey = identity
 			? 'account:' + fingerprint(JSON.stringify(identity))
 			: 'session:' + fingerprint(JSON.stringify([token, workspace]));
@@ -175,7 +179,7 @@ export class GptApi {
 		url.search = new URLSearchParams({ message_id: messageId, sandbox_path: path, download_intent: 'true' }).toString();
 		let res: Response;
 		try {
-			res = await loginFetch('chatgpt', url.href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual', signal: AbortSignal.timeout(120_000) });
+			res = await loginFetch(this.login, url.href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual', signal: AbortSignal.timeout(120_000) });
 		} catch {
 			throw new BlockedLinkError('generated-file request failed');
 		}

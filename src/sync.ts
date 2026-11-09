@@ -1,6 +1,8 @@
 // One sync run: list -> filter -> fetch new/changed -> write files -> log.
 
 import type AIChatBridge from './main';
+import { withAccount } from './accounts';
+import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
 import { DEFAULT_RECENT, dedupe, filterByProjects, pickTodo, projectFolderNames, projectSubfolder, targetFor } from './select';
@@ -97,12 +99,12 @@ async function fetchFiles(
 }
 
 /** `progress` gets short status texts (and how far along) while the sync runs. */
-export async function runSync(plugin: AIChatBridge, progress: ProgressFn = () => undefined): Promise<SyncResult> {
-	const s = plugin.settings;
+export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, progress: ProgressFn = () => undefined): Promise<SyncResult> {
+	const s = account.web;
 	const app = plugin.app;
-	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
+	const delayMs = Math.max(MIN_DELAY_SECONDS, plugin.settings.delaySeconds) * 1000;
 	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], restored: [] };
-	const auth = await claudeAuth(plugin);
+	const auth = await claudeAuth(plugin, account);
 	const getKey = auth.getKey;
 
 	const exists = (path: string): boolean => app.vault.getAbstractFileByPath(path) instanceof TFile;
@@ -195,7 +197,7 @@ export async function runSync(plugin: AIChatBridge, progress: ProgressFn = () =>
 	};
 
 	try {
-		if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Use "Log in to claude.ai" in the plugin settings.');
+		if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Select "Log in" for this account in the plugin settings.');
 		const api = new ClaudeApi(auth.orgId, getKey);
 
 		// 1. Read the whole chat list, 30 at a time.
@@ -222,7 +224,8 @@ export async function runSync(plugin: AIChatBridge, progress: ProgressFn = () =>
 		// 3. Only new or changed chats.
 		const todoAll = pickTodo(kept, s.index);
 		result.unchanged = kept.length - todoAll.length;
-		const todo = s.maxChatsPerRun > 0 ? todoAll.slice(0, s.maxChatsPerRun) : todoAll;
+		const maxChats = plugin.settings.maxChatsPerRun;
+		const todo = maxChats > 0 ? todoAll.slice(0, maxChats) : todoAll;
 		result.leftForLater = todoAll.length - todo.length;
 
 		// 4. Make sure the folders exist: both base folders, and (if mirroring)
@@ -399,11 +402,13 @@ export async function runSync(plugin: AIChatBridge, progress: ProgressFn = () =>
 		else result.stopped = redact(e instanceof Error ? e.message : String(e), key);
 	}
 
-	await writeLog(plugin, result);
+	await writeLog(plugin, account, result);
 	return result;
 }
 
-async function writeLog(plugin: AIChatBridge, r: SyncResult): Promise<void> {
+async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncResult): Promise<void> {
+	// Named only once there are several accounts; a single account's log reads as before.
+	const who = plugin.settings.claude.length > 1 ? `**${withAccount('claude.ai', plugin.settings.claude, account)}:** ` : '';
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 	const parts = [`${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
@@ -416,7 +421,7 @@ async function writeLog(plugin: AIChatBridge, r: SyncResult): Promise<void> {
 	if (r.filesSkipped.length) parts.push(`files not saved: ${r.filesSkipped.join(', ')}`);
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
 	if (r.otherPlatforms.size) parts.push(`to Claude Code folder: platform ${[...r.otherPlatforms].join(', ')}`);
-	let line = `- [[${dailyNoteName(now)}]] ${time} – ${parts.join(', ')}`;
+	let line = `- [[${dailyNoteName(now)}]] ${time} – ${who}${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');
 		line += `: ${shown}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;

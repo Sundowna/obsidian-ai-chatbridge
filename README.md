@@ -20,6 +20,7 @@ Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many reques
 ## Features
 
 - Log in to claude.ai and ChatGPT in a window inside Obsidian, the same way you do in a browser.
+- **Several accounts per provider**, each with its own login, folders and sync history, on both the web and the desktop app. See [Multiple accounts](#multiple-accounts).
 - Copy chats into the vault as raw JSON plus a Markdown transcript with a link back to the original chat.
 - Optionally download files the AI created (to `Artifacts/`) and files you uploaded (to `Attachments/`) next to each chat.
 - Mirror your claude.ai / ChatGPT projects as subfolders, or sync only the projects you list.
@@ -33,22 +34,35 @@ Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many reques
 
 | Command | What it does |
 | --- | --- |
-| **Sync Claude chats** | Sync claude.ai only |
-| **Sync ChatGPT chats** | Sync ChatGPT only |
+| **Sync Claude chats** | Sync every claude.ai account you are logged in to |
+| **Sync ChatGPT chats** | Sync every ChatGPT account you are logged in to |
 | **Sync desktop app chats (Claude, Codex)** | Save local Claude Code and Codex sessions |
 | **Move synced chats into the app layout (Claude Desktop, ChatGPT Desktop)** | Move existing synced folders to `Claude Desktop/Chat`, `Claude Desktop/Code`, `ChatGPT Desktop/Chat` and `ChatGPT Desktop/Codex`. Links and the sync index follow |
-| **Sync all chats** | Sync every provider you are logged in to, then the desktop apps that are on |
+| **Sync all chats** | Sync every account you are logged in to, then the desktop apps that are on |
 | **Diagnose: save claude.ai answers for the open chat** | Save the raw API answers for the open chat, for bug reports |
 
 ## Getting started
 
 1. Install and enable the plugin (see below).
 2. Open **Settings → AI ChatBridge**.
-3. Under **Accounts**, select **Log in** for claude.ai and/or ChatGPT and sign in in the window that opens. It closes itself once you are logged in.
-4. Choose the folders (defaults: `AI Chats/Claude`, `AI Chats/Claude Code`, `AI Chats/ChatGPT`).
-5. Select **Sync** or **Sync all**.
+3. On the **Claude** or **ChatGPT** tab, select **Log in** and sign in in the window that opens. It closes itself once you are logged in.
+4. Choose the folders (defaults: `AI Chats/Claude Desktop/Chat` and `/Code`, `AI Chats/ChatGPT Desktop/Chat` and `/Codex`).
+5. Select **Sync now**, or **Sync all** on the **Overview** tab.
 
 **Max chats per run** starts at 3 so a first test is quick. Set it to `0` to sync everything.
+
+## Multiple accounts
+
+On the **Claude** or **ChatGPT** tab, select **Add account** and give it a name such as `Work`. Each account has its own login window and its own folders (`Claude Desktop (Work)/Chat` and so on), and a **Web** and a **Desktop app** side.
+
+Desktop sessions are sorted automatically, so two accounts can share one desktop app without anything being saved twice:
+
+- A session goes to the account whose **Extra session folders** hold it. Use these if a login has its own config folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`).
+- Otherwise it goes to the account whose login made it: the organization ID for Claude, the workspace ID for ChatGPT. The account fills these in on its first web sync, and you can also enter them under **Advanced**.
+- Anything else goes to the first account. Claude Code sessions run only from the CLI have no recorded login, so they end up here.
+- Until an added account has logged in and synced, sessions that are clearly not the first account's wait rather than being filed under the wrong account.
+
+A session that is already saved stays with the account that saved it, so upgrading does not move or duplicate your existing chats.
 
 ## Privacy and network use
 
@@ -57,10 +71,11 @@ This plugin needs network access to work. Please read this before using it.
 - **Services contacted:** `claude.ai` and `chatgpt.com` (and their login pages, for example `auth.openai.com`), only when you log in or run a sync. Nothing is sent anywhere else. There is no telemetry.
 - **What is sent:** the requests your browser would send to list and read your own chats and files, with your login cookies.
 - **Accounts:** you need your own claude.ai and/or ChatGPT account.
-- **Where logins are stored:** in the login window's own Electron storage on this computer, outside the vault. Logins are never written to `data.json`, to notes or to logs. **Log out** in the settings removes them.
+- **Where logins are stored:** in the login window's own Electron storage on this computer, separately for each account, outside the vault. Logins are never written to `data.json`, to notes or to logs. **Log out** and **Remove** in the settings clear them.
+- **Account identifiers:** the name you give an account, and its claude.ai organization ID or ChatGPT workspace ID, are stored in `data.json`. These are not secrets.
 - **Session key fallback (claude.ai):** if the login window does not work, you can paste your `sessionKey` cookie. It is kept in Obsidian's secret storage on this computer, not in the vault.
 - **What is written:** chat JSON, Markdown transcripts, downloaded files and a sync log, only inside the vault folders you choose. The sync index in `data.json` holds chat IDs and paths, no content and no secrets.
-- **Files outside the vault (desktop apps only):** when a desktop app is turned on in the **Desktop apps** tab, the plugin *reads* that app's session files on this computer (`~/.claude/projects`, the Claude desktop app's session list and Local Storage for titles and sidebar groups, `~/.codex/.codex-global-state.json` for Codex projects, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl`, and any extra folders you add). It never changes or deletes them, and sends nothing over the network. Turn an app off to stop this.
+- **Files outside the vault (desktop apps only):** when **Sync desktop sessions** is on for an account, the plugin *reads* that app's session files on this computer (`~/.claude/projects`, the Claude desktop app's session list and Local Storage for titles and sidebar groups, `~/.codex/.codex-global-state.json` for Codex projects, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl`, and any extra folders you add). It never changes or deletes them, and sends nothing over the network. Turn an app off to stop this.
 - **Terms of service:** automated access may be limited by the providers' terms. Use a reasonable delay between requests and your own judgment.
 
 ## Requirements

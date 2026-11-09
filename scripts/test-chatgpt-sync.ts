@@ -40,7 +40,7 @@ async function testAutomaticResume() {
 	const timers = new Map<number, { due: number; callback: () => void }>();
 	const h = harness();
 	let persisted = structuredClone(h.settings);
-	persisted.gpt.chatProgress = { inventoryKey: 'account:retry-test', scope: '[true,[],"",[]]', saved: 285, total: 926 };
+	persisted.chatgpt[0]!.web.chatProgress = { inventoryKey: 'account:retry-test', scope: '[true,[],"",[]]', saved: 285, total: 926 };
 	const commands = new Map<string, { checkCallback?: (checking: boolean) => boolean }>();
 	const flush = async (done: () => boolean) => {
 		for (let n = 0; n < 100; n++) {
@@ -98,26 +98,26 @@ async function testAutomaticResume() {
 		let p = await load();
 		await p.syncGpt('auto');
 		assert.equal(calls, 1);
-		assert.equal(persisted.gpt.cooldownUntil, now + 30_000);
-		assert.equal(persisted.gpt.resumeAfter429?.consecutive, 1);
+		assert.equal(persisted.chatgpt[0]!.web.cooldownUntil, now + 30_000);
+		assert.equal(persisted.chatgpt[0]!.web.resumeAfter429?.consecutive, 1);
 		assert.equal(status, 'ChatGPT: 285 of 926 chats saved · retry in 00:30');
 		p.onunload();
 		assert.equal(timers.size, 0);
 		assert.equal(status, '');
 		p = await load();
 		assert.equal(calls, 1);
-		const due = persisted.gpt.cooldownUntil!;
+		const due = persisted.chatgpt[0]!.web.cooldownUntil!;
 		fire(now + 1000);
 		assert.equal(status, 'ChatGPT: 285 of 926 chats saved · retry in 00:29');
 		assert.equal(calls, 1);
 		fire(due);
-		await flush(() => timers.size === 1 && persisted.gpt.resumeAfter429?.consecutive === 2);
+		await flush(() => timers.size === 1 && persisted.chatgpt[0]!.web.resumeAfter429?.consecutive === 2);
 		assert.equal(calls, 2);
-		assert.equal(persisted.gpt.cooldownUntil, due + 60_000);
+		assert.equal(persisted.chatgpt[0]!.web.cooldownUntil, due + 60_000);
 		assert.equal(status, 'ChatGPT: 285 of 926 chats saved · retry in 01:00');
 		outcome = 'success';
-		fire(persisted.gpt.cooldownUntil!);
-		await flush(() => calls === 3 && !persisted.gpt.resumeAfter429 && status === '');
+		fire(persisted.chatgpt[0]!.web.cooldownUntil!);
+		await flush(() => calls === 3 && !persisted.chatgpt[0]!.web.resumeAfter429 && status === '');
 		assert.equal(timers.size, 0);
 		// Idle after a finished sync: the status bar is cleared.
 		assert.equal(status, '');
@@ -126,21 +126,21 @@ async function testAutomaticResume() {
 		await p.syncGpt('auto');
 		assert.equal(timers.size, 1);
 		assert(commands.get('cancel-chatgpt-retry')?.checkCallback?.(false));
-		await flush(() => persisted.gpt.resumeAfter429 === null);
+		await flush(() => persisted.chatgpt[0]!.web.resumeAfter429 === null);
 		assert.equal(timers.size, 0);
-		assert(persisted.gpt.cooldownUntil! > now);
+		assert(persisted.chatgpt[0]!.web.cooldownUntil! > now);
 		p.onunload();
 		p = await load();
 		assert.equal(timers.size, 0);
 
 		// A pre-upgrade cooldown can be adopted, then a login error disarms it.
-		delete persisted.gpt.resumeAfter429;
+		delete persisted.chatgpt[0]!.web.resumeAfter429;
 		p.onunload();
 		p = await load();
 		assert.equal(timers.size, 1);
 		outcome = 'login-error';
-		fire(persisted.gpt.cooldownUntil!);
-		await flush(() => !persisted.gpt.resumeAfter429);
+		fire(persisted.chatgpt[0]!.web.cooldownUntil!);
+		await flush(() => !persisted.chatgpt[0]!.web.resumeAfter429);
 		assert.equal(timers.size, 0);
 
 		// Automatic sync on and idle: the status bar says so, unless an error paused it.
@@ -167,7 +167,8 @@ async function testAutomaticResume() {
 function harness() {
 	const entries = new Map<string, TFile | TFolder>();
 	const contents = new Map<string, ArrayBuffer>();
-	const settings = structuredClone({ ...DEFAULT_SETTINGS, gpt: { ...DEFAULT_GPT, folder: 'Chats', includeArchived: true }, logPath: 'Logs/sync.md' });
+	const settings = structuredClone({ ...DEFAULT_SETTINGS, logPath: 'Logs/sync.md' });
+	settings.chatgpt[0]!.web = { ...DEFAULT_GPT, folder: 'Chats', includeArchived: true };
 	let saved = structuredClone(settings);
 	let crashOnOlder = false;
 	const read = (path: string) => new TextDecoder().decode(contents.get(path));
@@ -198,7 +199,7 @@ function harness() {
 	} as unknown as AIChatBridge;
 	return { settings, entries, contents, plugin, read,
 		interrupt: () => { crashOnOlder = true; },
-		restart: () => { Object.assign(settings.gpt, structuredClone(saved.gpt)); },
+		restart: () => { Object.assign(settings.chatgpt[0]!.web, structuredClone(saved.chatgpt[0]!.web)); },
 	};
 }
 
@@ -252,41 +253,41 @@ async function main() {
 		} as unknown as GptApi;
 	};
 	try {
-		const limitedListing = await runGptSync(h.plugin);
+		const limitedListing = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.match(limitedListing.stopped ?? '', /429/);
 		assert.match(limitedListing.stopped ?? '', /listing archived normal chats \(offset 1\)\. Saved 0 chats/);
 		assert(!limitedListing.stopped?.includes('Fixture'));
 		assert.equal(limitedListing.listingRequests, 4);
 		assert.equal(limitedListing.leftForLater, 1);
 		h.restart();
-		const inventory = h.settings.gpt.inventories!.accounts['account:integration-test']!;
+		const inventory = h.settings.chatgpt[0]!.web.inventories!.accounts['account:integration-test']!;
 		assert.equal(inventory.queue[id]?.id, id);
 		assert(inventory.checkpoints['active-normal']);
 		assert.equal(inventory.checkpoints['archived-normal'], undefined);
 		assert.equal(inventory.checkpoints['archived-tpp'], undefined);
 		const beforeListingCooldown = calls;
-		assert.match((await runGptSync(h.plugin)).stopped ?? '', /cooling down/);
+		assert.match((await runGptSync(h.plugin, h.settings.chatgpt[0]!)).stopped ?? '', /cooling down/);
 		assert.equal(calls, beforeListingCooldown);
-		h.settings.gpt.cooldownUntil = Date.now() - 1;
+		h.settings.chatgpt[0]!.web.cooldownUntil = Date.now() - 1;
 		listingLimit = false;
 
 		olderPageLimit = true;
-		const limitedPage = await runGptSync(h.plugin);
+		const limitedPage = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.match(limitedPage.stopped ?? '', /fetching older conversation page 1 for "Fixture" \(queued chat 1 of 1, ID /);
 		assert(h.read('Logs/sync.md').includes(limitedPage.stopped!));
-		h.settings.gpt.cooldownUntil = Date.now() - 1;
+		h.settings.chatgpt[0]!.web.cooldownUntil = Date.now() - 1;
 		olderPageLimit = false;
 
 		h.interrupt();
-		const interrupted = await runGptSync(h.plugin);
+		const interrupted = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.match(interrupted.stopped ?? '', /simulated interruption/);
 		h.restart();
-		const journal = h.settings.gpt.pendingCaptures![id]!;
+		const journal = h.settings.chatgpt[0]!.web.pendingCaptures![id]!;
 		assert(h.entries.has(journal.json));
 		const initial = h.read(journal.json);
 		const displayed: string[] = [];
-		const limited = await runGptSync(h.plugin, (_msg, _done, _total, stage) => {
-			const count = h.settings.gpt.chatProgress;
+		const limited = await runGptSync(h.plugin, h.settings.chatgpt[0]!, (_msg, _done, _total, stage) => {
+			const count = h.settings.chatgpt[0]!.web.chatProgress;
 			if (stage && count) displayed.push(`${count.saved}/${count.total}: ${stage}`);
 		});
 		assert(displayed.includes('0/1: downloading chat 1'));
@@ -295,40 +296,40 @@ async function main() {
 		assert.match(limited.stopped ?? '', /downloading generated file "demo \(1\)\.pdf" for "Fixture" \(queued chat 1 of 1, ID /);
 		assert.match(limited.stopped ?? '', /Saved 1 chat this run/);
 		assert(h.read('Logs/sync.md').includes(limited.stopped!));
-		assert.equal(h.settings.gpt.index[id]?.json, journal.json);
+		assert.equal(h.settings.chatgpt[0]!.web.index[id]?.json, journal.json);
 		assert.equal(h.read(journal.json), initial);
 		assert(h.entries.has(journal.older![0]!));
 		assert(paths.includes('projects:next'));
 		h.restart();
-		assert.equal(h.settings.gpt.chatProgress?.saved, 1);
+		assert.equal(h.settings.chatgpt[0]!.web.chatProgress?.saved, 1);
 		const beforeCooldown = calls;
-		assert.match((await runGptSync(h.plugin)).stopped ?? '', /cooling down/);
+		assert.match((await runGptSync(h.plugin, h.settings.chatgpt[0]!)).stopped ?? '', /cooling down/);
 		assert.equal(calls, beforeCooldown);
 
-		h.settings.gpt.cooldownUntil = Date.now() - 1;
+		h.settings.chatgpt[0]!.web.cooldownUntil = Date.now() - 1;
 		phase = 'missing';
-		const missing = await runGptSync(h.plugin);
+		const missing = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.equal(missing.pendingAssets, 1);
 		const key = sandboxKey(id, 'message-new', '/mnt/data/demo (1).pdf');
-		assert.equal(h.settings.gpt.assetRetries?.[key]?.attempts, 1);
+		assert.equal(h.settings.chatgpt[0]!.web.assetRetries?.[key]?.attempts, 1);
 		const beforeRetry = sandboxCalls;
-		await runGptSync(h.plugin);
+		await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.equal(sandboxCalls, beforeRetry);
-		h.settings.gpt.assetRetries![key]!.nextAttempt = Date.now() - 1;
+		h.settings.chatgpt[0]!.web.assetRetries![key]!.nextAttempt = Date.now() - 1;
 		phase = 'ok';
-		const recovered = await runGptSync(h.plugin);
+		const recovered = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.equal(recovered.filesSaved, 1);
 		assert.equal(recovered.refreshedViews, 1);
-		const index = h.settings.gpt.index[id]!;
+		const index = h.settings.chatgpt[0]!.web.index[id]!;
 		assert(h.read(index.view!).includes('demo (1).pdf|PDF]]'));
 		assert(h.read(index.view!).includes('https://example.org/reference'));
 		assert(h.read(index.md).includes('generated file not downloaded'));
-		assert.equal((await runGptSync(h.plugin)).refreshedViews, 0);
-		assert.equal(h.settings.gpt.assetRetries?.[key], undefined);
+		assert.equal((await runGptSync(h.plugin, h.settings.chatgpt[0]!)).refreshedViews, 0);
+		assert.equal(h.settings.chatgpt[0]!.web.assetRetries?.[key], undefined);
 
 		fixtureVisible = false;
 		const beforeReconciliation = paths.filter((path) => path === 'chat').length;
-		const reconciled = await runGptSync(h.plugin, undefined, true);
+		const reconciled = await runGptSync(h.plugin, h.settings.chatgpt[0]!, undefined, true);
 		assert.equal(reconciled.fullLists, 4);
 		assert.equal(paths.filter((path) => path === 'chat').length, beforeReconciliation);
 		assert.equal(h.read(journal.json), initial);
@@ -337,11 +338,11 @@ async function main() {
 		h.entries.delete(journal.older![0]!);
 		h.contents.delete(journal.older![0]!);
 		olderPayload = { ...older, messages: [message('different-old', 'Changed remote text')] };
-		const repaired = await runGptSync(h.plugin);
+		const repaired = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.equal(repaired.restored.length, 1);
-		assert.notEqual(h.settings.gpt.index[id]?.json, journal.json);
+		assert.notEqual(h.settings.chatgpt[0]!.web.index[id]?.json, journal.json);
 		assert.equal(h.read(journal.json), initial);
-		assert(h.read(h.settings.gpt.index[id]!.older![0]!).includes('Changed remote text'));
+		assert(h.read(h.settings.chatgpt[0]!.web.index[id]!.older![0]!).includes('Changed remote text'));
 		console.log('ChatGPT sync integration passed: listing and download 429 recovery, archive scope, project cursors, interrupted capture, file retry, citations, refreshed transcript, and repair outside the listing window.');
 	} finally {
 		GptApi.connect = connect;

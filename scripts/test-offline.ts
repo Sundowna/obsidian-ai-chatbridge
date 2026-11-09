@@ -9,6 +9,13 @@ import { activeBranch, renderTranscript } from '../src/transcript';
 import { chatFiles, mergeFiles, numbered, safeFileName, visibleFiles } from '../src/files';
 import { decodeMessage, encodeStrings } from '../src/proto';
 import { followRename } from '../src/follow';
+import type { IndexEntry } from '../src/types';
+
+/** Settings with one account holding this index, for the rename tests. */
+const oneAccount = (web: object, provider: 'claude' | 'chatgpt') => ({
+	claude: provider === 'claude' ? [{ web, desktop: { index: {} } }] : [],
+	chatgpt: provider === 'chatgpt' ? [{ web, desktop: { index: {} } }] : [],
+} as unknown as Parameters<typeof followRename>[0]);
 import { checkGptChat, checkGptFileInfo, checkGptList, checkGptOlderPage, checkGptSidebar } from '../src/chatgpt/schema';
 import { joinParts, olderPartPath } from '../src/chatgpt/parts';
 import { toListItems } from '../src/chatgpt/select';
@@ -121,15 +128,16 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 
 // --- following renames/moves ---------------------------------------------------
 {
-	const s = {
-		index: { a: { updated_at: '', synced: '', json: 'C/Recent/x.json', md: 'C/Recent/x.md' } },
-		fileIndex: { f1: 'C/Recent/Artifacts/x/a.zip', f2: 'skipped: not found (404)', f3: 'C/Recentish/y.png' },
-	} as unknown as Parameters<typeof followRename>[0];
-	expect('rename file: one path updated', followRename(s, 'C/Recent/x.md', 'C/Recent/x2.md') === 1 && s.index.a!.md === 'C/Recent/x2.md');
+	const web = {
+		index: { a: { updated_at: '', synced: '', json: 'C/Recent/x.json', md: 'C/Recent/x.md' } as IndexEntry },
+		fileIndex: { f1: 'C/Recent/Artifacts/x/a.zip', f2: 'skipped: not found (404)', f3: 'C/Recentish/y.png' } as Record<string, string>,
+	};
+	const s = oneAccount(web, 'claude');
+	expect('rename file: one path updated', followRename(s, 'C/Recent/x.md', 'C/Recent/x2.md') === 1 && web.index.a!.md === 'C/Recent/x2.md');
 	const n = followRename(s, 'C/Recent', 'C/Old chats');
-	expect('rename folder: everything under it follows', n === 3 && s.index.a!.json === 'C/Old chats/x.json' && s.fileIndex.f1 === 'C/Old chats/Artifacts/x/a.zip', String(n));
-	expect('rename folder: similar-named folder untouched', s.fileIndex.f3 === 'C/Recentish/y.png');
-	expect('rename: skipped marks untouched', s.fileIndex.f2 === 'skipped: not found (404)');
+	expect('rename folder: everything under it follows', n === 3 && web.index.a!.json === 'C/Old chats/x.json' && web.fileIndex.f1 === 'C/Old chats/Artifacts/x/a.zip', String(n));
+	expect('rename folder: similar-named folder untouched', web.fileIndex.f3 === 'C/Recentish/y.png');
+	expect('rename: skipped marks untouched', web.fileIndex.f2 === 'skipped: not found (404)');
 }
 
 // --- protobuf helpers --------------------------------------------------------
@@ -240,12 +248,14 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 		const smd = renderGptTranscript(scheduled, { jsonFileName: 'x.json' });
 		expect('gpt scheduled task: each run gets its own heading', (smd.match(/^## ChatGPT · /gm) ?? []).length === 3);
 		expect('gpt normal chat: still 4 turns', (renderGptTranscript(chat, { jsonFileName: 'x.json' }).match(/^## (You|ChatGPT) · /gm) ?? []).length === 4);
-		const s3 = { index: {}, fileIndex: {}, gpt: { index: { c: { updated_at: '', synced: '', json: 'G/R/c.json', md: 'G/R/c.md', older: ['G/R/c (older 1).json'] } }, fileIndex: {} } } as unknown as Parameters<typeof followRename>[0];
-		expect('rename: older parts follow too', followRename(s3, 'G/R', 'G/Q') === 3 && s3.gpt.index.c!.older![0] === 'G/Q/c (older 1).json');
+		const gpt3 = { index: { c: { updated_at: '', synced: '', json: 'G/R/c.json', md: 'G/R/c.md', older: ['G/R/c (older 1).json'] } as IndexEntry }, fileIndex: {} };
+		const s3 = oneAccount(gpt3, 'chatgpt');
+		expect('rename: older parts follow too', followRename(s3, 'G/R', 'G/Q') === 3 && gpt3.index.c!.older![0] === 'G/Q/c (older 1).json');
 	}
 
-	const s2 = { index: {}, fileIndex: {}, gpt: { index: { c: { updated_at: '', synced: '', json: 'G/Recent/c.json', md: 'G/Recent/c.md' } }, fileIndex: { f: 'G/Recent/Artifacts/c/a.png' } } } as unknown as Parameters<typeof followRename>[0];
-	expect('rename: ChatGPT index follows too', followRename(s2, 'G/Recent', 'G/Old') === 3 && s2.gpt.fileIndex.f === 'G/Old/Artifacts/c/a.png');
+	const gpt2 = { index: { c: { updated_at: '', synced: '', json: 'G/Recent/c.json', md: 'G/Recent/c.md' } as IndexEntry }, fileIndex: { f: 'G/Recent/Artifacts/c/a.png' } as Record<string, string> };
+	const s2 = oneAccount(gpt2, 'chatgpt');
+	expect('rename: ChatGPT index follows too', followRename(s2, 'G/Recent', 'G/Old') === 3 && gpt2.fileIndex.f === 'G/Old/Artifacts/c/a.png');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll passed');

@@ -5,13 +5,16 @@
 //   <root>/ChatGPT Desktop/Chat  ChatGPT chats     (Recent/, <project>/)
 //   <root>/ChatGPT Desktop/Codex Codex threads     (Recent/, <project>/)
 //
+// Only the first account of each provider: accounts added later start out in their own
+// "Claude Desktop (<name>)" folders.
+//
 // moveToAppLayout moves already-synced folders there with Obsidian's own rename, so links
 // and the plugin's indexes follow (see follow.ts). Nothing is deleted except source
 // folders left empty by the move.
 
 import { normalizePath, TFile, TFolder, type App, type TAbstractFile } from 'obsidian';
 import { followRename } from '../follow';
-import type { Settings } from '../settings';
+import { DEFAULT_ACCOUNT_ID, type Settings } from '../settings';
 
 export const CLAUDE_APP = 'Claude Desktop';
 export const CHATGPT_APP = 'ChatGPT Desktop';
@@ -22,7 +25,9 @@ const join = (root: string, rest: string) => (root ? `${root}/${rest}` : rest);
 /** The folder holding the app folders: next to the Claude Chat folder (or above it, if already in the layout). */
 export function layoutRoot(chatFolder: string): string {
 	const parent = parentOf(chatFolder);
-	return parent.split('/').pop() === CLAUDE_APP ? parentOf(parent) : parent;
+	// "Claude Desktop (Work)" is an added account's app folder.
+	const last = parent.split('/').pop() ?? '';
+	return last === CLAUDE_APP || last.startsWith(`${CLAUDE_APP} (`) ? parentOf(parent) : parent;
 }
 
 export interface LayoutMove {
@@ -38,13 +43,20 @@ export interface LayoutMove {
  * (changed by hand) with the synced chats still sitting in the old one.
  */
 export function layoutMoves(s: Settings, exists: (path: string) => boolean = () => false): LayoutMove[] {
-	const root = layoutRoot(s.chatFolder);
+	// Only the original account can sit in the old flat folders; it may have been removed.
+	const claude = s.claude.find((a) => a.id === DEFAULT_ACCOUNT_ID);
+	const chatgpt = s.chatgpt.find((a) => a.id === DEFAULT_ACCOUNT_ID);
+	const root = layoutRoot(s.claude[0]!.web.chatFolder);
 	const targets: { label: string; setting: string; legacy: string[]; to: string; set: LayoutMove['set'] }[] = [
-		{ label: 'claude.ai chats', setting: s.chatFolder, legacy: ['Claude Chat', 'Claude'], to: `${CLAUDE_APP}/Chat`, set: (x, p) => (x.chatFolder = p) },
-		{ label: 'Claude Code chats listed on claude.ai', setting: s.codeFolder, legacy: ['Claude Code'], to: `${CLAUDE_APP}/Code`, set: (x, p) => (x.codeFolder = p) },
-		{ label: 'Claude desktop Code sessions', setting: s.desktop.claude.folder, legacy: [], to: `${CLAUDE_APP}/Code`, set: (x, p) => (x.desktop.claude.folder = p) },
-		{ label: 'ChatGPT chats', setting: s.gpt.folder, legacy: ['ChatGPT Chat', 'ChatGPT'], to: `${CHATGPT_APP}/Chat`, set: (x, p) => (x.gpt.folder = p) },
-		{ label: 'Codex threads', setting: s.desktop.codex.folder, legacy: ['Codex'], to: `${CHATGPT_APP}/Codex`, set: (x, p) => (x.desktop.codex.folder = p) },
+		...(claude ? [
+		{ label: 'claude.ai chats', setting: claude.web.chatFolder, legacy: ['Claude Chat', 'Claude'], to: `${CLAUDE_APP}/Chat`, set: (_s: Settings, p: string) => (claude.web.chatFolder = p) },
+		{ label: 'Claude Code chats listed on claude.ai', setting: claude.web.codeFolder, legacy: ['Claude Code'], to: `${CLAUDE_APP}/Code`, set: (_s: Settings, p: string) => (claude.web.codeFolder = p) },
+		{ label: 'Claude desktop Code sessions', setting: claude.desktop.folder, legacy: [], to: `${CLAUDE_APP}/Code`, set: (_s: Settings, p: string) => (claude.desktop.folder = p) },
+		] : []),
+		...(chatgpt ? [
+		{ label: 'ChatGPT chats', setting: chatgpt.web.folder, legacy: ['ChatGPT Chat', 'ChatGPT'], to: `${CHATGPT_APP}/Chat`, set: (_s: Settings, p: string) => (chatgpt.web.folder = p) },
+		{ label: 'Codex threads', setting: chatgpt.desktop.folder, legacy: ['Codex'], to: `${CHATGPT_APP}/Codex`, set: (_s: Settings, p: string) => (chatgpt.desktop.folder = p) },
+		] : []),
 	];
 	const out: LayoutMove[] = [];
 	const seen = new Set<string>();

@@ -42,6 +42,25 @@ export function defaultRoots(fs: DesktopFs, app: DesktopApp): string[] {
 	return [join(home, 'sessions'), join(home, 'archived_sessions')];
 }
 
+/** Whether a file path is this folder or inside it (slashes and case don't matter). */
+export function sameOrUnder(path: string, folder: string): boolean {
+	const norm = (p: string) => p.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+	const f = norm(folder);
+	return !!f && (norm(path) === f || norm(path).startsWith(`${f}/`));
+}
+
+/**
+ * Every Codex home in use: the default one, plus the parent of any extra folder that is a
+ * home's "sessions" folder (where a second login's CODEX_HOME keeps its titles and projects).
+ */
+export function codexHomes(fs: DesktopFs, extraFolders: string[]): string[] {
+	const homes = extraFolders.flatMap((f) => {
+		const m = /^(.*)\/(?:archived_)?sessions\/*$/i.exec(f.trim().replace(/\\/g, '/'));
+		return m?.[1] ? [m[1]] : [];
+	});
+	return [...new Set([codexHome(fs), ...homes])];
+}
+
 async function walk(fs: DesktopFs, dir: string, depth: number, out: string[]): Promise<void> {
 	if (depth > MAX_DEPTH) return;
 	for (const e of await fs.readDir(dir)) {
