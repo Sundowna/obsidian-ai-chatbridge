@@ -4,9 +4,10 @@
 
 import { CHATGPT_APP, CLAUDE_APP, layoutRoot } from './desktop/layout';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
+import { onlySelected } from './project-catalog';
 import {
-	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GPT, DEFAULT_SETTINGS, desktopApp,
-	type ChatgptAccount, type ClaudeAccount, type ClaudeWebSettings, type GptSettings, type Settings,
+	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GPT, DEFAULT_LUMO, DEFAULT_SETTINGS, desktopApp,
+	type ChatgptAccount, type ClaudeAccount, type ClaudeWebSettings, type GptSettings, type LumoAccount, type Settings,
 } from './settings';
 
 /** The desktop settings as they were saved before multiple accounts. */
@@ -108,6 +109,23 @@ const hydrateGpt = (a: Partial<ChatgptAccount>): ChatgptAccount => {
 	};
 };
 
+const hydrateLumo = (a: Partial<LumoAccount>): LumoAccount => {
+	const projects = [...(a.web?.projects ?? [])];
+	// Earlier builds saved every project name; only selected ones may stay in data.json.
+	const projectCatalog = onlySelected(a.web?.projectCatalog, projects, a.web?.recentFolderName || DEFAULT_LUMO.recentFolderName);
+	return {
+		id: a.id ?? DEFAULT_ACCOUNT_ID,
+		label: a.label ?? DEFAULT_ACCOUNT_LABEL,
+		web: { ...DEFAULT_LUMO, ...a.web, projects, projectCatalog, index: { ...(a.web?.index ?? {}) } },
+	};
+};
+
+/** A vault that never had Lumo gets it next to its other chat folders. */
+function firstLumo(claudeChatFolder: string): LumoAccount[] {
+	const root = layoutRoot(claudeChatFolder);
+	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_LUMO, folder: root ? `${root}/Lumo/Chat` : 'Lumo/Chat' } }];
+}
+
 /** `migrated` = flat settings were converted (the caller keeps a copy of the old file). */
 export function normalizeSettings(loaded: unknown): { settings: Settings; migrated: boolean } {
 	const raw = (loaded ?? {}) as Saved & Legacy;
@@ -115,6 +133,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 	const saved: Saved = flat ? fromLegacy(raw) : raw;
 	const claude = saved.claude?.length ? saved.claude : DEFAULT_SETTINGS.claude;
 	const chatgpt = saved.chatgpt?.length ? saved.chatgpt : DEFAULT_SETTINGS.chatgpt;
+	const hydratedClaude = claude.map(hydrateClaude);
 	return {
 		migrated: flat && loaded !== null && loaded !== undefined,
 		settings: {
@@ -122,8 +141,9 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			delaySeconds: saved.delaySeconds ?? DEFAULT_SETTINGS.delaySeconds,
 			intervalMinutes: saved.intervalMinutes ?? DEFAULT_SETTINGS.intervalMinutes,
 			logPath: saved.logPath ?? DEFAULT_SETTINGS.logPath,
-			claude: claude.map(hydrateClaude),
+			claude: hydratedClaude,
 			chatgpt: chatgpt.map(hydrateGpt),
+			lumo: saved.lumo?.length ? saved.lumo.map(hydrateLumo) : firstLumo(hydratedClaude[0]!.web.chatFolder),
 			desktop: { ...DEFAULT_DESKTOP, ...saved.desktop },
 		},
 	};

@@ -186,6 +186,14 @@ const vault = {
 };
 const settings: Settings = normalizeSettings({ maxChatsPerRun: 0, chatFolder: '30 Sources/AI Chats/Claude Chat', logPath: 'log.md' }).settings;
 expect('settings: app layout next to Claude Chat', settings.claude[0]!.desktop.folder === '30 Sources/AI Chats/Claude Desktop/Code' && settings.chatgpt[0]!.desktop.folder === '30 Sources/AI Chats/ChatGPT Desktop/Codex');
+{
+	const catalog = { fetchedAt: 't', rows: [{ id: 'a', name: 'Ticked' }, { id: 'b', name: 'Private' }] };
+	const lumoWeb = (projects: string[]) => normalizeSettings({ claude: [{}], chatgpt: [{}], lumo: [{ web: { projects, projectCatalog: catalog } }] }).settings.lumo[0]!.web;
+	expect('settings: unticked Lumo names are dropped on load', lumoWeb(['a']).projectCatalog?.rows.map((r) => r.name).join() === 'Ticked');
+	expect('settings: no Lumo names kept when nothing is ticked', lumoWeb([]).projectCatalog === undefined);
+	const chatgpt = normalizeSettings({ claude: [{}], chatgpt: [{ web: { projects: [], projectCatalog: catalog } }] }).settings.chatgpt[0]!.web;
+	expect('settings: other providers keep their list', chatgpt.projectCatalog?.rows.length === 2);
+}
 expect('settings: saved values win', mergeDesktop({ claude: { enabled: false, folder: 'X', extraFolders: [], index: {} } } as never, 'A/B').claude.folder === 'X');
 const from016 = mergeDesktop({ claude: { enabled: true, folder: 'S/Claude Desktop', extraFolders: [], index: {} }, codex: { enabled: true, folder: 'S/Codex', extraFolders: [], index: {} } } as never, 'S/Claude Chat');
 expect('settings: unused 0.16.0 folders move to the app layout', from016.claude.folder === 'S/Claude Desktop/Code' && from016.codex.folder === 'S/ChatGPT Desktop/Codex');

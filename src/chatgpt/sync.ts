@@ -7,7 +7,7 @@ import { loginRef, withAccount } from '../accounts';
 import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
 import { ShapeError } from '../schema';
-import { DEFAULT_RECENT, filterByProjects, projectFolderNames, projectSubfolder } from '../select';
+import { DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames, projectSubfolder } from '../select';
 import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
 import { createNew, ensureFolder, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
@@ -56,9 +56,34 @@ export interface GptSyncResult {
 	incrementalLists: number;
 	resumeAt?: number;
 	stopped?: string;
+	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
+	nothingSelected?: boolean;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+
+/** Every project in the sidebar. `cut` = it would not stop listing, so some may be missing. */
+export async function listAllGptProjects(a: GptApi, wait: () => Promise<unknown>, onPage: (page: number) => void): Promise<{ projects: GptProject[]; cut: boolean }> {
+	const projects = new Map<string, GptProject>();
+	const cursors = new Set<string>();
+	let cursor: string | undefined;
+	let cut = false;
+	let page = 0;
+	do {
+		await wait();
+		onPage(++page);
+		const sidebar = checkGptSidebar((await a.get(a.projectPagePath(cursor))).json);
+		for (const project of sidebar.projects) projects.set(project.id, project);
+		cursor = sidebar.cursor;
+		if (!cursor) break;
+		if (cursors.has(cursor) || cursors.size >= MAX_PAGES) {
+			cut = true;
+			break;
+		}
+		cursors.add(cursor);
+	} while (cursor);
+	return { projects: [...projects.values()], cut };
+}
 
 function equalBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
 	if (a.byteLength !== b.byteLength) return false;
@@ -75,7 +100,15 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
 	const result: GptSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, tooLong: [], projectsCut: false, pendingAssets: 0, refreshedViews: 0, listingRequests: 0, projectRequests: 0, fullLists: 0, incrementalLists: 0 };
-	const scan: ScanStats = { requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set() };
+	if (nothingSelected(g)) {
+		// A waiting retry would otherwise come back here every second.
+		if (g.resumeAfter429) {
+			delete g.resumeAfter429;
+			await plugin.saveSettings();
+		}
+		return { ...result, nothingSelected: true };
+	}
+	const scan: ScanStats ={ requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set() };
 	let queuedCount = () => 0;
 	let fullStillRequested = forceFull || g.resumeAfter429?.forceFull === true;
 	const cooldownUntil = g.cooldownUntil ?? 0;
@@ -194,24 +227,11 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		}
 
 		// Refresh labels before applying name-based project filters.
-		const projects = new Map<string, GptProject>();
-		const projectCursors = new Set<string>();
-		let cursor: string | undefined;
-		do {
-			await sleep(delayMs);
-			result.projectRequests++;
-			requestStage = `listing projects (page ${result.projectRequests})`;
-			const sidebar = checkGptSidebar((await a.get(a.projectPagePath(cursor))).json);
-			for (const project of sidebar.projects) projects.set(project.id, project);
-			cursor = sidebar.cursor;
-			if (!cursor) break;
-			if (projectCursors.has(cursor) || projectCursors.size >= MAX_PAGES) {
-				result.projectsCut = true;
-				break;
-			}
-			projectCursors.add(cursor);
-		} while (cursor);
-		const projectList = [...projects.values()];
+		const { projects: projectList, cut } = await listAllGptProjects(a, () => sleep(delayMs), (page) => {
+			result.projectRequests = page;
+			requestStage = `listing projects (page ${page})`;
+		});
+		result.projectsCut = cut;
 		const recent = g.recentFolderName || DEFAULT_RECENT;
 		const filters = g.onlyProjects ? [...new Set(g.projects.map((name) => name.trim().toLowerCase()).filter(Boolean))].sort() : [];
 		const scope = JSON.stringify([

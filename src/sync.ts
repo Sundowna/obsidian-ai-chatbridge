@@ -5,7 +5,7 @@ import { withAccount } from './accounts';
 import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
-import { DEFAULT_RECENT, dedupe, filterByProjects, pickTodo, projectFolderNames, projectSubfolder, targetFor } from './select';
+import { DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, projectSubfolder, targetFor } from './select';
 import { baseName, dailyNoteName, localStamp } from './naming';
 import { renderTranscript } from './transcript';
 import type { Chat } from './types';
@@ -41,9 +41,28 @@ export interface SyncResult {
 	/** Chats whose deleted .json/.md were written again. */
 	restored: string[];
 	stopped?: string;
+	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
+	nothingSelected?: boolean;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+
+/** The whole chat list, 30 at a time. */
+export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn): Promise<ListItem[]> {
+	const items: ListItem[] = [];
+	let offset = 0;
+	for (let page = 0; ; page++) {
+		if (page >= MAX_PAGES) throw new StopError('Chat list did not end after 200 pages – stopped.');
+		if (page > 0) await sleep(delayMs);
+		const { json } = await api.get(api.listPath(offset));
+		const p = checkListPage(json);
+		items.push(...p.data);
+		progress(`reading chat list… ${items.length} chats`);
+		if (!p.has_more || p.data.length === 0) break;
+		offset += p.data.length;
+	}
+	return dedupe(items);
+}
 
 function equalBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
 	if (a.byteLength !== b.byteLength) return false;
@@ -104,6 +123,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, plugin.settings.delaySeconds) * 1000;
 	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], restored: [] };
+	if (nothingSelected(s)) return { ...result, nothingSelected: true };
 	const auth = await claudeAuth(plugin, account);
 	const getKey = auth.getKey;
 
@@ -201,19 +221,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const api = new ClaudeApi(auth.orgId, getKey);
 
 		// 1. Read the whole chat list, 30 at a time.
-		let items: ListItem[] = [];
-		let offset = 0;
-		for (let page = 0; ; page++) {
-			if (page >= MAX_PAGES) throw new StopError('Chat list did not end after 200 pages – stopped.');
-			if (page > 0) await sleep(delayMs);
-			const { json } = await api.get(api.listPath(offset));
-			const p = checkListPage(json);
-			items.push(...p.data);
-			progress(`reading chat list… ${items.length} chats`);
-			if (!p.has_more || p.data.length === 0) break;
-			offset += p.data.length;
-		}
-		items = dedupe(items);
+		const items = await listAllChats(api, delayMs, progress);
 		result.listed = items.length;
 
 		// 2. Project filter (uses the project info in the list – no extra requests).

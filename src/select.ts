@@ -6,14 +6,22 @@ import { safeTitle } from './naming';
 /** Default folder name for chats without a project (claude.ai lists them under Recents). */
 export const DEFAULT_RECENT = 'Recent';
 
+/** The picker's saved entry for chats without a project; survives renaming the Recent folder. */
+export const NO_PROJECT = ':no-project';
+
+/** "Only selected projects" is on and nothing is selected, so there is nothing to sync. */
+export function nothingSelected(o: { onlyProjects: boolean; projects: string[] }): boolean {
+	return o.onlyProjects && !o.projects.some((p) => p.trim());
+}
+
 /**
  * Keep only chats whose project name or project uuid is in `projects`.
- * Listing the Recent folder name (e.g. "Recent") keeps chats without a project.
+ * Listing the Recent folder name (e.g. "Recent") or NO_PROJECT keeps chats without a project.
  */
 export function filterByProjects(items: ListItem[], projects: string[], recentName = DEFAULT_RECENT): ListItem[] {
 	const wanted = new Set(projects.map((p) => p.trim().toLowerCase()).filter(Boolean));
 	if (wanted.size === 0) return items;
-	const wantRecent = wanted.has(recentName.trim().toLowerCase());
+	const wantRecent = wanted.has(recentName.trim().toLowerCase()) || wanted.has(NO_PROJECT);
 	return items.filter((it) => {
 		const p = it.project;
 		if (!p) return wantRecent;

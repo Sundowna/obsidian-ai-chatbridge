@@ -5,8 +5,8 @@ import { loginRef, SITE_LABEL, withAccount, accountsOf, type AnyAccount } from '
 import { DEFAULT_OVERLAP_MINUTES } from '../chatgpt/inventory';
 import { isLoggedIn, logout, openLogin, type Provider } from '../login';
 import { isUuid } from '../schema';
-import type { ChatgptAccount, ClaudeAccount } from '../settings';
-import { advanced, contentOptions, count, filingOptions, folderSetting, type PanelContext } from './fields';
+import type { ChatgptAccount, ClaudeAccount, LumoAccount } from '../settings';
+import { advanced, contentOptions, count, filingOptions, folderSetting, projectFilterOptions, type PanelContext } from './fields';
 
 /** Login state with only the buttons that make sense for it. */
 function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string): void {
@@ -65,7 +65,7 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 	filingOptions(ctx, el, 'claude.ai', s);
 
 	new Setting(el).setName('Content').setHeading();
-	contentOptions(ctx, el, 'claude.ai', s);
+	contentOptions(ctx, el, 'claude', account, s);
 
 	const more = advanced(ctx, el, `claude-web-${account.id}`);
 	new Setting(more)
@@ -90,6 +90,22 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 		);
 }
 
+export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAccount): void {
+	const g = account.web;
+	loginRow(ctx, el, 'lumo', account, () => `${count(Object.keys(g.index).length, 'chat')} saved.`);
+
+	new Setting(el)
+		.setName('Encryption')
+		.setDesc('Lumo stores chats end-to-end encrypted. To sync, the plugin unlocks your keys from the login window for that one sync, in memory only, and saves readable copies in this vault. Anything that can read your vault can read them. Files attached to chats are not saved.');
+
+	new Setting(el).setName('Folders').setHeading();
+	folderSetting(ctx, el, 'Chat folder', 'Where Lumo chats are saved.', () => g.folder, (p) => (g.folder = p));
+	filingOptions(ctx, el, 'Lumo', g);
+
+	new Setting(el).setName('Content').setHeading();
+	projectFilterOptions(ctx, el, 'lumo', account, g);
+}
+
 export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: ChatgptAccount): void {
 	const g = account.web;
 	const save = () => ctx.plugin.saveSettings();
@@ -103,7 +119,7 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 	filingOptions(ctx, el, 'ChatGPT', g);
 
 	new Setting(el).setName('Content').setHeading();
-	contentOptions(ctx, el, 'ChatGPT', g);
+	contentOptions(ctx, el, 'chatgpt', account, g);
 	new Setting(el)
 		.setName('Include archived chats')
 		.setDesc('Also check archived conversations during sync.')

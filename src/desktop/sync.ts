@@ -17,7 +17,7 @@ import { renderDesktopTranscript, sessionFolderName } from './render';
 import { claudeDesktopMetaFiles, claudeLocalStorageFiles, codexHomes, listSessionFiles, nodeDesktopFs, sameOrUnder, type DesktopFs, type SourceFile } from './scan';
 import { claudeGroups, claudePlacement, codexProjectFor, parseClaudeMeta, parseCodexState, type ClaudeDesktopMeta, type CodexProjects } from './sections';
 import { APP_LABEL, type DesktopApp, type DesktopIndexEntry, type DesktopSession } from './types';
-import type { AnyAccount } from '../accounts';
+import type { DesktopAccount } from '../accounts';
 import type { Provider } from '../login';
 import type { ChatgptAccount, ClaudeAccount, Settings } from '../settings';
 
@@ -50,9 +50,9 @@ interface ClaudeApp {
 	groups: Map<string, string>;
 }
 
-const PROVIDER: Record<DesktopApp, Provider> = { claude: 'claude', codex: 'chatgpt' };
-const accountsFor = (s: Settings, app: DesktopApp): AnyAccount[] => s[PROVIDER[app]];
-const ownerIdOf = (app: DesktopApp, a: AnyAccount): string | undefined =>
+const PROVIDER: Record<DesktopApp, Exclude<Provider, 'lumo'>> = { claude: 'claude', codex: 'chatgpt' };
+const accountsFor = (s: Settings, app: DesktopApp): DesktopAccount[] => s[PROVIDER[app]];
+const ownerIdOf = (app: DesktopApp, a: DesktopAccount): string | undefined =>
 	app === 'claude' ? (a as ClaudeAccount).web.orgId : (a as ChatgptAccount).web.workspaceId;
 
 export function anyDesktopEnabled(plugin: AIChatBridge): boolean {
@@ -68,12 +68,12 @@ export function anyDesktopEnabled(plugin: AIChatBridge): boolean {
  * Null = wait: the session is clearly not the first account's, and an added account has not
  * logged in yet. Saving it now would file it under the wrong account for good.
  */
-export function desktopOwner(accounts: AnyAccount[], app: DesktopApp, path: string, ownerId: string | undefined): AnyAccount | null {
+export function desktopOwner(accounts: DesktopAccount[], app: DesktopApp, path: string, ownerId: string | undefined): DesktopAccount | null {
 	const byFolder = accounts.find((a) => a.desktop.extraFolders.some((f) => sameOrUnder(path, f)));
 	if (byFolder) return byFolder;
 	const byLogin = ownerId ? accounts.find((a) => ownerIdOf(app, a) === ownerId) : undefined;
 	if (byLogin) return byLogin;
-	const [first, ...rest] = accounts as [AnyAccount, ...AnyAccount[]];
+	const [first, ...rest] = accounts as [DesktopAccount, ...DesktopAccount[]];
 	const unidentified = rest.some((a) => !ownerIdOf(app, a) && !a.desktop.extraFolders.length);
 	return ownerId && ownerIdOf(app, first) && unidentified ? null : first;
 }
@@ -89,7 +89,7 @@ interface Todo {
 	session: DesktopSession;
 	text: string;
 	isUpdate: boolean;
-	owner: AnyAccount;
+	owner: DesktopAccount;
 }
 
 export async function runDesktopSync(
@@ -171,7 +171,7 @@ export async function runDesktopSync(
 
 		for (const which of APPS) {
 			const accounts = accountsFor(s, which);
-			const wanted = (a: AnyAccount) => a.desktop.enabled && (!only || (only.provider === PROVIDER[which] && only.id === a.id));
+			const wanted = (a: DesktopAccount) => a.desktop.enabled && (!only || (only.provider === PROVIDER[which] && only.id === a.id));
 			if (!accounts.some(wanted)) continue;
 			for (const a of accounts.filter(wanted)) {
 				if (!cleanFolder(a.desktop.folder)) throw new Error(`The ${APP_LABEL[which]} folder setting of "${a.label}" is empty or invalid.`);

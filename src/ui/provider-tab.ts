@@ -1,15 +1,15 @@
 // A provider's tab: pick an account, then its Web or Desktop side.
 
 import { Notice, setIcon } from 'obsidian';
-import { accountsOf, addAccount, loginRef, nameProblem, PROVIDER_LABEL, removeAccount, SITE_LABEL, type AnyAccount } from '../accounts';
+import { accountsOf, addAccount, loginRef, nameProblem, PROVIDER_LABEL, removeAccount, SITE_LABEL, type AnyAccount, type DesktopAccount } from '../accounts';
 import { isLoggedIn, logout, type Provider } from '../login';
 import type { Surface } from '../main';
-import type { ChatgptAccount, ClaudeAccount } from '../settings';
+import type { ChatgptAccount, ClaudeAccount, LumoAccount } from '../settings';
 import { desktopPanel } from './desktop-panel';
 import type { PanelContext } from './fields';
 import { providerIcon } from './icons';
 import { ConfirmModal, NameModal } from './modals';
-import { chatgptWebPanel, claudeWebPanel } from './web-panel';
+import { chatgptWebPanel, claudeWebPanel, lumoWebPanel } from './web-panel';
 
 export interface ProviderState {
 	accountId: string;
@@ -98,6 +98,12 @@ export function providerTab(ctx: PanelContext, el: HTMLElement, provider: Provid
 
 	accountHeader(ctx, el, provider, account, list);
 
+	// Lumo is a website only, so there is no Web / Desktop choice.
+	if (provider === 'lumo') {
+		lumoWebPanel(ctx, el, account as LumoAccount);
+		return;
+	}
+
 	const surfaces: [Surface, string, string][] = [['web', 'globe', 'Web'], ['desktop', 'monitor', 'Desktop app']];
 	const seg = el.createDiv({ cls: 'ccs-segmented', attr: { role: 'tablist', 'aria-label': 'Surface' } });
 	for (const [id, icon, text] of surfaces) {
@@ -111,7 +117,7 @@ export function providerTab(ctx: PanelContext, el: HTMLElement, provider: Provid
 		});
 	}
 
-	if (state.surface === 'desktop') desktopPanel(ctx, el, provider, account, list);
+	if (state.surface === 'desktop') desktopPanel(ctx, el, provider, account as DesktopAccount, list as DesktopAccount[]);
 	else if (provider === 'claude') claudeWebPanel(ctx, el, account as ClaudeAccount);
 	else chatgptWebPanel(ctx, el, account as ChatgptAccount);
 }
