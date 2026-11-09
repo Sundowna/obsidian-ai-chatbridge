@@ -19,7 +19,7 @@ Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many reques
 
 ## Features
 
-- Log in to claude.ai and ChatGPT in a window inside Obsidian, the same way you do in a browser.
+- Log in to Proton Lumo, claude.ai and ChatGPT in a window inside Obsidian, the same way you do in a browser.
 - **Several accounts per provider**, each with its own login, folders and sync history, on both the web and the desktop app. See [Multiple accounts](#multiple-accounts).
 - Copy chats into the vault as raw JSON plus a Markdown transcript with a link back to the original chat.
 - Optionally download files the AI created (to `Artifacts/`) and files you uploaded (to `Attachments/`) next to each chat.
