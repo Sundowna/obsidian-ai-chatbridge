@@ -1,16 +1,26 @@
 import { Notice, Plugin } from 'obsidian';
-import { AIChatBridgeSettingTab, DEFAULT_DESKTOP, DEFAULT_GPT, DEFAULT_SETTINGS, MIN_INTERVAL_MINUTES, Settings } from './settings';
-import { anyDesktopEnabled, runDesktopSync } from './desktop/sync';
-import type { DesktopAppSettings } from './desktop/types';
-import { CHATGPT_APP, CLAUDE_APP, folderExists, layoutMoves, layoutRoot, moveToAppLayout } from './desktop/layout';
+import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type Settings } from './settings';
+import { accountsOf, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
+import { normalizeSettings } from './migrate';
+import { AIChatBridgeSettingTab } from './ui/settings-tab';
+import { anyDesktopEnabled, runDesktopSync, type DesktopOnly } from './desktop/sync';
+import { folderExists, layoutMoves, moveToAppLayout } from './desktop/layout';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
-import { closeLoginWindows, isLoggedIn } from './login';
+import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { runGptSync } from './chatgpt/sync';
 import { chatCountStatus, SyncProgress } from './progress';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
+
+/** One run of one thing: an account's website, or the desktop apps. */
+type Target =
+	| { kind: 'claude'; account: ClaudeAccount }
+	| { kind: 'chatgpt'; account: ChatgptAccount; forceFull?: boolean }
+	| { kind: 'desktop'; only?: DesktopOnly; label?: string };
+
+export type Surface = 'web' | 'desktop';
 
 export default class AIChatBridge extends Plugin {
 	settings!: Settings;
@@ -30,12 +40,15 @@ export default class AIChatBridge extends Plugin {
 	async onload() {
 		this.unloaded = false;
 		await this.loadSettings();
-		const gpt = this.settings.gpt;
 		// Pick up an active cooldown saved by a version that had no automatic retry.
-		if (gpt.resumeAfter429 === undefined && (gpt.cooldownUntil ?? 0) > Date.now()) {
-			gpt.resumeAfter429 = { consecutive: 1, forceFull: false };
-			await this.saveSettings();
+		let adopted = false;
+		for (const { web } of this.settings.chatgpt) {
+			if (web.resumeAfter429 === undefined && (web.cooldownUntil ?? 0) > Date.now()) {
+				web.resumeAfter429 = { consecutive: 1, forceFull: false };
+				adopted = true;
+			}
 		}
+		if (adopted) await this.saveSettings();
 		this.statusEl = this.addStatusBarItem();
 
 		this.addCommand({
@@ -60,7 +73,7 @@ export default class AIChatBridge extends Plugin {
 			id: 'cancel-chatgpt-retry',
 			name: 'Cancel pending chat sync retry',
 			checkCallback: (checking) => {
-				if (this.running || !this.settings.gpt.resumeAfter429) return false;
+				if (this.running || !this.nextGptResume()) return false;
 				if (!checking) void this.cancelGptResume();
 				return true;
 			},
@@ -133,22 +146,34 @@ export default class AIChatBridge extends Plugin {
 		this.showingGptCooldown = false;
 	}
 
+	/** The ChatGPT account whose automatic retry comes first. Each account cools down on its own. */
+	private nextGptResume(): ChatgptAccount | undefined {
+		const waiting = this.settings.chatgpt.filter((a) => a.web.resumeAfter429);
+		return waiting.sort((a, b) => (a.web.cooldownUntil ?? 0) - (b.web.cooldownUntil ?? 0))[0];
+	}
+
+	private gptLabel(account: ChatgptAccount): string {
+		return withAccount('ChatGPT', this.settings.chatgpt, account);
+	}
+
 	private scheduleGptResume(): void {
 		this.clearGptResumeTimer();
-		const gpt = this.settings.gpt;
 		if (this.unloaded || this.running) return;
+		const account = this.nextGptResume();
 		// Idle: nothing running or waiting.
-		if (!gpt.resumeAfter429) {
+		if (!account) {
 			this.statusEl?.setText(this.idleStatus());
 			return;
 		}
-		const count = chatCountStatus(gpt.chatProgress);
+		const gpt = account.web;
+		const label = this.gptLabel(account);
+		const count = chatCountStatus(gpt.chatProgress, label);
 		const delay = Math.max(0, (gpt.cooldownUntil ?? 0) - Date.now());
 		if (delay > 0) {
 			const seconds = Math.ceil(delay / 1000);
 			const minutes = String(Math.floor(seconds / 60)).padStart(2, '0');
 			const remainder = String(seconds % 60).padStart(2, '0');
-			this.statusEl?.setText(`${count ? count + ' ·' : 'ChatGPT'} retry in ${minutes}:${remainder}`);
+			this.statusEl?.setText(`${count ? count + ' ·' : label} retry in ${minutes}:${remainder}`);
 			this.showingGptCooldown = true;
 		}
 		this.gptResumeTimer = window.setTimeout(() => {
@@ -159,7 +184,7 @@ export default class AIChatBridge extends Plugin {
 				this.scheduleGptResume();
 				return;
 			}
-			void this.guarded('resume', () => this.runOne('chatgpt', 'resume')).catch(() => {
+			void this.guarded('resume', () => this.runOne({ kind: 'chatgpt', account }, 'resume')).catch(() => {
 				this.clearGptResumeTimer();
 				new Notice('The sync retry could not finish. Check the settings and try again.');
 			});
@@ -168,7 +193,7 @@ export default class AIChatBridge extends Plugin {
 
 	private async cancelGptResume(): Promise<void> {
 		this.clearGptResumeTimer();
-		this.settings.gpt.resumeAfter429 = null;
+		for (const { web } of this.settings.chatgpt) if (web.resumeAfter429) web.resumeAfter429 = null;
 		await this.saveSettings();
 		this.scheduleGptResume();
 		new Notice('Pending retry canceled. The cooldown still applies.');
@@ -182,7 +207,7 @@ export default class AIChatBridge extends Plugin {
 
 	/** Refreshes the idle text when nothing is running or counting down. */
 	private refreshIdleStatus(): void {
-		if (this.unloaded || this.running || this.showingGptCooldown || this.settings.gpt.resumeAfter429) return;
+		if (this.unloaded || this.running || this.showingGptCooldown || this.nextGptResume()) return;
 		this.statusEl?.setText(this.idleStatus());
 	}
 
@@ -204,24 +229,64 @@ export default class AIChatBridge extends Plugin {
 		this.refreshIdleStatus();
 	}
 
-	/** claude.ai only. */
-	async sync(trigger: 'manual' | 'auto') {
-		await this.guarded(trigger, () => this.runOne('claude', trigger));
+	/** Can this account's website be synced right now? */
+	async canSyncWeb(provider: Provider, account: AnyAccount): Promise<boolean> {
+		if (await isLoggedIn(loginRef(provider, account))) return true;
+		return provider === 'claude' && !!(account as ClaudeAccount).web.secretId;
 	}
 
-	/** ChatGPT only. */
+	/**
+	 * The accounts a provider-wide sync should run. With several accounts, ones you are not
+	 * logged in to are left out; a single account always runs, so its "not logged in" is shown.
+	 */
+	private async webAccounts<T extends AnyAccount>(provider: Provider, list: T[]): Promise<T[]> {
+		if (list.length === 1) return list;
+		const out: T[] = [];
+		for (const account of list) if (await this.canSyncWeb(provider, account)) out.push(account);
+		return out;
+	}
+
+	private notLoggedIn(provider: Provider, trigger: SyncTrigger): void {
+		if (trigger === 'manual') new Notice(`${SITE_LABEL[provider]}: none of the accounts is logged in. Log in in the plugin settings.`);
+	}
+
+	/** Every claude.ai account. One account stopping does not hold back the others. */
+	async sync(trigger: 'manual' | 'auto') {
+		await this.guarded(trigger, async () => {
+			const accounts = await this.webAccounts('claude', this.settings.claude);
+			if (!accounts.length) this.notLoggedIn('claude', trigger);
+			for (const account of accounts) await this.runOne({ kind: 'claude', account }, trigger);
+		});
+	}
+
+	/** Every ChatGPT account. */
 	async syncGpt(trigger: 'manual' | 'auto', forceFull = false) {
-		await this.guarded(trigger, () => this.runOne('chatgpt', trigger, forceFull));
+		await this.guarded(trigger, async () => {
+			const accounts = await this.webAccounts('chatgpt', this.settings.chatgpt);
+			if (!accounts.length) this.notLoggedIn('chatgpt', trigger);
+			for (const account of accounts) await this.runOne({ kind: 'chatgpt', account, forceFull }, trigger);
+		});
 	}
 
 	/** Desktop apps only (Claude Code / Cowork, Codex). */
 	async syncDesktop(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
 			if (!anyDesktopEnabled(this)) {
-				if (trigger === 'manual') new Notice('Desktop apps: none is turned on. Turn them on in the plugin settings, "Desktop apps" tab.');
+				if (trigger === 'manual') new Notice('Desktop apps: none is turned on. Turn them on under each account in the plugin settings.');
 				return;
 			}
-			await this.runOne('desktop', trigger);
+			await this.runOne({ kind: 'desktop' }, trigger);
+		});
+	}
+
+	/** One surface of one account (the Sync buttons in the settings). */
+	async syncAccount(provider: Provider, account: AnyAccount, surface: Surface) {
+		await this.guarded('manual', async () => {
+			if (surface === 'desktop') {
+				const label = withAccount(provider === 'claude' ? 'Claude desktop' : 'Codex', accountsOf(this.settings, provider), account);
+				await this.runOne({ kind: 'desktop', only: { provider, id: account.id }, label }, 'manual');
+			} else if (provider === 'claude') await this.runOne({ kind: 'claude', account: account as ClaudeAccount }, 'manual');
+			else await this.runOne({ kind: 'chatgpt', account: account as ChatgptAccount }, 'manual');
 		});
 	}
 
@@ -243,21 +308,28 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
-	/** Every provider you are logged in to, one after the other, then the desktop apps. */
+	/** Every account you are logged in to, one after the other, then the desktop apps. */
 	async syncAll(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
-			const claude = (await isLoggedIn('claude')) || !!this.settings.secretId;
-			const gpt = await isLoggedIn('chatgpt');
+			const claude: ClaudeAccount[] = [];
+			for (const a of this.settings.claude) if (await this.canSyncWeb('claude', a)) claude.push(a);
+			const gpt: ChatgptAccount[] = [];
+			for (const a of this.settings.chatgpt) if (await this.canSyncWeb('chatgpt', a)) gpt.push(a);
 			const desktop = anyDesktopEnabled(this);
-			if (!claude && !gpt && !desktop) {
+			if (!claude.length && !gpt.length && !desktop) {
 				if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
 				return;
 			}
-			if (claude && !(await this.runOne('claude', trigger))) return; // a stop pauses the rest too
-			const waiting = this.settings.gpt.resumeAfter429 || (this.settings.gpt.cooldownUntil ?? 0) > Date.now();
-			// A ChatGPT cooldown only waits; the desktop apps still run.
-			if (gpt && (trigger === 'manual' || !waiting) && !(await this.runOne('chatgpt', trigger)) && this.autoPaused) return;
-			if (desktop) await this.runOne('desktop', trigger);
+			let claudeOk = true;
+			for (const account of claude) if (!(await this.runOne({ kind: 'claude', account }, trigger))) claudeOk = false;
+			if (!claudeOk) return; // a stop pauses the rest too
+			for (const account of gpt) {
+				const waiting = account.web.resumeAfter429 || (account.web.cooldownUntil ?? 0) > Date.now();
+				// A ChatGPT cooldown only waits; other accounts and the desktop apps still run.
+				if (trigger !== 'manual' && waiting) continue;
+				if (!(await this.runOne({ kind: 'chatgpt', account }, trigger)) && this.autoPaused) return;
+			}
+			if (desktop) await this.runOne({ kind: 'desktop' }, trigger);
 		});
 	}
 
@@ -279,17 +351,23 @@ export default class AIChatBridge extends Plugin {
 		}
 	}
 
-	/** Runs one provider and shows the result. Returns false if it stopped. */
-	private async runOne(which: 'claude' | 'chatgpt' | 'desktop', trigger: SyncTrigger, forceFull = false): Promise<boolean> {
-		const label = which === 'claude' ? 'claude.ai' : which === 'chatgpt' ? 'ChatGPT' : 'Desktop apps';
+	private targetLabel(target: Target): string {
+		if (target.kind === 'claude') return withAccount('claude.ai', this.settings.claude, target.account);
+		if (target.kind === 'chatgpt') return this.gptLabel(target.account);
+		return target.label ?? 'Desktop apps';
+	}
+
+	/** Runs one account or the desktop apps and shows the result. Returns false if it stopped. */
+	private async runOne(target: Target, trigger: SyncTrigger): Promise<boolean> {
+		const label = this.targetLabel(target);
 		// Progress bar in a notice (manual syncs) and a percentage in the status bar (all syncs).
 		const progress = new SyncProgress(label, this.statusEl, trigger === 'manual',
-			which === 'chatgpt' ? () => chatCountStatus(this.settings.gpt.chatProgress) : undefined);
+			target.kind === 'chatgpt' ? () => chatCountStatus(target.account.web.chatProgress, label) : undefined);
 		let r;
 		try {
-			r = which === 'claude' ? await runSync(this, progress.update)
-				: which === 'chatgpt' ? await runGptSync(this, progress.update, forceFull)
-				: await runDesktopSync(this, progress.update);
+			r = target.kind === 'claude' ? await runSync(this, target.account, progress.update)
+				: target.kind === 'chatgpt' ? await runGptSync(this, target.account, progress.update, target.forceFull)
+				: await runDesktopSync(this, progress.update, undefined, undefined, target.only);
 		} finally {
 			progress.finish();
 		}
@@ -312,38 +390,22 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	async loadSettings() {
-		const loaded = (await this.loadData()) as (Partial<Settings> & { rawFolder?: string }) | null;
-		// v0.1.0 had one "rawFolder"; it becomes the Claude Chat folder.
-		if (loaded?.rawFolder && !loaded.chatFolder) loaded.chatFolder = loaded.rawFolder;
-		if (loaded) delete loaded.rawFolder;
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
-		this.settings.index = { ...(loaded?.index ?? {}) };
-		this.settings.fileIndex = { ...(loaded?.fileIndex ?? {}) };
-		this.settings.projects = [...(loaded?.projects ?? DEFAULT_SETTINGS.projects)];
-		const g = loaded?.gpt;
-		this.settings.gpt = {
-			...DEFAULT_GPT,
-			...g,
-			projects: [...(g?.projects ?? DEFAULT_GPT.projects)],
-			index: { ...(g?.index ?? {}) },
-			fileIndex: { ...(g?.fileIndex ?? {}) },
-		};
-		this.settings.desktop = mergeDesktop(loaded?.desktop, this.settings.chatFolder);
-		// Seed the status immediately when upgrading a vault with one unfiltered inventory.
-		const gpt = this.settings.gpt;
-		if (!gpt.chatProgress && (!gpt.onlyProjects || !gpt.projects.some((name) => name.trim()))) {
-			const states = Object.entries(gpt.inventories?.accounts ?? {});
-			const session = gpt.inventories?.session;
-			if (session) states.push([session.key, session.inventory]);
-			const state = states.length === 1 ? states[0] : undefined;
-			if (state) {
-				const [inventoryKey, inventory] = state;
-				const scope = JSON.stringify([gpt.includeArchived === true, [], '', []]);
-				if (inventory.scope === scope) {
-					const rows = Object.values(inventory.known).filter((row) => row.generation === inventory.generation);
-					gpt.chatProgress = { inventoryKey, scope, total: rows.length, saved: rows.filter((row) => gpt.index[row.item.id]).length };
-				}
-			}
+		const loaded = (await this.loadData()) as unknown;
+		const { settings, migrated } = normalizeSettings(loaded);
+		this.settings = settings;
+		if (migrated) await this.keepOldSettings(loaded);
+	}
+
+	/** One copy of the settings from before multiple accounts, in case you ever go back a version. */
+	private async keepOldSettings(loaded: unknown): Promise<void> {
+		const dir = this.manifest?.dir;
+		if (!dir) return;
+		const path = `${dir}/data.before-accounts.json`;
+		try {
+			const adapter = this.app.vault.adapter;
+			if (!(await adapter.exists(path))) await adapter.write(path, JSON.stringify(loaded));
+		} catch (e) {
+			console.error('AI ChatBridge: could not keep a copy of the old settings', e instanceof Error ? e.message : e);
 		}
 	}
 
@@ -360,35 +422,4 @@ export default class AIChatBridge extends Plugin {
 export function formatClock(ms: number): string {
 	const d = new Date(ms);
 	return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-/**
- * Desktop settings from data.json over the defaults. A vault that never had them gets the
- * app layout next to its Claude Chat folder (e.g. "30 Sources/AI Chats/Claude Desktop/Code").
- */
-export function mergeDesktop(saved: Partial<Settings['desktop']> | undefined, chatFolder: string): Settings['desktop'] {
-	const root = layoutRoot(chatFolder);
-	const parent = chatFolder.split('/').slice(0, -1).join('/');
-	const under = (r: string, rest: string) => (r ? `${r}/${rest}` : rest);
-	const app = (s: Partial<DesktopAppSettings> | undefined, def: DesktopAppSettings, rest: string, before016: string): DesktopAppSettings => {
-		const folder = under(root, rest);
-		// 0.16.0 used ".../Claude Desktop" and ".../Codex"; nothing written there yet -> the new layout.
-		const unused = !Object.keys(s?.index ?? {}).length && s?.folder === under(parent, before016);
-		return {
-			...def,
-			folder,
-			...s,
-			...(unused ? { folder } : {}),
-			extraFolders: [...(s?.extraFolders ?? [])],
-			index: { ...(s?.index ?? {}) },
-			ignored: { ...(s?.ignored ?? {}) },
-			groupCache: { ...(s?.groupCache ?? {}) },
-		};
-	};
-	return {
-		...DEFAULT_DESKTOP,
-		...saved,
-		claude: app(saved?.claude, DEFAULT_DESKTOP.claude, `${CLAUDE_APP}/Code`, 'Claude Desktop'),
-		codex: app(saved?.codex, DEFAULT_DESKTOP.codex, `${CHATGPT_APP}/Codex`, 'Codex'),
-	};
 }

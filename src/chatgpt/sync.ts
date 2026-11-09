@@ -3,6 +3,8 @@
 
 import { TFile, TFolder } from 'obsidian';
 import type AIChatBridge from '../main';
+import { loginRef, withAccount } from '../accounts';
+import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
 import { ShapeError } from '../schema';
 import { DEFAULT_RECENT, filterByProjects, projectFolderNames, projectSubfolder } from '../select';
@@ -67,9 +69,9 @@ function equalBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
 }
 
 /** `progress` gets short status texts while the sync runs (shown in a notice). */
-export async function runGptSync(plugin: AIChatBridge, progress: ProgressFn = () => undefined, forceFull = false): Promise<GptSyncResult> {
+export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, progress: ProgressFn = () => undefined, forceFull = false): Promise<GptSyncResult> {
 	const s = plugin.settings;
-	const g = s.gpt;
+	const g = account.web;
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
 	const result: GptSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, tooLong: [], projectsCut: false, pendingAssets: 0, refreshedViews: 0, listingRequests: 0, projectRequests: 0, fullLists: 0, incrementalLists: 0 };
@@ -182,8 +184,14 @@ export async function runGptSync(plugin: AIChatBridge, progress: ProgressFn = ()
 		const base = cleanFolder(g.folder);
 		if (!base) throw new StopError('The ChatGPT folder setting is empty or invalid.');
 		progress('connecting…');
-		const a = await GptApi.connect();
+		const a = await GptApi.connect(loginRef('chatgpt', account));
 		api = a;
+		const twin = s.chatgpt.find((other) => other !== account && other.web.inventories?.accounts[a.inventoryKey]);
+		if (twin) throw new StopError(`This login is the same ChatGPT account and workspace as "${twin.label}". Log in with a different account, or remove this one.`);
+		if (a.workspaceId && g.workspaceId !== a.workspaceId) {
+			g.workspaceId = a.workspaceId;
+			await plugin.saveSettings();
+		}
 
 		// Refresh labels before applying name-based project filters.
 		const projects = new Map<string, GptProject>();
@@ -480,11 +488,11 @@ export async function runGptSync(plugin: AIChatBridge, progress: ProgressFn = ()
 		delete g.cooldownUntil;
 		await plugin.saveSettings();
 	}
-	await writeLog(plugin, result);
+	await writeLog(plugin, account, result);
 	return result;
 }
 
-async function writeLog(plugin: AIChatBridge, r: GptSyncResult): Promise<void> {
+async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyncResult): Promise<void> {
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 	const parts = [`${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
@@ -501,7 +509,7 @@ async function writeLog(plugin: AIChatBridge, r: GptSyncResult): Promise<void> {
 	if (r.tooLong.length) parts.push(`too long to load in one piece, skipped: ${r.tooLong.join(', ')}`);
 	if (r.projectsCut) parts.push('more projects exist than chatgpt.com listed – chats in unlisted projects use the project ID as folder name');
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
-	let line = `- [[${dailyNoteName(now)}]] ${time} – **ChatGPT:** ${parts.join(', ')}`;
+	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount('ChatGPT', plugin.settings.chatgpt, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');
 		line += `: ${shown}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;

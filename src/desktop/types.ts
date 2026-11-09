@@ -39,6 +39,8 @@ export interface DesktopSession {
 	isSubagent: boolean;
 	/** Sidebar section in the app (group/project, and parent session if nested): the subfolder. */
 	section?: string;
+	/** Which login made this session: claude.ai organization or ChatGPT workspace ID, if known. */
+	ownerId?: string;
 	turns: DesktopTurn[];
 }
 
@@ -68,9 +70,8 @@ export interface DesktopAppSettings {
 	groupCache?: Record<string, string>;
 }
 
+/** How sessions are saved, the same for every account. */
 export interface DesktopSettings {
-	claude: DesktopAppSettings;
-	codex: DesktopAppSettings;
 	/** Put each session in a subfolder named after the folder it ran in. */
 	projectSubfolders: boolean;
 	/** Also copy the source .jsonl next to the transcript. */

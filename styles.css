@@ -1,24 +1,303 @@
-/* Provider tabs in the settings (Claude | OpenAI). */
+/* Settings page. */
+.ccs-settings .ccs-glyph,
+.ccs-settings .ccs-icon {
+	display: inline-flex;
+	align-items: center;
+	flex: none;
+}
+
+.ccs-settings .ccs-glyph svg {
+	width: 15px;
+	height: 15px;
+}
+
+.ccs-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.ccs-icon-claude {
+	color: #d97757;
+}
+
+.ccs-icon-chatgpt {
+	color: var(--text-normal);
+}
+
+.ccs-settings button {
+	cursor: pointer;
+}
+
+/* Status dot: grey until something is on. */
+.ccs-dot {
+	flex: none;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--text-faint);
+}
+
+.ccs-dot.is-on {
+	background: var(--color-green);
+}
+
+/* Main tabs. */
 .ccs-tabs {
 	display: flex;
-	gap: 4px;
-	margin: 1.5em 0 0.75em;
+	flex-wrap: wrap;
+	gap: 2px;
+	margin-bottom: 20px;
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .ccs-tabs .ccs-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: auto;
+	padding: 8px 14px;
+	margin-bottom: -1px;
 	background: none;
 	box-shadow: none;
 	border: none;
 	border-bottom: 2px solid transparent;
 	border-radius: 0;
-	padding: 6px 16px;
 	color: var(--text-muted);
-	cursor: pointer;
 }
 
 .ccs-tabs .ccs-tab:hover {
 	color: var(--text-normal);
+}
+
+.ccs-tabs .ccs-tab.is-active {
+	color: var(--text-normal);
+	font-weight: var(--font-semibold);
+	border-bottom-color: var(--interactive-accent);
+}
+
+/* Overview. */
+.ccs-hero {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 14px 16px;
+	margin-bottom: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+}
+
+.ccs-hero-title {
+	font-weight: var(--font-semibold);
+}
+
+.ccs-hero-desc {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-provider-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 20px 0 8px;
+}
+
+.ccs-provider-head .ccs-icon svg {
+	width: 18px;
+	height: 18px;
+}
+
+.ccs-provider-name {
+	flex: 1;
+	font-weight: var(--font-semibold);
+}
+
+.ccs-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+	gap: 8px;
+}
+
+.ccs-card {
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.ccs-card-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
+.ccs-card-head .ccs-card-title {
+	height: auto;
+	padding: 0;
+	overflow: hidden;
+	background: none;
+	border: none;
+	box-shadow: none;
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ccs-card-head .ccs-card-title:hover {
+	color: var(--text-accent);
+}
+
+.ccs-surface-line {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 2px 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-surface-name {
+	width: 56px;
+}
+
+/* Account picker. */
+.ccs-account-pills {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 16px;
+}
+
+.ccs-account-pills .ccs-account-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: auto;
+	padding: 4px 12px;
+	border-radius: var(--radius-l);
+	box-shadow: none;
+	border: 1px solid var(--background-modifier-border);
+	background: none;
+	color: var(--text-muted);
+}
+
+.ccs-account-pills .ccs-account-pill.is-active {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.ccs-settings .ccs-add-account {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: auto;
+	padding: 4px 8px;
+	background: none;
+	border: none;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-settings .ccs-add-account:hover {
+	color: var(--text-accent);
+}
+
+.ccs-account-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.ccs-account-head .ccs-icon svg {
+	width: 22px;
+	height: 22px;
+}
+
+.ccs-account-name {
+	flex: 1;
+	overflow: hidden;
+	font-size: var(--font-ui-large);
+	font-weight: var(--font-semibold);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ccs-account-actions {
+	display: flex;
+	gap: 6px;
+}
+
+/* Web | Desktop app. */
+.ccs-segmented {
+	display: inline-flex;
+	padding: 2px;
+	margin-bottom: 8px;
+	border-radius: var(--radius-m);
+	background: var(--background-modifier-border);
+}
+
+.ccs-segmented .ccs-segment {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: auto;
+	padding: 4px 14px;
+	background: none;
+	border: none;
+	box-shadow: none;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+}
+
+.ccs-segmented .ccs-segment.is-active {
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.ccs-settings .ccs-primary-row {
+	border-top: none;
+}
+
+/* Folder paths are long, and their end is the part that differs. */
+.ccs-settings .setting-item-control input[type='text'] {
+	width: 280px;
+	max-width: 100%;
+}
+
+/* Rarely used settings. */
+.ccs-advanced {
+	margin-top: 16px;
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 10px;
+}
+
+.ccs-advanced > summary {
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.ccs-advanced[open] > summary {
+	margin-bottom: 8px;
+}
+
+/* Add / rename dialog. */
+.ccs-name-input {
+	width: 100%;
+}
+
+.ccs-name-error {
+	min-height: 1.4em;
+	margin-top: 4px;
+	color: var(--text-error);
+	font-size: var(--font-ui-small);
 }
 
 /* Progress bar in the sync notice. */
@@ -49,10 +328,4 @@
 @keyframes ccs-slide {
 	from { left: -30%; }
 	to { left: 100%; }
-}
-
-.ccs-tabs .ccs-tab.is-active {
-	color: var(--text-normal);
-	font-weight: var(--font-semibold);
-	border-bottom-color: var(--interactive-accent);
 }

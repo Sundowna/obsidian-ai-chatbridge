@@ -11,8 +11,8 @@ export interface ChatCounts {
 	total: number;
 }
 
-export function chatCountStatus(counts?: ChatCounts): string | undefined {
-	return counts ? `ChatGPT: ${counts.saved} of ${counts.total} chats saved` : undefined;
+export function chatCountStatus(counts?: ChatCounts, label = 'ChatGPT'): string | undefined {
+	return counts ? `${label}: ${counts.saved} of ${counts.total} chats saved` : undefined;
 }
 
 export class SyncProgress {

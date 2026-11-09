@@ -14,9 +14,12 @@ import { parseClaudeSession } from './claude-code';
 import { codexTitles, parseCodexSession } from './codex';
 import { findLatestJson } from './leveldb';
 import { renderDesktopTranscript, sessionFolderName } from './render';
-import { claudeDesktopMetaFiles, claudeLocalStorageFiles, codexHome, listSessionFiles, nodeDesktopFs, type DesktopFs, type SourceFile } from './scan';
+import { claudeDesktopMetaFiles, claudeLocalStorageFiles, codexHomes, listSessionFiles, nodeDesktopFs, sameOrUnder, type DesktopFs, type SourceFile } from './scan';
 import { claudeGroups, claudePlacement, codexProjectFor, parseClaudeMeta, parseCodexState, type ClaudeDesktopMeta, type CodexProjects } from './sections';
-import { APP_LABEL, type DesktopApp, type DesktopSession } from './types';
+import { APP_LABEL, type DesktopApp, type DesktopIndexEntry, type DesktopSession } from './types';
+import type { AnyAccount } from '../accounts';
+import type { Provider } from '../login';
+import type { ChatgptAccount, ClaudeAccount, Settings } from '../settings';
 
 export interface DesktopSyncResult {
 	listed: number;
@@ -42,12 +45,43 @@ const RECENT = 'Recent';
 interface ClaudeApp {
 	metas: Map<string, ClaudeDesktopMeta>;
 	byCli: Map<string, ClaudeDesktopMeta>;
+	/** Session ID -> the claude.ai organization whose folder its Code-tab file sits in. */
+	orgByCli: Map<string, string>;
 	groups: Map<string, string>;
 }
 
+const PROVIDER: Record<DesktopApp, Provider> = { claude: 'claude', codex: 'chatgpt' };
+const accountsFor = (s: Settings, app: DesktopApp): AnyAccount[] => s[PROVIDER[app]];
+const ownerIdOf = (app: DesktopApp, a: AnyAccount): string | undefined =>
+	app === 'claude' ? (a as ClaudeAccount).web.orgId : (a as ChatgptAccount).web.workspaceId;
+
 export function anyDesktopEnabled(plugin: AIChatBridge): boolean {
-	const d = plugin.settings.desktop;
-	return APPS.some((a) => d[a].enabled);
+	const s = plugin.settings;
+	return [...s.claude, ...s.chatgpt].some((a) => a.desktop.enabled);
+}
+
+/**
+ * Which account a session belongs to: the account whose own folder holds it, else the one
+ * whose login made it, else the first account. Each session has exactly one owner, so two
+ * accounts can read the same app folder without saving anything twice.
+ *
+ * Null = wait: the session is clearly not the first account's, and an added account has not
+ * logged in yet. Saving it now would file it under the wrong account for good.
+ */
+export function desktopOwner(accounts: AnyAccount[], app: DesktopApp, path: string, ownerId: string | undefined): AnyAccount | null {
+	const byFolder = accounts.find((a) => a.desktop.extraFolders.some((f) => sameOrUnder(path, f)));
+	if (byFolder) return byFolder;
+	const byLogin = ownerId ? accounts.find((a) => ownerIdOf(app, a) === ownerId) : undefined;
+	if (byLogin) return byLogin;
+	const [first, ...rest] = accounts as [AnyAccount, ...AnyAccount[]];
+	const unidentified = rest.some((a) => !ownerIdOf(app, a) && !a.desktop.extraFolders.length);
+	return ownerId && ownerIdOf(app, first) && unidentified ? null : first;
+}
+
+/** Limits a run to one account (its Sync button in the settings). */
+export interface DesktopOnly {
+	provider: Provider;
+	id: string;
 }
 
 interface Todo {
@@ -55,6 +89,7 @@ interface Todo {
 	session: DesktopSession;
 	text: string;
 	isUpdate: boolean;
+	owner: AnyAccount;
 }
 
 export async function runDesktopSync(
@@ -62,6 +97,7 @@ export async function runDesktopSync(
 	progress: ProgressFn = () => undefined,
 	fs: DesktopFs | null = nodeDesktopFs(),
 	now = Date.now(),
+	only?: DesktopOnly,
 ): Promise<DesktopSyncResult> {
 	const app = plugin.app;
 	const s = plugin.settings;
@@ -91,18 +127,38 @@ export async function runDesktopSync(
 		const loadClaude = async (): Promise<ClaudeApp> => {
 			const metas = new Map<string, ClaudeDesktopMeta>();
 			const byCli = new Map<string, ClaudeDesktopMeta>();
+			const orgByCli = new Map<string, string>();
 			for (const p of await claudeDesktopMetaFiles(fs)) {
 				const m = parseClaudeMeta((await fs.readText(p)) ?? '');
 				if (!m) continue;
 				metas.set(m.localId, m);
-				for (const id of m.cliIds) if (!byCli.has(id)) byCli.set(id, m);
+				// .../claude-code-sessions/<account>/<organization>/local_<id>.json
+				const org = p.split('/').slice(-2, -1)[0];
+				for (const id of m.cliIds) {
+					if (!byCli.has(id)) byCli.set(id, m);
+					if (org && !orgByCli.has(id)) orgByCli.set(id, org);
+				}
 			}
-			const conf = d.claude;
+			const conf = s.claude[0]!.desktop;
 			let groups = claudeGroups(findLatestJson(await claudeLocalStorageFiles(fs), 'customGroupsByScope'));
 			// The app may be mid-write: then use the groups seen last time.
 			if (groups.size) conf.groupCache = Object.fromEntries(groups);
 			else groups = new Map(Object.entries(conf.groupCache ?? {}));
-			return { metas, byCli, groups };
+			return { metas, byCli, orgByCli, groups };
+		};
+		/** Thread titles and projects from every Codex home in use (each login can have its own). */
+		const loadCodex = async (extraFolders: string[]): Promise<{ titles: Map<string, string>; projects: CodexProjects }> => {
+			const titles = new Map<string, string>();
+			const projects: CodexProjects = { names: new Map(), roots: [], assignments: new Map() };
+			for (const home of codexHomes(fs, extraFolders)) {
+				for (const [id, name] of codexTitles((await fs.readText(`${home}/session_index.jsonl`)) ?? '')) titles.set(id, name);
+				const one = parseCodexState((await fs.readText(`${home}/.codex-global-state.json`)) ?? '');
+				for (const [id, name] of one.names) projects.names.set(id, name);
+				for (const [id, project] of one.assignments) projects.assignments.set(id, project);
+				projects.roots.push(...one.roots);
+			}
+			projects.roots.sort((a, b) => b[0].length - a[0].length);
+			return { titles, projects };
 		};
 		/** Subfolder inside the app's folder: the sidebar section (and parent session, if nested). */
 		const sectionOf = (session: DesktopSession): string => {
@@ -114,13 +170,20 @@ export async function runDesktopSync(
 		};
 
 		for (const which of APPS) {
-			const conf = d[which];
-			if (!conf.enabled) continue;
-			if (!cleanFolder(conf.folder)) throw new Error(`The ${APP_LABEL[which]} folder setting is empty or invalid.`);
+			const accounts = accountsFor(s, which);
+			const wanted = (a: AnyAccount) => a.desktop.enabled && (!only || (only.provider === PROVIDER[which] && only.id === a.id));
+			if (!accounts.some(wanted)) continue;
+			for (const a of accounts.filter(wanted)) {
+				if (!cleanFolder(a.desktop.folder)) throw new Error(`The ${APP_LABEL[which]} folder setting of "${a.label}" is empty or invalid.`);
+			}
 			progress(`${APP_LABEL[which]}: looking for sessions…`);
-			const files = await listSessionFiles(fs, which, conf.extraFolders);
+			const extraFolders = accounts.filter((a) => a.desktop.enabled).flatMap((a) => a.desktop.extraFolders);
+			const files = await listSessionFiles(fs, which, extraFolders);
 			result.listed += files.length;
-			conf.ignored ??= {};
+			// Skipped files are skipped for every account, so one list is enough.
+			const ignored = (accounts[0]!.desktop.ignored ??= {});
+			const bySource = new Map<string, DesktopIndexEntry>();
+			for (const a of accounts) for (const e of Object.values(a.desktop.index)) bySource.set(e.source.toLowerCase(), e);
 
 			for (const file of files) {
 				if (now - file.mtime < quietMs) {
@@ -128,11 +191,11 @@ export async function runDesktopSync(
 					continue;
 				}
 				const key = file.path.toLowerCase();
-				if (conf.ignored[key] === file.mtime) {
+				if (ignored[key] === file.mtime) {
 					result.empty++;
 					continue;
 				}
-				const known = Object.values(conf.index).find((e) => e.source.toLowerCase() === key);
+				const known = bySource.get(key);
 				if (known && known.size === file.size && known.mtime === file.mtime && exists(known.md)) {
 					result.unchanged++;
 					continue;
@@ -144,19 +207,28 @@ export async function runDesktopSync(
 					claude ??= await loadClaude();
 					const titles = new Map([...claude.byCli].flatMap(([id, m]) => (m.title ? [[id, m.title] as [string, string]] : [])));
 					session = parseClaudeSession(text, (file.path.split('/').pop() ?? '').replace(/\.jsonl$/, ''), titles);
+					if (session) session.ownerId = claude.orgByCli.get(session.id);
 				} else {
-					codexTitleMap ??= codexTitles((await fs.readText(`${codexHome(fs)}/session_index.jsonl`)) ?? '');
-					codexProjects ??= parseCodexState((await fs.readText(`${codexHome(fs)}/.codex-global-state.json`)) ?? '');
+					if (!codexTitleMap || !codexProjects) {
+						const codex = await loadCodex(extraFolders);
+						codexTitleMap = codex.titles;
+						codexProjects = codex.projects;
+					}
 					session = parseCodexSession(text, codexTitleMap);
 				}
 				if (session) session.section = sectionOf(session);
 				if (!session || (session.isSubagent && !d.includeSubagents)) {
-					conf.ignored[key] = file.mtime;
+					ignored[key] = file.mtime;
 					result.empty++;
 					continue;
 				}
-				delete conf.ignored[key];
+				delete ignored[key];
 
+				// A session already saved stays with its account, so nothing is ever saved twice.
+				const sessionId = session.id;
+				const owner = accounts.find((a) => a.desktop.index[sessionId]) ?? desktopOwner(accounts, which, file.path, session.ownerId);
+				if (!owner || !wanted(owner)) continue;
+				const conf = owner.desktop;
 				const entry = conf.index[session.id];
 				if (entry && entry.updated === session.updated) {
 					// Same conversation (only moved, or bookkeeping lines added).
@@ -172,7 +244,7 @@ export async function runDesktopSync(
 					result.restored.push(entry.md.split('/').pop()!.replace(/\.md$/, ''));
 					continue;
 				}
-				todo.push({ file, session, text, isUpdate: !!entry });
+				todo.push({ file, session, text, isUpdate: !!entry, owner });
 			}
 			await plugin.saveSettings();
 		}
@@ -182,9 +254,9 @@ export async function runDesktopSync(
 		const limit = s.maxChatsPerRun > 0 ? s.maxChatsPerRun : todo.length;
 		result.leftForLater = Math.max(0, todo.length - limit);
 
-		for (const [i, { file, session, text, isUpdate }] of todo.slice(0, limit).entries()) {
+		for (const [i, { file, session, text, isUpdate, owner }] of todo.slice(0, limit).entries()) {
 			progress(`${i + 1} of ${Math.min(limit, todo.length)} sessions: ${session.title}`, i, Math.min(limit, todo.length));
-			const conf = d[session.app];
+			const conf = owner.desktop;
 			const base = cleanFolder(conf.folder)!;
 			const folder = d.projectSubfolders && session.section ? `${base}/${session.section}` : base;
 			await ensureFolder(app, folder);
