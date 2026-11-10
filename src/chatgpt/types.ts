@@ -26,6 +26,9 @@ export interface GptPart {
 	asset_pointer?: string;
 	mime_type?: string;
 	size_bytes?: number;
+	/** audio_transcription: the spoken words and "in" (you) or "out" (ChatGPT). */
+	text?: string;
+	direction?: string;
 	[key: string]: unknown;
 }
 

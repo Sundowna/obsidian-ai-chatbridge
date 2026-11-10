@@ -289,6 +289,30 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 		const smd = renderGptTranscript(scheduled, { jsonFileName: 'x.json' });
 		expect('gpt scheduled task: each run gets its own heading', (smd.match(/^## ChatGPT · /gm) ?? []).length === 3);
 		expect('gpt normal chat: still 4 turns', (renderGptTranscript(chat, { jsonFileName: 'x.json' }).match(/^## (You|ChatGPT) · /gm) ?? []).length === 4);
+		// Voice chats: synthetic parts shaped like a live voice chat (2026-11-10).
+		const pointer = { content_type: 'real_time_user_audio_video_asset_pointer', frames_asset_pointers: [], video_container_asset_pointer: null,
+			audio_asset_pointer: { content_type: 'audio_asset_pointer', asset_pointer: 'sediment://file_00000000000000000000aaaa', metadata: { transcription: null } } };
+		const said = (text: string, direction: 'in' | 'out') => ({ content_type: 'audio_transcription', text, direction, decoding_id: null });
+		const spoke = (mid: string, role: string, parts: unknown[], t: number) => ({ id: mid, author: { role }, create_time: t, content: { content_type: 'multimodal_text', parts }, recipient: 'all', channel: role === 'assistant' ? 'final' : null });
+		const voice = { ...chat, messages: [
+			spoke('v1', 'user', [pointer, said('Knowledge can be provisional.', 'in')], 1793379722),
+			spoke('v2', 'assistant', [said('Yes, mark it as provisional.', 'out'), { content_type: 'audio_asset_pointer', asset_pointer: 'sediment://file_00000000000000000000bbbb', metadata: {} }], 1793379730),
+			spoke('v3', 'user', ['Typed first.', pointer, said('Then spoken.', 'in')], 1793379740),
+			spoke('v4', 'user', [pointer], 1793379750),
+		] } as unknown as typeof chat;
+		const vmd = renderGptTranscript(voice, { jsonFileName: 'x.json' });
+		const turns = vmd.split(/^## /m).slice(1);
+		expect('gpt voice: user pointer + transcription shows the words in your turn',
+			turns[0]!.startsWith('You') && turns[0]!.includes('Knowledge can be provisional.') && !turns[0]!.includes('see raw JSON'), turns[0]);
+		expect('gpt voice: ChatGPT spoken answer shows its words', turns[1]!.startsWith('ChatGPT') && turns[1]!.includes('Yes, mark it as provisional.') && !turns[1]!.includes('see raw JSON'), turns[1]);
+		expect('gpt voice: typed text and spoken words kept in order',
+			turns[2]!.startsWith('You') && turns[2]!.indexOf('Typed first.') < turns[2]!.indexOf('Then spoken.') && turns[2]!.indexOf('Typed first.') >= 0 && !turns[2]!.includes('voice message'), turns[2]);
+		expect('gpt voice: audio without a transcription stays clearly marked', turns[3]!.startsWith('You') && turns[3]!.includes('no transcription available'), turns[3]);
+		expect('gpt voice: 4 turns, no generic placeholders', turns.length === 4 && !vmd.includes('see raw JSON'));
+		const transcribedPointer = { ...pointer, audio_asset_pointer: { ...pointer.audio_asset_pointer, metadata: { transcription: 'From the pointer.' } } };
+		const fromPointer = renderGptTranscript({ ...chat, messages: [spoke('v5', 'user', [transcribedPointer], 1793379760)] } as unknown as typeof chat, { jsonFileName: 'x.json' });
+		expect('gpt voice: transcription stored on the pointer is used', fromPointer.includes('From the pointer.') && !fromPointer.includes('no transcription'));
+		expect('gpt voice: same input renders the same note', renderGptTranscript(voice, { jsonFileName: 'x.json' }) === vmd);
 		const gpt3 = { index: { c: { updated_at: '', synced: '', json: 'G/R/c.json', md: 'G/R/c.md', older: ['G/R/c (older 1).json'] } as IndexEntry }, fileIndex: {} };
 		const s3 = oneAccount(gpt3, 'chatgpt');
 		expect('rename: older parts follow too', followRename(s3, 'G/R', 'G/Q') === 3 && gpt3.index.c!.older![0] === 'G/Q/c (older 1).json');

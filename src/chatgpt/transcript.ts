@@ -4,7 +4,8 @@
 
 import { localDateTime } from '../naming';
 import { fallbackMarkdown, imageParts, pointerId, sandboxKey, sandboxLinks } from './files';
-import type { GptChat, GptMessage } from './types';
+import type { GptChat, GptMessage, GptPart } from './types';
+import { hasVideo, isAudioPointer, isTranscription, NO_TRANSCRIPTION, pointerTranscription, transcriptionText } from './voice';
 
 export const isoFromUnix = (s: number): string => new Date(s * 1000).toISOString();
 
@@ -90,7 +91,12 @@ function pieces(m: GptMessage, chatId: string, filePaths: Map<string, string>): 
 				const t = renderText(clean);
 				if (t) out.push({ kind: 'text', md: t });
 			}
-			for (const p of Array.isArray(c.parts) ? c.parts : []) {
+			const parts = Array.isArray(c.parts) ? c.parts : [];
+			const objects = parts.filter((p): p is GptPart => typeof p === 'object' && p !== null);
+			// Spoken words come as transcription parts; the audio pointer then needs no line.
+			const heard = objects.some((p) => transcriptionText(p) !== null);
+			const hasPointer = objects.some(isAudioPointer);
+			for (const p of parts) {
 				if (typeof p === 'string') {
 					if (clean) continue; // the clean version above replaces the text parts
 					const t = renderText(p);
@@ -101,6 +107,17 @@ function pieces(m: GptMessage, chatId: string, filePaths: Map<string, string>): 
 					const id = pointerId(p.asset_pointer);
 					const path = id ? filePaths.get(id) : undefined;
 					out.push({ kind: 'text', md: path ? `![[${path}]]` : '*[image – not downloaded]*' });
+				} else if (p && isTranscription(p)) {
+					const spoken = transcriptionText(p);
+					const t = spoken ? renderText(spoken) : '';
+					if (t) out.push({ kind: 'text', md: t });
+					else if (!heard && !hasPointer) out.push({ kind: 'text', md: NO_TRANSCRIPTION });
+				} else if (p && isAudioPointer(p)) {
+					if (!heard) {
+						const spoken = pointerTranscription(p);
+						out.push({ kind: 'text', md: spoken ? renderText(spoken) || NO_TRANSCRIPTION : NO_TRANSCRIPTION });
+					}
+					if (hasVideo(p)) out.push({ kind: 'text', md: '*[video – see raw JSON]*' });
 				} else if (typeof p?.content_type === 'string') {
 					out.push({ kind: 'text', md: `*[${p.content_type} – see raw JSON]*` });
 				}

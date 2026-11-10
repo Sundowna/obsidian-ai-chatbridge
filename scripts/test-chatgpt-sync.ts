@@ -203,6 +203,70 @@ function harness() {
 	};
 }
 
+/** A voice chat saved by an older version gets a new transcript once; syncing again adds nothing. */
+async function testVoiceReimport() {
+	const voiceId = '87654321-4321-4321-4321-cba987654321';
+	const pointer = { content_type: 'real_time_user_audio_video_asset_pointer', frames_asset_pointers: [], video_container_asset_pointer: null,
+		audio_asset_pointer: { content_type: 'audio_asset_pointer', asset_pointer: 'sediment://file_00000000000000000000cccc', metadata: { transcription: null } } };
+	const voiceChat = {
+		conversation_id: voiceId, title: 'Voice', create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [
+			{ id: 'u1', author: { role: 'user' }, create_time: 1793955600, content: { content_type: 'multimodal_text', parts: [pointer, { content_type: 'audio_transcription', text: 'Spoken user words', direction: 'in' }] } },
+			{ id: 'a1', author: { role: 'assistant' }, create_time: 1793955610, content: { content_type: 'multimodal_text', parts: [{ content_type: 'audio_transcription', text: 'Spoken answer', direction: 'out' }] }, recipient: 'all', channel: 'final' },
+		],
+		page_info: { has_previous_page: false },
+	};
+	const h = harness();
+	const connect = GptApi.connect;
+	GptApi.connect = async () => ({
+		inventoryKey: 'account:voice-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean) => 'list:' + [offset, tpp, archived].join(':'),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: () => 'chat',
+		olderPath: () => 'older',
+		redact: (value: string) => value,
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: [{ id: voiceId, title: 'Voice', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat') return raw(voiceChat);
+			throw new Error('Unexpected request ' + path);
+		},
+	} as unknown as GptApi);
+	try {
+		const first = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(first.newCount, 1, first.stopped);
+		const entry = h.settings.chatgpt[0]!.web.index[voiceId]!;
+		const note = h.read(entry.md);
+		assert.equal(note.split('Spoken user words').length, 2, 'user words once');
+		assert.equal(note.split('Spoken answer').length, 2, 'answer once');
+		assert(!note.includes('see raw JSON'));
+
+		// Simulate the note an older version wrote (placeholders) with its own hash.
+		const oldNote = note.replace('Spoken user words', '*[real_time_user_audio_video_asset_pointer – see raw JSON]*');
+		h.contents.set(entry.md, bytes(oldNote));
+		entry.viewHash = 'old-renderer';
+		delete entry.view;
+		const files = h.entries.size;
+		const second = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(second.refreshedViews, 1);
+		assert.equal(h.read(entry.md), oldNote, 'the original note is kept as it was');
+		assert.equal(h.entries.size, files + 1, 'one new transcript, nothing else');
+		const view = h.read(entry.view!);
+		assert.equal(view.split('Spoken user words').length, 2);
+		assert.equal(view.split('Spoken answer').length, 2);
+
+		const settled = h.entries.size;
+		const third = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(third.refreshedViews, 0);
+		assert.equal(third.newCount + third.changedCount, 0);
+		assert.equal(h.entries.size, settled, 'syncing again adds no files');
+		assert.equal(h.read(entry.view!), view);
+	} finally {
+		GptApi.connect = connect;
+	}
+}
+
 async function main() {
 	assert.equal(retryDeadline('120', 1000), 121000);
 	assert.equal(retryDeadline('invalid', 1000), 601000);
@@ -211,6 +275,7 @@ async function main() {
 	assert.throws(() => checkGptOlderPage({ messages: [], page_info: {} }));
 	await testAutomaticResume();
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
+	await testVoiceReimport();
 	let calls = 0;
 	let sandboxCalls = 0;
 	let listingLimit = true;
