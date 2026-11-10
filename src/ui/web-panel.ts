@@ -1,7 +1,7 @@
 // The Web surface of an account: its login, where its chats go, and what gets synced.
 
 import { Notice, SecretComponent, Setting } from 'obsidian';
-import { loginRef, SITE_LABEL, withAccount, accountsOf, type AnyAccount } from '../accounts';
+import { hasPastedSession, loginRef, SITE_LABEL, withAccount, accountsOf, type AnyAccount } from '../accounts';
 import { DEFAULT_OVERLAP_MINUTES } from '../chatgpt/inventory';
 import { isLoggedIn, logout, openLogin, type Provider } from '../login';
 import { isUuid } from '../schema';
@@ -38,7 +38,7 @@ function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, accoun
 			sync(true);
 			return;
 		}
-		if (provider === 'claude' && (account as ClaudeAccount).web.secretId) sync(false);
+		if (hasPastedSession(provider, account)) sync(false);
 		row.addButton((b) =>
 			b.setButtonText('Log in').setCta().onClick(async () => {
 				try {
@@ -131,6 +131,15 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 		);
 
 	const more = advanced(ctx, el, `chatgpt-web-${account.id}`);
+	new Setting(more)
+		.setName('Session cookie (fallback)')
+		.setDesc('Only if the login window does not work: the value of your chatgpt.com "__Secure-next-auth.session-token" cookie, or the whole Cookie header from DevTools if ChatGPT splits it into .0 and .1. Kept in Obsidian\'s secret storage on this computer. The login window wins if both are set. Files ChatGPT generated in a chat may be skipped with this.')
+		.addComponent((c) =>
+			new SecretComponent(ctx.app, c).setValue(g.secretId).onChange(async (v) => {
+				g.secretId = v;
+				await save();
+			}),
+		);
 	new Setting(more)
 		.setName('Incremental sync overlap (minutes)')
 		.setDesc('Check recent changes again on each run. A full inventory runs on the next sync after seven days.')

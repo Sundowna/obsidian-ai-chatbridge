@@ -37,6 +37,33 @@ export function findAccessToken(html: string): string | null {
 	return all.length === 1 ? all[0]! : null;
 }
 
+const SESSION_COOKIE = '__Secure-next-auth.session-token';
+const COOKIE_NAME = /^[A-Za-z0-9_.-]+$/;
+const COOKIE_VALUE = /^[A-Za-z0-9_.\-~+/=%]{20,}$/;
+
+/**
+ * The Cookie header for a pasted login, or null if it does not look like one. Accepts the
+ * bare value of "__Secure-next-auth.session-token", or a whole "name=value; …" Cookie
+ * header copied from DevTools (with or without "Cookie:"), which also covers the split
+ * ".0"/".1" form. Never log the input or the result.
+ */
+export function fallbackCookie(pasted: string): string | null {
+	const text = pasted.trim().replace(/^cookie:\s*/i, '');
+	if (!text || /[\r\n]/.test(text)) return null;
+	if (!text.includes(SESSION_COOKIE)) return COOKIE_VALUE.test(text) ? `${SESSION_COOKIE}=${text}` : null;
+	const pairs: string[] = [];
+	for (const part of text.split(';')) {
+		const p = part.trim();
+		if (!p) continue;
+		const eq = p.indexOf('=');
+		const name = p.slice(0, eq);
+		const value = p.slice(eq + 1);
+		if (eq <= 0 || !COOKIE_NAME.test(name) || !/^[^\s;,"\\]*$/.test(value)) return null;
+		pairs.push(`${name}=${value}`);
+	}
+	return pairs.some((p) => p.startsWith(`${SESSION_COOKIE}=`) || p.startsWith(`${SESSION_COOKIE}.`)) ? pairs.join('; ') : null;
+}
+
 /** Masks every key-shaped or long random-looking value. */
 export function maskSecrets(text: string): string {
 	return text.replace(JWT, '[key]').replace(/[A-Za-z0-9_\-+/=]{24,}/g, '[hidden]');

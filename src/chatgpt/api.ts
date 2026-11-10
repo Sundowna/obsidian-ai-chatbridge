@@ -1,16 +1,17 @@
 // The ONLY place that talks to chatgpt.com.
 // Rules: https://chatgpt.com only, GET only, only the addresses seen in DevTools
 // (allowlist below), no retries, stop on anything odd.
-// Login: the cookies of the ChatGPT login window + the key the chatgpt.com page carries.
+// Login: the cookies of the ChatGPT login window (or, without one, a pasted session cookie
+// from secret storage) + the key the chatgpt.com page carries.
 // Both stay in memory; every error text is cleaned of them before it is shown or logged.
 
-import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { requestUrl, RequestUrlResponse, type App } from 'obsidian';
 import { StopError } from '../api';
 import { cookieHeader, cookieValue, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
 import { isChatId, isFileId, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
-import { describePage, findAccessToken, inventoryIdentity, maskSecrets } from './token';
+import { describePage, fallbackCookie, findAccessToken, inventoryIdentity, maskSecrets } from './token';
 
 const ORIGIN = 'https://chatgpt.com';
 
@@ -44,6 +45,11 @@ export interface Raw {
 	json: unknown;
 }
 
+/** The pasted session cookie from Obsidian's secret storage, or null if none is set. */
+export function pastedSession(app: App, secretId: string): string | null {
+	return secretId ? app.secretStorage.getSecret(secretId) || null : null;
+}
+
 function header(headers: Record<string, string>, name: string): string {
 	const k = Object.keys(headers).find((h) => h.toLowerCase() === name);
 	return k ? (headers[k] ?? '') : '';
@@ -61,14 +67,26 @@ export class GptApi {
 		private token: string | null,
 	) {}
 
-	/** Reads the login window's cookies and gets the page key. Stops if not logged in. */
-	static async connect(login: LoginRef): Promise<GptApi> {
-		if (!(await isLoggedIn(login))) throw new StopError('Not logged in to ChatGPT. Select "Log in" for this account in the plugin settings.');
-		const api = new GptApi(login, await cookieHeader(login), await cookieValue(login, 'oai-did'), loginUserAgent(login), null);
+	/**
+	 * Reads the login window's cookies and gets the page key. Without a login there, uses the
+	 * pasted session cookie (`fallback`, from secret storage) instead. Stops if neither works.
+	 */
+	static async connect(login: LoginRef, fallback: string | null = null): Promise<GptApi> {
+		let api: GptApi;
+		const pasted = !(await isLoggedIn(login));
+		if (!pasted) {
+			api = new GptApi(login, await cookieHeader(login), await cookieValue(login, 'oai-did'), loginUserAgent(login), null);
+		} else {
+			const cookie = fallback ? fallbackCookie(fallback) : null;
+			if (fallback && !cookie) throw new StopError('The ChatGPT session cookie in the plugin settings does not look right. Paste the value of "__Secure-next-auth.session-token", or log in instead.');
+			if (!cookie) throw new StopError('Not logged in to ChatGPT. Select "Log in" for this account in the plugin settings.');
+			api = new GptApi(login, cookie, null, loginUserAgent(login), null);
+		}
 		const page = await api.request('/', 'text/html', false, false);
 		const token = findAccessToken(page.text);
 		if (!token) {
-			throw new StopError(`chatgpt.com did not hand out a login key – log in again in the plugin settings. If that does not help, send this to Claude: ${api.redact(describePage(page.text))}`);
+			const fix = pasted ? 'the pasted session cookie may have expired – paste a fresh one or log in instead' : 'log in again in the plugin settings';
+			throw new StopError(`chatgpt.com did not hand out a login key – ${fix}. If that does not help, send this to Claude: ${api.redact(describePage(page.text))}`);
 		}
 		api.token = token;
 		// Use the workspace cookie from the same snapshot used for requests.

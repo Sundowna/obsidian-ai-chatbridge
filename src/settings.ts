@@ -1,6 +1,7 @@
 // The settings model. Everything here is saved in data.json, which syncs with the vault.
 // So: NO secrets. Logins live in the login windows' own storage; the fallback session
-// key lives in Obsidian's secret storage – we only store the *name* of that secret (secretId).
+// keys (claude.ai, ChatGPT) live in Obsidian's secret storage – we only store the *name*
+// of that secret (secretId).
 
 import { normalizePath } from 'obsidian';
 import type { IndexEntry } from './types';
@@ -44,6 +45,8 @@ export interface ClaudeWebSettings {
 /** One ChatGPT login: its own folders, index and cooldown. */
 export interface GptSettings {
 	folder: string;
+	/** Name of the secret holding a pasted session cookie, used when the login window has none. */
+	secretId: string;
 	projectSubfolders: boolean;
 	recentFolderName: string;
 	downloadFiles: boolean;
@@ -128,6 +131,7 @@ export const DEFAULT_CLAUDE_WEB: ClaudeWebSettings = {
 
 export const DEFAULT_GPT: GptSettings = {
 	folder: 'AI Chats/ChatGPT Desktop/Chat',
+	secretId: '',
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
 	downloadFiles: true,

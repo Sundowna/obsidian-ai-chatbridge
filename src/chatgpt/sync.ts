@@ -14,7 +14,7 @@ import { appendLog } from '../log';
 import { cleanFolder, MIN_DELAY_SECONDS } from '../settings';
 import { KIND_FOLDER, numbered, safeFileName } from '../files';
 import type { IndexEntry, ListItem } from '../types';
-import { BlockedLinkError, GptApi } from './api';
+import { BlockedLinkError, GptApi, pastedSession } from './api';
 import { checkGptChat, checkGptFileInfo, checkGptOlderPage, checkGptSidebar, isMessageId } from './schema';
 import { joinParts, olderPartPath } from './parts';
 import { toListItems } from './select';
@@ -217,7 +217,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		const base = cleanFolder(g.folder);
 		if (!base) throw new StopError('The ChatGPT folder setting is empty or invalid.');
 		progress('connecting…');
-		const a = await GptApi.connect(loginRef('chatgpt', account));
+		const a = await GptApi.connect(loginRef('chatgpt', account), pastedSession(plugin.app, g.secretId));
 		api = a;
 		const twin = s.chatgpt.find((other) => other !== account && other.web.inventories?.accounts[a.inventoryKey]);
 		if (twin) throw new StopError(`This login is the same ChatGPT account and workspace as "${twin.label}". Log in with a different account, or remove this one.`);

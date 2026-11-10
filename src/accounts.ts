@@ -20,6 +20,16 @@ export function loginRef(provider: Provider, account: { id: string }): LoginRef 
 	return { provider, id: account.id };
 }
 
+/**
+ * Whether the account names a pasted session in secret storage (claude.ai, ChatGPT). Lumo has
+ * none: opening its encrypted chats needs keys only its login window holds.
+ */
+export function hasPastedSession(provider: Provider, account: AnyAccount): boolean {
+	if (provider === 'claude') return !!(account as ClaudeAccount).web.secretId;
+	if (provider === 'chatgpt') return !!(account as ChatgptAccount).web.secretId;
+	return false;
+}
+
 /** "ChatGPT (Work)" once there are several accounts, plain "ChatGPT" while there is one. */
 export function withAccount(base: string, list: readonly AnyAccount[], account: AnyAccount): string {
 	return list.length > 1 ? `${base} (${account.label})` : base;

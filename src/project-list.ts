@@ -4,7 +4,7 @@
 import type AIChatBridge from './main';
 import { loginRef, SITE_LABEL, type AnyAccount } from './accounts';
 import { ClaudeApi, StopError } from './api';
-import { GptApi } from './chatgpt/api';
+import { GptApi, pastedSession } from './chatgpt/api';
 import { GptRateLimitError } from './chatgpt/recovery';
 import { listAllGptProjects } from './chatgpt/sync';
 import { claudeAuth } from './claude-auth';
@@ -36,7 +36,7 @@ async function chatgptRows(plugin: AIChatBridge, account: ChatgptAccount, delayM
 	if (until > Date.now()) throw new StopError(`ChatGPT is cooling down until ${new Date(until).toLocaleTimeString()}. Try again after that.`);
 	status('connecting to ChatGPT…');
 	try {
-		const api = await GptApi.connect(loginRef('chatgpt', account));
+		const api = await GptApi.connect(loginRef('chatgpt', account), pastedSession(plugin.app, g.secretId));
 		const wait = () => new Promise((r) => window.setTimeout(r, delayMs));
 		const { projects, cut } = await listAllGptProjects(api, wait, (page) => status(`reading project list… page ${page}`));
 		return { rows: rowsFromProjects(projects), ...(cut ? { note: 'ChatGPT did not finish listing, so some projects may be missing.' } : {}) };

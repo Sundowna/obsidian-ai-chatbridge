@@ -1,6 +1,6 @@
 import { Notice, Plugin } from 'obsidian';
 import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type LumoAccount, type Settings } from './settings';
-import { accountsOf, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
+import { accountsOf, hasPastedSession, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
 import { AIChatBridgeSettingTab } from './ui/settings-tab';
 import { anyDesktopEnabled, runDesktopSync, type DesktopOnly } from './desktop/sync';
@@ -243,7 +243,7 @@ export default class AIChatBridge extends Plugin {
 	/** Can this account's website be synced right now? */
 	async canSyncWeb(provider: Provider, account: AnyAccount): Promise<boolean> {
 		if (await isLoggedIn(loginRef(provider, account))) return true;
-		return provider === 'claude' && !!(account as ClaudeAccount).web.secretId;
+		return hasPastedSession(provider, account);
 	}
 
 	/**
