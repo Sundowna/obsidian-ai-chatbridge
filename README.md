@@ -6,7 +6,8 @@ This way it looks and feels the same way as the GUIs that you are used to - mini
 Each chat is saved as the raw JSON the website returns, plus a readable Markdown transcript, so your AI conversations live next to the rest of your notes.
 
 ### Overview:
-- Sync chats from Claude and ChatGPTs web & desktop interfaces (other models coming)
+- Sync chats from Lumo, Claude and ChatGPTs web & desktop interfaces (other models coming)
+- Multiple accounts per provider e.g. 2x Claude Pro accounts
 - Includes downloads of everything you put in and got out of AI - all media, files and artifacts.
 - Background sync job with timer
 - Automatic retry for large imports i.e. HTTP 429 - Too many requests error (no waiting for days for OpenAI to send you your data)
