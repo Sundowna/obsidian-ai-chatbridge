@@ -77,6 +77,21 @@ export interface LumoSettings {
 	userId?: string;
 }
 
+/** One Google login's Gemini chats (gemini.google.com). No tokens: those exist only during a sync. */
+export interface GeminiSettings {
+	folder: string;
+	index: Record<string, IndexEntry>;
+	/** The Google account behind this login (its email, not secret), to notice the same login twice. */
+	userId?: string;
+}
+
+/** The same login's Google AI Studio prompts, which AI Studio keeps in Google Drive. */
+export interface StudioSettings {
+	enabled: boolean;
+	folder: string;
+	index: Record<string, IndexEntry>;
+}
+
 /** One person's login at a provider, with its two surfaces: the website and the desktop app. */
 export interface ClaudeAccount {
 	id: string;
@@ -99,6 +114,14 @@ export interface LumoAccount {
 	web: LumoSettings;
 }
 
+/** One Google login, used for both Gemini and Google AI Studio. */
+export interface GeminiAccount {
+	id: string;
+	label: string;
+	web: GeminiSettings;
+	studio: StudioSettings;
+}
+
 export interface Settings {
 	maxChatsPerRun: number;
 	delaySeconds: number;
@@ -108,6 +131,7 @@ export interface Settings {
 	claude: ClaudeAccount[];
 	chatgpt: ChatgptAccount[];
 	lumo: LumoAccount[];
+	gemini: GeminiAccount[];
 	/** How desktop sessions are saved, for every account. */
 	desktop: DesktopSettings;
 }
@@ -146,6 +170,17 @@ export const DEFAULT_LUMO: LumoSettings = {
 	index: {},
 };
 
+export const DEFAULT_GEMINI: GeminiSettings = {
+	folder: 'AI Chats/Gemini/Chat',
+	index: {},
+};
+
+export const DEFAULT_STUDIO: StudioSettings = {
+	enabled: true,
+	folder: 'AI Chats/Gemini/AI Studio',
+	index: {},
+};
+
 export const desktopApp = (folder: string): DesktopAppSettings => ({ enabled: true, folder, extraFolders: [], index: {} });
 
 export const DEFAULT_DESKTOP: DesktopSettings = {
@@ -167,6 +202,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	claude: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_CLAUDE_WEB, desktop: desktopApp('AI Chats/Claude Desktop/Code') }],
 	chatgpt: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GPT, desktop: desktopApp('AI Chats/ChatGPT Desktop/Codex') }],
 	lumo: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_LUMO }],
+	gemini: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GEMINI, studio: DEFAULT_STUDIO }],
 	desktop: DEFAULT_DESKTOP,
 };
 

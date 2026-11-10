@@ -43,6 +43,7 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 	for (const { web } of s.chatgpt) followIndex([...Object.values(web.index), ...Object.values(web.pendingCaptures ?? {})], web.fileIndex);
 
 	for (const { web } of s.lumo) followIndex(Object.values(web.index), {});
+	for (const { web, studio } of s.gemini) followIndex([...Object.values(web.index), ...Object.values(studio.index)], {});
 
 	// Desktop app sessions: transcript and raw copy.
 	for (const { desktop } of [...s.claude, ...s.chatgpt]) {

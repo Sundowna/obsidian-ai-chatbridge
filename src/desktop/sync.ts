@@ -50,7 +50,7 @@ interface ClaudeApp {
 	groups: Map<string, string>;
 }
 
-const PROVIDER: Record<DesktopApp, Exclude<Provider, 'lumo'>> = { claude: 'claude', codex: 'chatgpt' };
+const PROVIDER: Record<DesktopApp, Exclude<Provider, 'lumo' | 'gemini'>> = { claude: 'claude', codex: 'chatgpt' };
 const accountsFor = (s: Settings, app: DesktopApp): DesktopAccount[] => s[PROVIDER[app]];
 const ownerIdOf = (app: DesktopApp, a: DesktopAccount): string | undefined =>
 	app === 'claude' ? (a as ClaudeAccount).web.orgId : (a as ChatgptAccount).web.workspaceId;

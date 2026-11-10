@@ -1,5 +1,5 @@
 import { Notice, Plugin } from 'obsidian';
-import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type LumoAccount, type Settings } from './settings';
+import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 import { accountsOf, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
 import { AIChatBridgeSettingTab } from './ui/settings-tab';
@@ -12,6 +12,8 @@ import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { StopError } from './api';
 import { runGptSync } from './chatgpt/sync';
 import { runLumoSync } from './lumo/sync';
+import { runGeminiSync } from './gemini/sync';
+import { runStudioSync } from './studio/sync';
 import { chatCountStatus, SyncProgress } from './progress';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
@@ -21,9 +23,12 @@ type Target =
 	| { kind: 'claude'; account: ClaudeAccount }
 	| { kind: 'chatgpt'; account: ChatgptAccount; forceFull?: boolean }
 	| { kind: 'lumo'; account: LumoAccount }
+	| { kind: 'gemini'; account: GeminiAccount }
+	| { kind: 'studio'; account: GeminiAccount }
 	| { kind: 'desktop'; only?: DesktopOnly; label?: string };
 
-export type Surface = 'web' | 'desktop';
+/** web = the provider's chat website; studio = Google AI Studio, which shares the Google login. */
+export type Surface = 'web' | 'desktop' | 'studio';
 
 export default class AIChatBridge extends Plugin {
 	settings!: Settings;
@@ -72,6 +77,12 @@ export default class AIChatBridge extends Plugin {
 			id: 'sync-lumo-chats',
 			name: 'Sync Lumo chats',
 			callback: () => void this.syncLumo('manual'),
+		});
+
+		this.addCommand({
+			id: 'sync-gemini-chats',
+			name: 'Sync Gemini and AI Studio chats',
+			callback: () => void this.syncGemini('manual'),
 		});
 
 		this.addCommand({
@@ -288,6 +299,22 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
+	/** Every Google account: its Gemini chats, then its AI Studio prompts. */
+	async syncGemini(trigger: 'manual' | 'auto') {
+		await this.guarded(trigger, async () => {
+			const accounts = await this.webAccounts('gemini', this.settings.gemini);
+			if (!accounts.length) this.notLoggedIn('gemini', trigger);
+			for (const account of accounts) await this.runGoogle(account, trigger);
+		});
+	}
+
+	/** Gemini, then AI Studio if it is on. Returns false if either stopped. */
+	private async runGoogle(account: GeminiAccount, trigger: SyncTrigger): Promise<boolean> {
+		const chats = await this.runOne({ kind: 'gemini', account }, trigger);
+		if (!account.studio.enabled) return chats;
+		return (await this.runOne({ kind: 'studio', account }, trigger)) && chats;
+	}
+
 	/** Desktop apps only (Claude Code / Cowork, Codex). */
 	async syncDesktop(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
@@ -305,7 +332,9 @@ export default class AIChatBridge extends Plugin {
 			if (surface === 'desktop') {
 				const label = withAccount(provider === 'claude' ? 'Claude desktop' : 'Codex', accountsOf(this.settings, provider), account);
 				await this.runOne({ kind: 'desktop', only: { provider, id: account.id }, label }, 'manual');
-			} else if (provider === 'claude') await this.runOne({ kind: 'claude', account: account as ClaudeAccount }, 'manual');
+			} else if (surface === 'studio') await this.runOne({ kind: 'studio', account: account as GeminiAccount }, 'manual');
+			else if (provider === 'gemini') await this.runOne({ kind: 'gemini', account: account as GeminiAccount }, 'manual');
+			else if (provider === 'claude') await this.runOne({ kind: 'claude', account: account as ClaudeAccount }, 'manual');
 			else if (provider === 'lumo') await this.runOne({ kind: 'lumo', account: account as LumoAccount }, 'manual');
 			else await this.runOne({ kind: 'chatgpt', account: account as ChatgptAccount }, 'manual');
 		});
@@ -338,8 +367,10 @@ export default class AIChatBridge extends Plugin {
 			for (const a of this.settings.chatgpt) if (await this.canSyncWeb('chatgpt', a)) gpt.push(a);
 			const lumo: LumoAccount[] = [];
 			for (const a of this.settings.lumo) if (await this.canSyncWeb('lumo', a)) lumo.push(a);
+			const gemini: GeminiAccount[] = [];
+			for (const a of this.settings.gemini) if (await this.canSyncWeb('gemini', a)) gemini.push(a);
 			const desktop = anyDesktopEnabled(this);
-			if (!claude.length && !gpt.length && !lumo.length && !desktop) {
+			if (!claude.length && !gpt.length && !lumo.length && !gemini.length && !desktop) {
 				if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
 				return;
 			}
@@ -353,6 +384,7 @@ export default class AIChatBridge extends Plugin {
 				if (!(await this.runOne({ kind: 'chatgpt', account }, trigger)) && this.autoPaused) return;
 			}
 			for (const account of lumo) if (!(await this.runOne({ kind: 'lumo', account }, trigger)) && this.autoPaused) return;
+			for (const account of gemini) if (!(await this.runGoogle(account, trigger)) && this.autoPaused) return;
 			if (desktop) await this.runOne({ kind: 'desktop' }, trigger);
 		});
 	}
@@ -399,6 +431,8 @@ export default class AIChatBridge extends Plugin {
 		if (target.kind === 'claude') return withAccount('claude.ai', this.settings.claude, target.account);
 		if (target.kind === 'chatgpt') return this.gptLabel(target.account);
 		if (target.kind === 'lumo') return withAccount('Lumo', this.settings.lumo, target.account);
+		if (target.kind === 'gemini') return withAccount('Gemini', this.settings.gemini, target.account);
+		if (target.kind === 'studio') return withAccount('AI Studio', this.settings.gemini, target.account);
 		return target.label ?? 'Desktop apps';
 	}
 
@@ -413,6 +447,8 @@ export default class AIChatBridge extends Plugin {
 			r = target.kind === 'claude' ? await runSync(this, target.account, progress.update)
 				: target.kind === 'chatgpt' ? await runGptSync(this, target.account, progress.update, target.forceFull)
 				: target.kind === 'lumo' ? await runLumoSync(this, target.account, progress.update)
+				: target.kind === 'gemini' ? await runGeminiSync(this, target.account, progress.update)
+				: target.kind === 'studio' ? await runStudioSync(this, target.account, progress.update)
 				: await runDesktopSync(this, progress.update, undefined, undefined, target.only);
 		} finally {
 			progress.finish();
