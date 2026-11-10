@@ -24,6 +24,10 @@
 	color: var(--text-normal);
 }
 
+.ccs-icon-gemini {
+	color: #4285f4;
+}
+
 .ccs-settings button {
 	cursor: pointer;
 }

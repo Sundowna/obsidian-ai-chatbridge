@@ -1,12 +1,13 @@
 <img src="chatBridgeLogo.png" width="120" alt="AI ChatBridge logo"><h1 align="left">AI ChatBridge</h1>
 
-Sync your **claude.ai**, **ChatGPT** and **Proton Lumo** chats into your Obsidian vault.
+Sync your **claude.ai**, **ChatGPT**, **Proton Lumo**, **Gemini** and **Google AI Studio** chats into your Obsidian vault.
 The idea is to mirror the chats and folders from your AI web & desktop interfaces to your Obsidian vault, **including media, files and artifacts.**
 This way it looks and feels the same way as the GUIs that you are used to - minimum barrier-to-entry and context switching.
 Each chat is saved as the raw JSON the website returns, plus a readable Markdown transcript, so your AI conversations live next to the rest of your notes.
 
 ### Overview:
-- Sync chats from Claude and ChatGPTs web & desktop interfaces (other models coming)
+- Sync chats from Lumo, Gemini, Google AI Studio, Claude and ChatGPTs web & desktop interfaces (other models coming)
+- Multiple accounts per provider e.g. 2x Claude Pro accounts
 - Includes downloads of everything you put in and got out of AI - all media, files and artifacts.
 - Background sync job with timer
 - Automatic retry for large imports i.e. HTTP 429 - Too many requests error (no waiting for days for OpenAI to send you your data)
@@ -19,7 +20,7 @@ Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many reques
 
 ## Features
 
-- Log in to claude.ai and ChatGPT in a window inside Obsidian, the same way you do in a browser.
+- Log in to Proton Lumo, Google (Gemini and AI Studio), claude.ai and ChatGPT in a window inside Obsidian, the same way you do in a browser.
 - **Several accounts per provider**, each with its own login, folders and sync history, on both the web and the desktop app. See [Multiple accounts](#multiple-accounts).
 - Copy chats into the vault as raw JSON plus a Markdown transcript with a link back to the original chat.
 - Optionally download files the AI created (to `Artifacts/`) and files you uploaded (to `Attachments/`) next to each chat.
@@ -28,7 +29,7 @@ Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many reques
 - **Desktop apps:** also save the chats that exist only on this computer: Claude Code sessions from the Claude desktop app and CLI (`~/.claude/projects`), and Codex threads from the ChatGPT/Codex desktop app and CLI (`~/.codex/sessions`). Titles and folders match the apps' sidebars: Claude Code sessions go into one folder per sidebar group (otherwise per working folder), with forks and side sessions nested under the session they came from. Codex threads go into one folder per project, or `Recent`. Sessions still being written wait for a quiet period. Cowork sessions are kept in the cloud, not on this computer, so they cannot be read locally. If you have session `.jsonl` files elsewhere, add their folders under **Extra session folders**.
 - Only new or changed chats are written again; moving or renaming synced notes inside Obsidian is tracked.
 - Optional automatic sync (every 30 minutes or more), which pauses itself after an error.
-- Read-only: the plugin never creates, changes or deletes anything on claude.ai, ChatGPT or Lumo.
+- Read-only: the plugin never creates, changes or deletes anything on claude.ai, ChatGPT, Lumo, Gemini or AI Studio.
 
 ## Commands
 
@@ -37,6 +38,7 @@ Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many reques
 | **Sync Claude chats** | Sync every claude.ai account you are logged in to |
 | **Sync ChatGPT chats** | Sync every ChatGPT account you are logged in to |
 | **Sync Lumo chats** | Sync every Proton Lumo account you are logged in to |
+| **Sync Gemini and AI Studio chats** | Sync every Google account you are logged in to: its Gemini chats, then its AI Studio prompts |
 | **Sync desktop app chats (Claude, Codex)** | Save local Claude Code and Codex sessions |
 | **Move synced chats into the app layout (Claude Desktop, ChatGPT Desktop)** | Move existing synced folders to `Claude Desktop/Chat`, `Claude Desktop/Code`, `ChatGPT Desktop/Chat` and `ChatGPT Desktop/Codex`. Links and the sync index follow |
 | **Sync all chats** | Sync every account you are logged in to, then the desktop apps that are on |
@@ -69,10 +71,11 @@ A session that is already saved stays with the account that saved it, so upgradi
 
 This plugin needs network access to work. Please read this before using it.
 
-- **Services contacted:** `claude.ai`, `chatgpt.com` and `lumo.proton.me` (and their login pages, for example `auth.openai.com` and `account.proton.me`), only when you log in or run a sync. Nothing is sent anywhere else. There is no telemetry.
+- **Services contacted:** `claude.ai`, `chatgpt.com`, `lumo.proton.me`, `gemini.google.com` and `aistudio.google.com` with its API host `alkalimakersuite-pa.clients6.google.com` (and their login pages, for example `auth.openai.com`, `account.proton.me` and `accounts.google.com`), only when you log in or run a sync. Nothing is sent anywhere else. There is no telemetry.
 - **What is sent:** the requests your browser would send to list and read your own chats and files, with your login cookies.
 - **Accounts:** you need your own claude.ai, ChatGPT and/or Proton account.
 - **Proton Lumo encryption:** Lumo stores chats end-to-end encrypted. To sync them, the plugin opens Lumo in a hidden window with your login and unlocks your account keys for that one sync. The keys stay in memory and are never saved or logged. The chats are then saved **readable** in your vault, so anything that can read your vault can read them. Lumo support is new and files attached to Lumo chats are not saved.
+- **Gemini and AI Studio:** Google offers no API for either, so the plugin opens them in a hidden window with your Google login and asks for the same data their own pages load: Gemini's chat list and chats, and AI Studio's prompt library. Requests are signed inside that page, the way the page signs its own; no Google token is saved or logged. Images and files in chats are not downloaded. If Google changes these internal formats, the sync stops instead of saving something wrong. Gemini and AI Studio support is new.
 - **Where logins are stored:** in the login window's own Electron storage on this computer, separately for each account, outside the vault. Logins are never written to `data.json`, to notes or to logs. **Log out** and **Remove** in the settings clear them.
 - **Account identifiers:** the name you give an account, and its claude.ai organization ID or ChatGPT workspace ID, are stored in `data.json`. These are not secrets.
 - **Session key fallback (claude.ai):** if the login window does not work, you can paste your `sessionKey` cookie. It is kept in Obsidian's secret storage on this computer, not in the vault.

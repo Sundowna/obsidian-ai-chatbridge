@@ -22,9 +22,15 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 	const open = head.createEl('button', { cls: 'ccs-card-title', text: account.label, attr: { 'aria-label': `Open ${PROVIDER_LABEL[provider]} account ${account.label}` } });
 	open.addEventListener('click', () => ctx.openAccount(provider, account));
 
-	const web = surfaceLine(card, 'globe', 'Web');
+	const web = surfaceLine(card, 'globe', provider === 'gemini' ? 'Gemini' : 'Web');
 	const chats = Object.keys(account.web.index).length;
 	const app = 'desktop' in account ? account.desktop : null;
+	const studio = 'studio' in account ? account.studio : null;
+	if (studio) {
+		const line = surfaceLine(card, 'flask-conical', 'AI Studio');
+		line.dot.toggleClass('is-on', studio.enabled);
+		line.text.setText(studio.enabled ? count(Object.keys(studio.index).length, 'prompt') : 'Off');
+	}
 	if (app) {
 		const desktop = surfaceLine(card, 'monitor', 'Desktop');
 		desktop.dot.toggleClass('is-on', app.enabled);
@@ -41,6 +47,7 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 			new Notice(`${account.label}: sync starting…`);
 			if (await ctx.plugin.canSyncWeb(provider, account)) await ctx.plugin.syncAccount(provider, account, 'web');
 			if (app?.enabled) await ctx.plugin.syncAccount(provider, account, 'desktop');
+			if (studio?.enabled && (await ctx.plugin.canSyncWeb(provider, account))) await ctx.plugin.syncAccount(provider, account, 'studio');
 			ctx.refresh();
 		})();
 	});
@@ -50,7 +57,8 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 	const s = ctx.plugin.settings;
 	const hero = el.createDiv({ cls: 'ccs-hero' });
 	const words = hero.createDiv();
-	const chats = [...s.claude, ...s.chatgpt, ...s.lumo].reduce((n, a) => n + Object.keys(a.web.index).length, 0);
+	const chats = [...s.claude, ...s.chatgpt, ...s.lumo, ...s.gemini].reduce((n, a) => n + Object.keys(a.web.index).length, 0)
+		+ s.gemini.reduce((n, a) => n + Object.keys(a.studio.index).length, 0);
 	const sessions = [...s.claude, ...s.chatgpt].reduce((n, a) => n + Object.keys(a.desktop.index).length, 0);
 	words.createDiv({ cls: 'ccs-hero-title', text: 'Sync all accounts' });
 	words.createDiv({ cls: 'ccs-hero-desc', text: `${count(chats, 'chat')} and ${count(sessions, 'desktop session')} saved so far.` });
@@ -60,7 +68,7 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 		void ctx.plugin.syncAll('manual').then(ctx.refresh);
 	});
 
-	for (const provider of ['claude', 'chatgpt', 'lumo'] as const) {
+	for (const provider of ['claude', 'chatgpt', 'lumo', 'gemini'] as const) {
 		const head = el.createDiv({ cls: 'ccs-provider-head' });
 		providerIcon(head, provider);
 		head.createDiv({ cls: 'ccs-provider-name', text: PROVIDER_LABEL[provider] });

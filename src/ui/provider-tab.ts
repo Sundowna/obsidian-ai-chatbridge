@@ -4,12 +4,12 @@ import { Notice, setIcon } from 'obsidian';
 import { accountsOf, addAccount, loginRef, nameProblem, PROVIDER_LABEL, removeAccount, SITE_LABEL, type AnyAccount, type DesktopAccount } from '../accounts';
 import { isLoggedIn, logout, type Provider } from '../login';
 import type { Surface } from '../main';
-import type { ChatgptAccount, ClaudeAccount, LumoAccount } from '../settings';
+import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount } from '../settings';
 import { desktopPanel } from './desktop-panel';
 import type { PanelContext } from './fields';
 import { providerIcon } from './icons';
 import { ConfirmModal, NameModal } from './modals';
-import { chatgptWebPanel, claudeWebPanel, lumoWebPanel } from './web-panel';
+import { chatgptWebPanel, claudeWebPanel, geminiWebPanel, lumoWebPanel, studioPanel } from './web-panel';
 
 export interface ProviderState {
 	accountId: string;
@@ -104,7 +104,12 @@ export function providerTab(ctx: PanelContext, el: HTMLElement, provider: Provid
 		return;
 	}
 
-	const surfaces: [Surface, string, string][] = [['web', 'globe', 'Web'], ['desktop', 'monitor', 'Desktop app']];
+	// One Google login has two places with chats: Gemini and AI Studio.
+	const surfaces: [Surface, string, string][] = provider === 'gemini'
+		? [['web', 'message-circle', 'Chat'], ['studio', 'flask-conical', 'AI Studio']]
+		: [['web', 'globe', 'Web'], ['desktop', 'monitor', 'Desktop app']];
+	if (provider === 'gemini' && state.surface === 'desktop') state.surface = 'web';
+	if (provider !== 'gemini' && state.surface === 'studio') state.surface = 'web';
 	const seg = el.createDiv({ cls: 'ccs-segmented', attr: { role: 'tablist', 'aria-label': 'Surface' } });
 	for (const [id, icon, text] of surfaces) {
 		const b = seg.createEl('button', { cls: 'ccs-segment', attr: { role: 'tab', 'aria-selected': String(id === state.surface) } });
@@ -117,7 +122,10 @@ export function providerTab(ctx: PanelContext, el: HTMLElement, provider: Provid
 		});
 	}
 
-	if (state.surface === 'desktop') desktopPanel(ctx, el, provider, account as DesktopAccount, list as DesktopAccount[]);
+	if (provider === 'gemini') {
+		if (state.surface === 'studio') studioPanel(ctx, el, account as GeminiAccount);
+		else geminiWebPanel(ctx, el, account as GeminiAccount);
+	} else if (state.surface === 'desktop') desktopPanel(ctx, el, provider, account as DesktopAccount, list as DesktopAccount[]);
 	else if (provider === 'claude') claudeWebPanel(ctx, el, account as ClaudeAccount);
 	else chatgptWebPanel(ctx, el, account as ChatgptAccount);
 }

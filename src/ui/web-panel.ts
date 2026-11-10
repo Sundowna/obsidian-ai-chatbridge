@@ -5,11 +5,11 @@ import { hasPastedSession, loginRef, SITE_LABEL, withAccount, accountsOf, type A
 import { DEFAULT_OVERLAP_MINUTES } from '../chatgpt/inventory';
 import { isLoggedIn, logout, openLogin, type Provider } from '../login';
 import { isUuid } from '../schema';
-import type { ChatgptAccount, ClaudeAccount, LumoAccount } from '../settings';
+import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount } from '../settings';
 import { advanced, contentOptions, count, filingOptions, folderSetting, projectFilterOptions, type PanelContext } from './fields';
 
 /** Login state with only the buttons that make sense for it. */
-function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string): void {
+function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string, surface: 'web' | 'studio' = 'web'): void {
 	const { plugin } = ctx;
 	const list = accountsOf(plugin.settings, provider);
 	const label = withAccount(SITE_LABEL[provider], list, account);
@@ -19,7 +19,7 @@ function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, accoun
 	const sync = (cta: boolean) =>
 		row.addButton((b) => {
 			b.setButtonText('Sync now').onClick(() => {
-				void plugin.syncAccount(provider, account, 'web').then(ctx.refresh);
+				void plugin.syncAccount(provider, account, surface).then(ctx.refresh);
 			});
 			if (cta) b.setCta();
 		});
@@ -104,6 +104,35 @@ export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAc
 
 	new Setting(el).setName('Content').setHeading();
 	projectFilterOptions(ctx, el, 'lumo', account, g);
+}
+
+export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: GeminiAccount): void {
+	const g = account.web;
+	loginRow(ctx, el, 'gemini', account, () => `${count(Object.keys(g.index).length, 'chat')} saved. The same Google login is used for AI Studio.`);
+
+	new Setting(el).setName('Folders').setHeading();
+	folderSetting(ctx, el, 'Chat folder', 'Where Gemini chats are saved.', () => g.folder, (p) => (g.folder = p));
+	new Setting(el)
+		.setName('What is saved')
+		.setDesc("Each chat's prompts and answers, including the reasoning Gemini shows. Images and files in chats are listed but not downloaded. Gemini has no public API, so the plugin reads what the website itself loads; if Google changes that, the sync stops instead of saving something wrong.");
+}
+
+export function studioPanel(ctx: PanelContext, el: HTMLElement, account: GeminiAccount): void {
+	const st = account.studio;
+	loginRow(ctx, el, 'gemini', account, () => `${count(Object.keys(st.index).length, 'prompt')} saved.`, 'studio');
+
+	new Setting(el)
+		.setName('Sync AI Studio')
+		.setDesc('AI Studio keeps your chats and prompts as files in your Google Drive. When on, "Sync" on this account and "Sync all" also save those.')
+		.addToggle((t) =>
+			t.setValue(st.enabled).onChange(async (v) => {
+				st.enabled = v;
+				await ctx.plugin.saveSettings();
+			}),
+		);
+
+	new Setting(el).setName('Folders').setHeading();
+	folderSetting(ctx, el, 'AI Studio folder', 'Where AI Studio chats and prompts are saved.', () => st.folder, (p) => (st.folder = p));
 }
 
 export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: ChatgptAccount): void {

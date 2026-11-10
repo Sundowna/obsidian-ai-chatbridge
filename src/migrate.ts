@@ -6,8 +6,8 @@ import { CHATGPT_APP, CLAUDE_APP, layoutRoot } from './desktop/layout';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import { onlySelected } from './project-catalog';
 import {
-	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GPT, DEFAULT_LUMO, DEFAULT_SETTINGS, desktopApp,
-	type ChatgptAccount, type ClaudeAccount, type ClaudeWebSettings, type GptSettings, type LumoAccount, type Settings,
+	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_LUMO, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
+	type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type ClaudeWebSettings, type GptSettings, type LumoAccount, type Settings,
 } from './settings';
 
 /** The desktop settings as they were saved before multiple accounts. */
@@ -126,6 +126,20 @@ function firstLumo(claudeChatFolder: string): LumoAccount[] {
 	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_LUMO, folder: root ? `${root}/Lumo/Chat` : 'Lumo/Chat' } }];
 }
 
+const hydrateGemini = (a: Partial<GeminiAccount>): GeminiAccount => ({
+	id: a.id ?? DEFAULT_ACCOUNT_ID,
+	label: a.label ?? DEFAULT_ACCOUNT_LABEL,
+	web: { ...DEFAULT_GEMINI, ...a.web, index: { ...(a.web?.index ?? {}) } },
+	studio: { ...DEFAULT_STUDIO, ...a.studio, index: { ...(a.studio?.index ?? {}) } },
+});
+
+/** A vault that never had Gemini gets it next to its other chat folders. */
+function firstGemini(claudeChatFolder: string): GeminiAccount[] {
+	const root = layoutRoot(claudeChatFolder);
+	const app = root ? `${root}/Gemini` : 'Gemini';
+	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_GEMINI, index: {}, folder: `${app}/Chat` }, studio: { ...DEFAULT_STUDIO, index: {}, folder: `${app}/AI Studio` } }];
+}
+
 /** `migrated` = flat settings were converted (the caller keeps a copy of the old file). */
 export function normalizeSettings(loaded: unknown): { settings: Settings; migrated: boolean } {
 	const raw = (loaded ?? {}) as Saved & Legacy;
@@ -144,6 +158,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			claude: hydratedClaude,
 			chatgpt: chatgpt.map(hydrateGpt),
 			lumo: saved.lumo?.length ? saved.lumo.map(hydrateLumo) : firstLumo(hydratedClaude[0]!.web.chatFolder),
+			gemini: saved.gemini?.length ? saved.gemini.map(hydrateGemini) : firstGemini(hydratedClaude[0]!.web.chatFolder),
 			desktop: { ...DEFAULT_DESKTOP, ...saved.desktop },
 		},
 	};

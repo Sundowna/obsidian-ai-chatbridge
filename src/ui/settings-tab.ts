@@ -20,6 +20,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		claude: { accountId: '', surface: 'web' },
 		chatgpt: { accountId: '', surface: 'web' },
 		lumo: { accountId: '', surface: 'web' },
+		gemini: { accountId: '', surface: 'web' },
 	};
 	private readonly openSections = new Set<string>();
 
@@ -42,7 +43,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const active = id === this.tab;
 		const b = bar.createEl('button', { cls: 'ccs-tab', attr: { role: 'tab', 'aria-selected': String(active) } });
 		b.toggleClass('is-active', active);
-		if (id === 'claude' || id === 'chatgpt' || id === 'lumo') providerIcon(b, id);
+		if (id === 'claude' || id === 'chatgpt' || id === 'lumo' || id === 'gemini') providerIcon(b, id);
 		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : 'sliders-horizontal');
 		b.createSpan({ text: label });
 		b.addEventListener('click', () => this.go(id));
@@ -59,6 +60,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		this.tabButton(bar, 'claude', 'Claude');
 		this.tabButton(bar, 'chatgpt', 'ChatGPT');
 		this.tabButton(bar, 'lumo', 'Lumo');
+		this.tabButton(bar, 'gemini', 'Gemini');
 		this.tabButton(bar, 'general', 'General');
 
 		const ctx: PanelContext = {

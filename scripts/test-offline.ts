@@ -18,6 +18,7 @@ const oneAccount = (web: object, provider: 'claude' | 'chatgpt') => ({
 	claude: provider === 'claude' ? [{ web, desktop: { index: {} } }] : [],
 	chatgpt: provider === 'chatgpt' ? [{ web, desktop: { index: {} } }] : [],
 	lumo: [],
+	gemini: [],
 } as unknown as Parameters<typeof followRename>[0]);
 import { checkGptChat, checkGptFileInfo, checkGptList, checkGptOlderPage, checkGptSidebar } from '../src/chatgpt/schema';
 import { joinParts, olderPartPath } from '../src/chatgpt/parts';

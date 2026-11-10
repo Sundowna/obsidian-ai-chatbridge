@@ -4,13 +4,13 @@
 import type { LoginRef, Provider } from './login';
 import { CHATGPT_APP, CLAUDE_APP, layoutRoot } from './desktop/layout';
 import { safeTitle } from './naming';
-import { DEFAULT_CLAUDE_WEB, DEFAULT_GPT, DEFAULT_LUMO, desktopApp, type ChatgptAccount, type ClaudeAccount, type LumoAccount, type Settings } from './settings';
+import { DEFAULT_CLAUDE_WEB, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_LUMO, DEFAULT_STUDIO, desktopApp, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 
 export type DesktopAccount = ClaudeAccount | ChatgptAccount;
-export type AnyAccount = DesktopAccount | LumoAccount;
+export type AnyAccount = DesktopAccount | LumoAccount | GeminiAccount;
 
-export const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', chatgpt: 'ChatGPT', lumo: 'Lumo' };
-export const SITE_LABEL: Record<Provider, string> = { claude: 'claude.ai', chatgpt: 'ChatGPT', lumo: 'Lumo' };
+export const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', chatgpt: 'ChatGPT', lumo: 'Lumo', gemini: 'Gemini' };
+export const SITE_LABEL: Record<Provider, string> = { claude: 'claude.ai', chatgpt: 'ChatGPT', lumo: 'Lumo', gemini: 'Google' };
 
 export function accountsOf(s: Settings, provider: Provider): AnyAccount[] {
 	return s[provider];
@@ -71,6 +71,17 @@ export function addAccount(s: Settings, provider: Provider, label: string): AnyA
 		s.lumo.push(account);
 		return account;
 	}
+	if (provider === 'gemini') {
+		const app = under(root, `Gemini (${name})`);
+		const account: GeminiAccount = {
+			id: newId(),
+			label: name,
+			web: { ...DEFAULT_GEMINI, index: {}, folder: `${app}/Chat` },
+			studio: { ...DEFAULT_STUDIO, index: {}, folder: `${app}/AI Studio` },
+		};
+		s.gemini.push(account);
+		return account;
+	}
 	const app = under(root, `${CHATGPT_APP} (${name})`);
 	const account: ChatgptAccount = {
 		id: newId(),
@@ -87,6 +98,7 @@ export function removeAccount(s: Settings, provider: Provider, account: AnyAccou
 	if (s[provider].length <= 1) return false;
 	if (provider === 'claude') s.claude = s.claude.filter((a) => a !== account);
 	else if (provider === 'lumo') s.lumo = s.lumo.filter((a) => a !== account);
+	else if (provider === 'gemini') s.gemini = s.gemini.filter((a) => a !== account);
 	else s.chatgpt = s.chatgpt.filter((a) => a !== account);
 	return true;
 }
