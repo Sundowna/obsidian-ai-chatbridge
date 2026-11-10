@@ -141,7 +141,7 @@ This plugin needs network access to work. Please read this before using it.
 - **Accounts:** you need your own account with each provider you sync
 - **Where logins are stored:** in each login window's own storage on this computer, outside the vault, separately per account. Never in `data.json`, notes or logs. **Log out** and **Remove** in the settings clear them
 - **Account identifiers:** the name you give an account, and its claude.ai organization ID or ChatGPT workspace ID, are stored in `data.json` - these are not secrets
-- **Session key fallback (claude.ai):** if the login window doesn't work you can paste your `sessionKey` cookie. It's kept in Obsidian's secret storage on this computer, not in the vault
+- **Pasted login fallback (claude.ai, ChatGPT, Gemini and AI Studio):** if the login window doesn't work you can paste a login cookie from your browser instead, under the account's advanced settings - claude.ai's `sessionKey`, ChatGPT's `__Secure-next-auth.session-token` (or the whole Cookie header), or the whole Cookie header of a `gemini.google.com` request for Google. It's kept in Obsidian's secret storage on this computer - never in the vault, `data.json`, notes or logs - and the login window wins if both are set. Google's cookies only go into a separate hidden window kept in memory, which is emptied after each sync. Lumo has no fallback: unlocking its encrypted chats needs keys only its login window holds. The ChatGPT and Google fallbacks are new
 - **Gemini and AI Studio:** Google has no API for either, so the plugin opens them in a hidden window with your Google login and reads the same data their own pages load. Requests are signed inside that page the same way the page signs its own - no Google token is saved or logged. Google blocks logins from windows inside apps, so the Google login window says it's Firefox. Gemini and AI Studio support is new
 - **Proton Lumo:** Lumo stores chats end-to-end encrypted. To sync them, the plugin opens Lumo in a hidden window with your login and unlocks your keys for that one sync - the keys stay in memory and are never saved or logged. The chats are then saved **readable** in your vault, so anything that can read your vault can read them. With **Only sync selected projects** on, only the names of the selected Lumo projects end up in `data.json`. Lumo support is new
 - **What is written:** chat JSON, Markdown transcripts, downloaded files and a sync log - only in the vault folders you choose. The sync index in `data.json` holds chat IDs and paths, no chat content and no secrets
@@ -170,6 +170,16 @@ Once the plugin is accepted into the directory: **Settings → Community plugins
 **My first sync is taking forever?**
 
 That's the 429s - with 1,000+ chats the providers start saying "too many requests". The plugin pauses, shows a countdown in the status bar and carries on by itself. Still faster than waiting for a data export :)
+
+**The login window doesn't work for me?**
+
+Use the pasted login fallback. Sign in to the site in your browser and open DevTools (**F12**), then:
+
+- **claude.ai:** **Application → Cookies**, copy the value of `sessionKey`
+- **ChatGPT:** **Application → Cookies**, copy the value of `__Secure-next-auth.session-token` - or, if ChatGPT split it into `.0` and `.1`, go to **Network**, select a `chatgpt.com` request and copy its whole `Cookie` header
+- **Gemini and AI Studio:** **Network**, select a `gemini.google.com` request and copy its whole `Cookie` header
+
+Paste it under the account's advanced settings in the plugin. Pasted cookies run out sooner than a login - Google's especially - so paste a fresh one when the sync says it expired.
 
 **Can I edit the synced notes?**
 
