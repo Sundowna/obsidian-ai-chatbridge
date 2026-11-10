@@ -313,6 +313,36 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 		const fromPointer = renderGptTranscript({ ...chat, messages: [spoke('v5', 'user', [transcribedPointer], 1793379760)] } as unknown as typeof chat, { jsonFileName: 'x.json' });
 		expect('gpt voice: transcription stored on the pointer is used', fromPointer.includes('From the pointer.') && !fromPointer.includes('no transcription'));
 		expect('gpt voice: same input renders the same note', renderGptTranscript(voice, { jsonFileName: 'x.json' }) === vmd);
+		// Layout answers (2026-11-10): structure kept, sources resolved, flat version as safety net.
+		const laid = (text: string, flat: string, extra: object = {}) => renderGptTranscript({ ...chat, messages: [{ id: 'l1', author: { role: 'assistant' }, create_time: 1793379722,
+			content: { content_type: 'text', parts: [text] }, metadata: { model_dil_v2: { fallbackMarkdown: flat, appData: { opGenui: { componentResults: {
+				c1: { status: 'resolved', state: { items: [
+					{ ref_id: 'turn1search0', url: 'https://example.org/docs', source_label: 'Example Docs' },
+					{ ref_id: 'turn1search1', url: 'https://example.net/guide', source_label: 'Guide' }] } } } } } }, ...extra }, recipient: 'all', channel: 'final' }] } as unknown as typeof chat, { jsonFileName: 'x.json' });
+		const diagram = 'Intro text. <Cite refs={["turn1search0","turn1search1"]}/>\n\n## Plan\n\n<box border radius="lg" padding={3}>\n  <box background="surface-secondary">\n    **Top**\n    <text color="secondary">First layer</text>\n  </box>\n  <box align="center">\n    <icon name="arrow-up-down"/>\n  </box>\n  <grid columns={2}>\n    <grid-item><box>**Left**\n    <text>Left job</text></box></grid-item>\n    <grid-item><box>**Right**\n    <text>Right job</text></box></grid-item>\n  </grid>\n  <caption>Only a proposal.</caption>\n</box>\n\nDone.';
+		const flatDiagram = 'Intro text. \uE200cite\uE202turn1search0\uE202turn1search1\uE201\n\n## Plan\n\n**Top**\n\nFirst layer\n\n**Left**\n\nLeft job\n\n**Right**\n\nRight job\n\nOnly a proposal.\n\nDone.';
+		const dmd = laid(diagram, flatDiagram);
+		expect('gpt layout: sources become named links', dmd.includes('Intro text. [Example Docs](<https://example.org/docs>), [Guide](<https://example.net/guide>)'), dmd);
+		expect('gpt layout: bordered box is a quote, inner card nested', dmd.includes('> > **Top**\n> > First layer'), dmd);
+		expect('gpt layout: arrow icon kept', dmd.includes('> ⇅'));
+		expect('gpt layout: grid becomes a table', dmd.includes('> | **Left**<br>Left job | **Right**<br>Right job |\n> | --- | --- |'), dmd);
+		expect('gpt layout: caption in italics, text before and after in order', dmd.includes('> *Only a proposal.*') && dmd.indexOf('## Plan') < dmd.indexOf('⇅') && dmd.indexOf('⇅') < dmd.indexOf('Done.'));
+		expect('gpt layout: no markup left', !/<\/?(box|grid|text|icon|caption|Cite)\b/.test(dmd));
+		const flatOnly = laid(diagram, 'Intro text. \uE200cite\uE202turn1search0\uE201\n\nWords the layout does not have at all here, so trust the flat version instead please.');
+		expect('gpt layout: flat version used when the layout would lose words', flatOnly.includes('Words the layout does not have') && flatOnly.includes('[Example Docs](<https://example.org/docs>)') && !flatOnly.includes('⇅'), flatOnly);
+		const loop = laid('<grid columns={2}>\n  {#each [{name:"Alpha",d:\'one\'},{name:"Beta",d:"two"}] as a}\n  <grid-item><box>**{a.name}**\n  <caption>{a.d}</caption></box></grid-item>\n  {/each}\n</grid>', '-');
+		expect('gpt layout: template loop over literal data is filled in', loop.includes('| **Alpha**<br>*one* | **Beta**<br>*two* |'), loop);
+		const code = laid('{@body const [n,setN] = DIL.useState(1)}\n<box>Total: **{n*2}** {alert(1)}</box>', '-');
+		expect('gpt layout: state setup dropped, computed values not run', code.includes('Total: **…** …') && !code.includes('@body'), code);
+		const svg = laid('<box border><svg viewBox="0 0 100 50" width="100%">\n  {#each [{x:10,t:"A"},{x:60,t:"B"}] as n}\n  <rect x={n.x} y="5" width={30} height="20" fillOpacity=".2" strokeWidth={2}/>\n  <text x={n.x+15} y="40" textAnchor="middle">{n.t}</text>\n  {/each}\n</svg></box>', '-');
+		expect('gpt layout: SVG drawn inline with SVG attribute names',
+			svg.includes('<rect x="10" y="5" width="30" height="20" fill-opacity=".2" stroke-width="2"/>') && svg.includes('<text x="75" y="40" text-anchor="middle">B</text>') && svg.includes('viewBox="0 0 100 50"') && !svg.includes('\n> \n'), svg);
+		const svgCode = laid('<svg viewBox="0 0 9 9">{Array.from({length:3}).map((_,i)=><circle cx={i}/>)}</svg>', '-');
+		expect('gpt layout: SVG built by code stays marked', svgCode.includes('*[diagram – see raw JSON]*'), svgCode);
+		const chartMd = laid('<Chart content={{"chartType":"line","meta":{"footer":"Daily data"},"xKey":"date","series":[{"dataKey":"clicks","label":"Clicks"}],"data":[{"date":"10 Oct","clicks":42},{"date":"11 Oct","clicks":70}]}}/>', '-');
+		expect('gpt layout: chart data becomes a table', chartMd.includes('| date | Clicks |\n| --- | --- |\n| 10 Oct | 42 |\n| 11 Oct | 70 |') && chartMd.includes('*Daily data*'), chartMd);
+		const flatCite = cleanMarkers('See \uE200cite\uE202turn1search1\uE201.', [], new Map([['turn1search1', { url: 'https://example.net/guide', label: 'Guide' }]]));
+		expect('gpt flat version: source chip resolved by ref', flatCite === 'See [Guide](<https://example.net/guide>).', flatCite);
 		const gpt3 = { index: { c: { updated_at: '', synced: '', json: 'G/R/c.json', md: 'G/R/c.md', older: ['G/R/c (older 1).json'] } as IndexEntry }, fileIndex: {} };
 		const s3 = oneAccount(gpt3, 'chatgpt');
 		expect('rename: older parts follow too', followRename(s3, 'G/R', 'G/Q') === 3 && gpt3.index.c!.older![0] === 'G/Q/c (older 1).json');
