@@ -1,6 +1,6 @@
 // The settings model. Everything here is saved in data.json, which syncs with the vault.
 // So: NO secrets. Logins live in the login windows' own storage; the fallback session
-// keys (claude.ai, ChatGPT) live in Obsidian's secret storage – we only store the *name*
+// keys (claude.ai, ChatGPT, Google) live in Obsidian's secret storage – we only store the *name*
 // of that secret (secretId).
 
 import { normalizePath } from 'obsidian';
@@ -83,6 +83,8 @@ export interface LumoSettings {
 /** One Google login's Gemini chats (gemini.google.com). No tokens: those exist only during a sync. */
 export interface GeminiSettings {
 	folder: string;
+	/** Name of the secret holding pasted Google cookies (Gemini and AI Studio), used when the login window has none. */
+	secretId: string;
 	index: Record<string, IndexEntry>;
 	/** The Google account behind this login (its email, not secret), to notice the same login twice. */
 	userId?: string;
@@ -176,6 +178,7 @@ export const DEFAULT_LUMO: LumoSettings = {
 
 export const DEFAULT_GEMINI: GeminiSettings = {
 	folder: 'AI Chats/Gemini/Chat',
+	secretId: '',
 	index: {},
 };
 

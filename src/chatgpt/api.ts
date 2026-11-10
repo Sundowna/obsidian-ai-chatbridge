@@ -5,7 +5,7 @@
 // from secret storage) + the key the chatgpt.com page carries.
 // Both stay in memory; every error text is cleaned of them before it is shown or logged.
 
-import { requestUrl, RequestUrlResponse, type App } from 'obsidian';
+import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
 import { cookieHeader, cookieValue, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
 import { isChatId, isFileId, isMessageId } from './schema';
@@ -43,11 +43,6 @@ export class BlockedLinkError extends Error {
 export interface Raw {
 	bytes: ArrayBuffer;
 	json: unknown;
-}
-
-/** The pasted session cookie from Obsidian's secret storage, or null if none is set. */
-export function pastedSession(app: App, secretId: string): string | null {
-	return secretId ? app.secretStorage.getSecret(secretId) || null : null;
 }
 
 function header(headers: Record<string, string>, name: string): string {

@@ -7,6 +7,7 @@ import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
+import { pastedSession } from '../cookies';
 import { GeminiApi } from './api';
 import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from './save';
 import { renderGeminiTranscript } from './transcript';
@@ -25,7 +26,7 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 		const folder = cleanFolder(g.folder);
 		if (!folder) throw new StopError('The Gemini folder setting is empty or invalid.');
 		progress('opening Gemini…');
-		const a = await GeminiApi.connect(loginRef('gemini', account));
+		const a = await GeminiApi.connect(loginRef('gemini', account), pastedSession(plugin.app, g.secretId));
 		api = a;
 		const items = await a.listChats(wait, (page) => progress(`reading Gemini chat list… page ${page}`));
 		const byId = new Map<string, GeminiListItem>(items.map((it) => [it.uuid, it]));

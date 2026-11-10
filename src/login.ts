@@ -84,7 +84,10 @@ interface Cookie {
 }
 interface Session {
 	fetch?(url: string, init: RequestInit): Promise<Response>;
-	cookies: { get(filter: { url: string } | { domain: string }): Promise<Cookie[]> };
+	cookies: {
+		get(filter: { url: string } | { domain: string }): Promise<Cookie[]>;
+		set(details: { url: string; name: string; value: string; domain?: string; path: string; secure: boolean; httpOnly: boolean }): Promise<void>;
+	};
 	clearStorageData(): Promise<void>;
 	setUserAgent(ua: string): void;
 	getUserAgent(): string;
@@ -322,16 +325,35 @@ export interface ReadyPage {
 	close(): void;
 }
 
+/** Cookies pasted in the settings, for a hidden window when the login window has no login. */
+export interface PastedCookies {
+	pairs: readonly [string, string][];
+	/** Where they are set, e.g. ".google.com". */
+	domain: string;
+}
+
 /**
  * Opens `url` in a hidden window and waits until the expression `ready` is true in the page.
  * Null if it never is (not logged in, or the site changed).
+ * With `pasted`, the window gets a storage of its own, in memory only, holding just those
+ * cookies; it is emptied on close and the login window's own storage is never touched.
  */
-export async function openReadyPage(login: LoginRef, url: string, ready: string, timeoutMs: number): Promise<ReadyPage | null> {
+export async function openReadyPage(login: LoginRef, url: string, ready: string, timeoutMs: number, pasted?: PastedCookies): Promise<ReadyPage | null> {
 	const r = remote();
 	if (!r) throw new Error('Login windows are not available in this Obsidian (desktop only).');
-	const windowKey = partition(login);
+	// No "persist:" prefix: Electron keeps such a storage in memory and never writes it to disk.
+	const windowKey = pasted ? `${partition(login).replace(/^persist:/, '')}-pasted` : partition(login);
 	const ses = r.session.fromPartition(windowKey);
 	prepareSession(ses, SITES[login.provider]);
+	if (pasted) {
+		await ses.clearStorageData();
+		const at = SITES[login.provider].origin;
+		for (const [name, value] of pasted.pairs) {
+			// __Host- cookies must not name a domain; the rest go on the whole site.
+			const domain = name.startsWith('__Host-') ? undefined : pasted.domain;
+			await ses.cookies.set({ url: at, name, value, domain, path: '/', secure: true, httpOnly: false });
+		}
+	}
 	const win = new r.BrowserWindow({
 		show: false,
 		webPreferences: { partition: windowKey, nodeIntegration: false, contextIsolation: true, sandbox: true },
@@ -341,6 +363,7 @@ export async function openReadyPage(login: LoginRef, url: string, ready: string,
 	const close = () => {
 		open.delete(key);
 		if (!win.isDestroyed()) win.close();
+		if (pasted) void ses.clearStorageData().catch(() => undefined);
 	};
 	win.webContents.removeAllListeners('will-navigate');
 	win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

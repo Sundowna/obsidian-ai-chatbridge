@@ -25,7 +25,8 @@ import { joinParts, olderPartPath } from '../src/chatgpt/parts';
 import { toListItems } from '../src/chatgpt/select';
 import { gptChatFiles } from '../src/chatgpt/files';
 import { cleanMarkers, renderGptTranscript } from '../src/chatgpt/transcript';
-import { describePage, findAccessToken } from '../src/chatgpt/token';
+import { describePage, fallbackCookie, findAccessToken } from '../src/chatgpt/token';
+import { cookiePairs, cookieText, googleCookies } from '../src/cookies';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -296,6 +297,28 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 	const gpt2 = { index: { c: { updated_at: '', synced: '', json: 'G/Recent/c.json', md: 'G/Recent/c.md' } as IndexEntry }, fileIndex: { f: 'G/Recent/Artifacts/c/a.png' } as Record<string, string> };
 	const s2 = oneAccount(gpt2, 'chatgpt');
 	expect('rename: ChatGPT index follows too', followRename(s2, 'G/Recent', 'G/Old') === 3 && gpt2.fileIndex.f === 'G/Old/Artifacts/c/a.png');
+}
+
+// --- pasted session fallbacks (made-up values) ----------------------------
+{
+	const S = '__Secure-next-auth.session-token';
+	const v = 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..abcDEF123_-xyz';
+	expect('fallback: bare ChatGPT value gets the cookie name', fallbackCookie(v) === `${S}=${v}`);
+	expect('fallback: surrounding spaces and newline trimmed', fallbackCookie(`  ${v}\n`) === `${S}=${v}`);
+	expect('fallback: whole header with split .0/.1 kept', fallbackCookie(`Cookie: ${S}.0=aaa; ${S}.1=bbb; cf_clearance=ccc`) === `${S}.0=aaa; ${S}.1=bbb; cf_clearance=ccc`);
+	expect('fallback: too short or empty refused', fallbackCookie('short') === null && fallbackCookie('') === null);
+	expect('fallback: header without the session cookie refused', fallbackCookie('foo=bar; baz=qux') === null);
+	expect('fallback: empty session value refused', fallbackCookie(`${S}=; other=1`) === null);
+	expect('fallback: no extra header can be smuggled in', fallbackCookie(`${S}=a\r\nX-Evil: 1`) === null && fallbackCookie(`${S}=a b`) === null);
+
+	const google = 'SID=s1; HSID=h1; SAPISID=sap/abc; __Secure-1PSID=p1; __Secure-1PSIDTS=ts1; NID=n1';
+	expect('google: whole header accepted', googleCookies(google)?.length === 6);
+	expect('google: "Cookie:" prefix accepted', googleCookies(`cookie: ${google}`)?.length === 6);
+	expect('google: needs __Secure-1PSID', googleCookies('SID=s1; SAPISID=sap') === null);
+	expect('google: needs SAPISID (AI Studio signs with it)', googleCookies('SID=s1; __Secure-1PSID=p1') === null);
+	expect('google: a bare value refused', googleCookies('p1longvaluewithoutaname') === null);
+	expect('google: malformed part refused', googleCookies(`${google}; =x`) === null && googleCookies(`${google};\nX: 1`) === null);
+	expect('cookies: pairs round trip', cookieText(cookiePairs('a=1;  b=2 ;')!) === 'a=1; b=2');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll passed');

@@ -8,6 +8,7 @@ import { ShapeError } from '../schema';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from '../gemini/save';
 import { renderStudioTranscript } from '../gemini/transcript';
+import { pastedSession } from '../cookies';
 import { StudioApi } from './api';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -22,7 +23,7 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 		const folder = cleanFolder(st.folder);
 		if (!folder) throw new StopError('The AI Studio folder setting is empty or invalid.');
 		progress('opening AI Studio…');
-		const a = await StudioApi.connect(loginRef('gemini', account));
+		const a = await StudioApi.connect(loginRef('gemini', account), pastedSession(plugin.app, account.web.secretId));
 		api = a;
 		const items = await a.listPrompts(wait, (page) => progress(`reading AI Studio library… page ${page}`));
 		await saveChats(plugin, items, st.index, folder, async (item) => {

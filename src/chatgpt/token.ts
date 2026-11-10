@@ -2,6 +2,8 @@
 // (found 2026-11-06 with DevTools search: "accessToken" is in the HTML of chatgpt.com pages).
 // Pure functions, testable offline. The key is never stored or logged.
 
+import { cookiePairs, cookieText } from '../cookies';
+
 const JWT = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
 
 /** Decode identifiers for cache partitioning only. Requests still authenticate on the server. */
@@ -38,7 +40,6 @@ export function findAccessToken(html: string): string | null {
 }
 
 const SESSION_COOKIE = '__Secure-next-auth.session-token';
-const COOKIE_NAME = /^[A-Za-z0-9_.-]+$/;
 const COOKIE_VALUE = /^[A-Za-z0-9_.\-~+/=%]{20,}$/;
 
 /**
@@ -51,17 +52,9 @@ export function fallbackCookie(pasted: string): string | null {
 	const text = pasted.trim().replace(/^cookie:\s*/i, '');
 	if (!text || /[\r\n]/.test(text)) return null;
 	if (!text.includes(SESSION_COOKIE)) return COOKIE_VALUE.test(text) ? `${SESSION_COOKIE}=${text}` : null;
-	const pairs: string[] = [];
-	for (const part of text.split(';')) {
-		const p = part.trim();
-		if (!p) continue;
-		const eq = p.indexOf('=');
-		const name = p.slice(0, eq);
-		const value = p.slice(eq + 1);
-		if (eq <= 0 || !COOKIE_NAME.test(name) || !/^[^\s;,"\\]*$/.test(value)) return null;
-		pairs.push(`${name}=${value}`);
-	}
-	return pairs.some((p) => p.startsWith(`${SESSION_COOKIE}=`) || p.startsWith(`${SESSION_COOKIE}.`)) ? pairs.join('; ') : null;
+	const pairs = cookiePairs(text);
+	const session = pairs?.some(([n, v]) => (n === SESSION_COOKIE || n.startsWith(`${SESSION_COOKIE}.`)) && v !== '');
+	return pairs && session ? cookieText(pairs) : null;
 }
 
 /** Masks every key-shaped or long random-looking value. */

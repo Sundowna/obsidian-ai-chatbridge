@@ -115,6 +115,17 @@ export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: Gemi
 	new Setting(el)
 		.setName('What is saved')
 		.setDesc("Each chat's prompts and answers, including the reasoning Gemini shows. Images and files in chats are listed but not downloaded. Gemini has no public API, so the plugin reads what the website itself loads; if Google changes that, the sync stops instead of saving something wrong.");
+
+	const more = advanced(ctx, el, `gemini-web-${account.id}`);
+	new Setting(more)
+		.setName('Google cookies (fallback)')
+		.setDesc('Only if the login window does not work: the whole Cookie header of a gemini.google.com request, copied from DevTools. Used for Gemini and AI Studio, kept in Obsidian\'s secret storage on this computer, and loaded only into a hidden window that is emptied after each sync. The login window wins if both are set. Google renews these cookies often, so a pasted copy stops working sooner than a login.')
+		.addComponent((c) =>
+			new SecretComponent(ctx.app, c).setValue(g.secretId).onChange(async (v) => {
+				g.secretId = v;
+				await ctx.plugin.saveSettings();
+			}),
+		);
 }
 
 export function studioPanel(ctx: PanelContext, el: HTMLElement, account: GeminiAccount): void {

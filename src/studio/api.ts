@@ -5,7 +5,8 @@
 // public API key in the page. Both are read in the page and never leave it.
 
 import { StopError } from '../api';
-import { isLoggedIn, openReadyPage, type LoginRef, type ReadyPage } from '../login';
+import { openReadyPage, type LoginRef, type ReadyPage } from '../login';
+import { googleLogin } from '../gemini/api';
 import { ShapeError } from '../schema';
 import type { StudioPrompt } from '../gemini/types';
 import type { ListItem } from '../types';
@@ -25,10 +26,15 @@ const READY = `location.origin === ${JSON.stringify(ORIGIN)} && /(?:^|; )SAPISID
 export class StudioApi {
 	private constructor(private readonly page: ReadyPage) {}
 
-	static async connect(login: LoginRef): Promise<StudioApi> {
-		if (!(await isLoggedIn(login))) throw new StopError('Not logged in to Google. Select "Log in" for this account in the plugin settings.');
-		const page = await openReadyPage(login, START, READY, OPEN_TIMEOUT_MS);
-		if (!page) throw new StopError('AI Studio did not open signed in. Open aistudio.google.com once in the login window to accept its terms, or log in again.');
+	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
+	static async connect(login: LoginRef, fallback: string | null = null): Promise<StudioApi> {
+		const pasted = await googleLogin(login, fallback);
+		const page = await openReadyPage(login, START, READY, OPEN_TIMEOUT_MS, pasted);
+		if (!page) {
+			throw new StopError(pasted
+				? 'AI Studio did not open signed in with the pasted cookies. They may have expired: paste fresh ones, or log in instead.'
+				: 'AI Studio did not open signed in. Open aistudio.google.com once in the login window to accept its terms, or log in again.');
+		}
 		return new StudioApi(page);
 	}
 

@@ -4,7 +4,8 @@
 import type AIChatBridge from './main';
 import { loginRef, SITE_LABEL, type AnyAccount } from './accounts';
 import { ClaudeApi, StopError } from './api';
-import { GptApi, pastedSession } from './chatgpt/api';
+import { GptApi } from './chatgpt/api';
+import { pastedSession } from './cookies';
 import { GptRateLimitError } from './chatgpt/recovery';
 import { listAllGptProjects } from './chatgpt/sync';
 import { claudeAuth } from './claude-auth';
