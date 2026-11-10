@@ -42,13 +42,19 @@ export function citeSources(metadata: unknown): CiteSources {
 
 /** "[Nous Research](<url>), [Hermes Agent](<url>)", or "[Unresolved source]" when none is known. */
 export function formatCites(refs: string[], sources: CiteSources): string {
+	const links = citeLinks(refs, sources).map((s) => '[' + s.label.replace(/[[\]]/g, '') + '](<' + s.url + '>)');
+	return links.length ? links.join(', ') : refs.length ? '[Unresolved source]' : '';
+}
+
+/** The known sources of these refs, each URL once, in order. */
+export function citeLinks(refs: string[], sources: CiteSources): CiteSource[] {
 	const seen = new Set<string>();
-	const links: string[] = [];
+	const out: CiteSource[] = [];
 	for (const ref of refs) {
 		const s = sources.get(ref);
 		if (!s || seen.has(s.url)) continue;
 		seen.add(s.url);
-		links.push('[' + s.label.replace(/[[\]]/g, '') + '](<' + s.url + '>)');
+		out.push(s);
 	}
-	return links.length ? links.join(', ') : refs.length ? '[Unresolved source]' : '';
+	return out;
 }

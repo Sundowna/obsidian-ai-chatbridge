@@ -270,7 +270,7 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 		expect('gpt real chat: no layout code left', !/<box|<AsyncImage|<Entity|<Cite|\{#each/.test(gmd));
 		expect('gpt real chat: no hidden marker characters left', !/[-]/.test(gmd));
 		expect('gpt real chat: names kept', gmd.includes('TriliumNext Notes') && gmd.includes('Anytype'));
-		expect('gpt real chat: links kept', gmd.includes('[Website](https://triliumnotes.org/)'));
+		expect('gpt real chat: links kept (Markdown, or HTML inside a card)', gmd.includes('[Website](https://triliumnotes.org/)') || gmd.includes('<a href="https://triliumnotes.org/">Website</a>'));
 		expect('gpt real chat: table kept', gmd.includes('| Platform |'));
 	}
 
@@ -322,25 +322,32 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 		const diagram = 'Intro text. <Cite refs={["turn1search0","turn1search1"]}/>\n\n## Plan\n\n<box border radius="lg" padding={3}>\n  <box background="surface-secondary">\n    **Top**\n    <text color="secondary">First layer</text>\n  </box>\n  <box align="center">\n    <icon name="arrow-up-down"/>\n  </box>\n  <grid columns={2}>\n    <grid-item><box>**Left**\n    <text>Left job</text></box></grid-item>\n    <grid-item><box>**Right**\n    <text>Right job</text></box></grid-item>\n  </grid>\n  <caption>Only a proposal.</caption>\n</box>\n\nDone.';
 		const flatDiagram = 'Intro text. \uE200cite\uE202turn1search0\uE202turn1search1\uE201\n\n## Plan\n\n**Top**\n\nFirst layer\n\n**Left**\n\nLeft job\n\n**Right**\n\nRight job\n\nOnly a proposal.\n\nDone.';
 		const dmd = laid(diagram, flatDiagram);
+		// One HTML block per visual: no blank line inside, or Obsidian would end the block there.
+		const blocks = (md: string) => md.split('\n\n').filter((b) => b.startsWith('<div class="ccs-gpt">'));
 		expect('gpt layout: sources become named links', dmd.includes('Intro text. [Example Docs](<https://example.org/docs>), [Guide](<https://example.net/guide>)'), dmd);
-		expect('gpt layout: bordered box is a quote, inner card nested', dmd.includes('> > **Top**\n> > First layer'), dmd);
-		expect('gpt layout: arrow icon kept', dmd.includes('> ⇅'));
-		expect('gpt layout: grid becomes a table', dmd.includes('> | **Left**<br>Left job | **Right**<br>Right job |\n> | --- | --- |'), dmd);
-		expect('gpt layout: caption in italics, text before and after in order', dmd.includes('> *Only a proposal.*') && dmd.indexOf('## Plan') < dmd.indexOf('⇅') && dmd.indexOf('⇅') < dmd.indexOf('Done.'));
+		expect('gpt layout: one HTML block for the diagram', blocks(dmd).length === 1 && blocks(dmd)[0]!.endsWith('</div>'), dmd);
+		expect('gpt layout: bordered card holds a filled card', dmd.includes('<div class="ccs-gpt-box ccs-gpt-border"><div class="ccs-gpt-box ccs-gpt-fill"><div class="ccs-gpt-p"><strong>Top</strong></div>'), dmd);
+		expect('gpt layout: muted text and centred arrow icon', dmd.includes('<div class="ccs-gpt-text ccs-gpt-muted"><div class="ccs-gpt-p">First layer</div></div>') &&
+			dmd.includes('<div class="ccs-gpt-box ccs-gpt-plain ccs-gpt-center"><div class="ccs-gpt-p"><span class="ccs-gpt-icon" data-icon="arrow-up-down">⇅</span></div></div>'), dmd);
+		expect('gpt layout: grid keeps its columns', dmd.includes('<div class="ccs-gpt-grid ccs-gpt-cols-2"><div class="ccs-gpt-cell"><div class="ccs-gpt-box ccs-gpt-plain"><div class="ccs-gpt-p"><strong>Left</strong></div>'), dmd);
+		expect('gpt layout: caption, text before and after in order', dmd.includes('<div class="ccs-gpt-caption"><div class="ccs-gpt-p">Only a proposal.</div></div>') && dmd.indexOf('## Plan') < dmd.indexOf('ccs-gpt-grid') && dmd.indexOf('ccs-gpt-grid') < dmd.indexOf('Done.'));
 		expect('gpt layout: no markup left', !/<\/?(box|grid|text|icon|caption|Cite)\b/.test(dmd));
 		const flatOnly = laid(diagram, 'Intro text. \uE200cite\uE202turn1search0\uE201\n\nWords the layout does not have at all here, so trust the flat version instead please.');
-		expect('gpt layout: flat version used when the layout would lose words', flatOnly.includes('Words the layout does not have') && flatOnly.includes('[Example Docs](<https://example.org/docs>)') && !flatOnly.includes('⇅'), flatOnly);
+		expect('gpt layout: flat version used when the layout would lose words', flatOnly.includes('Words the layout does not have') && flatOnly.includes('[Example Docs](<https://example.org/docs>)') && !flatOnly.includes('ccs-gpt'), flatOnly);
 		const loop = laid('<grid columns={2}>\n  {#each [{name:"Alpha",d:\'one\'},{name:"Beta",d:"two"}] as a}\n  <grid-item><box>**{a.name}**\n  <caption>{a.d}</caption></box></grid-item>\n  {/each}\n</grid>', '-');
-		expect('gpt layout: template loop over literal data is filled in', loop.includes('| **Alpha**<br>*one* | **Beta**<br>*two* |'), loop);
+		expect('gpt layout: template loop over literal data is filled in', loop.includes('<strong>Alpha</strong>') && loop.includes('<div class="ccs-gpt-p">two</div>') && blocks(loop).length === 1, loop);
 		const code = laid('{@body const [n,setN] = DIL.useState(1)}\n<box>Total: **{n*2}** {alert(1)}</box>', '-');
-		expect('gpt layout: state setup dropped, computed values not run', code.includes('Total: **…** …') && !code.includes('@body'), code);
+		expect('gpt layout: state setup dropped, computed values not run', code.includes('Total: <strong>…</strong> …') && !code.includes('@body'), code);
+		const row = laid('<row><box width="40px"><icon name="folder"/></box><box flex="1">**1. <Entity value="A & B <x>"/>** costs <badge color="success">2 < 3</badge></box></row>', '-');
+		expect('gpt layout: Markdown around inline pieces stays intact, text escaped', row.includes('<strong>1. A &amp; B &lt;x&gt;</strong> costs <span class="ccs-gpt-badge ccs-gpt-success"><div') === false && row.includes('<strong>1. A &amp; B &lt;x&gt;</strong> costs <span class="ccs-gpt-badge ccs-gpt-success">2 &lt; 3</span>'), row);
+		expect('gpt layout: fixed-width and growing boxes in a row', row.includes('class="ccs-gpt-box ccs-gpt-plain ccs-gpt-fixed" style="width:40px"') && row.includes('ccs-gpt-box ccs-gpt-plain ccs-gpt-grow'), row);
 		const svg = laid('<box border><svg viewBox="0 0 100 50" width="100%">\n  {#each [{x:10,t:"A"},{x:60,t:"B"}] as n}\n  <rect x={n.x} y="5" width={30} height="20" fillOpacity=".2" strokeWidth={2}/>\n  <text x={n.x+15} y="40" textAnchor="middle">{n.t}</text>\n  {/each}\n</svg></box>', '-');
 		expect('gpt layout: SVG drawn inline with SVG attribute names',
-			svg.includes('<rect x="10" y="5" width="30" height="20" fill-opacity=".2" stroke-width="2"/>') && svg.includes('<text x="75" y="40" text-anchor="middle">B</text>') && svg.includes('viewBox="0 0 100 50"') && !svg.includes('\n> \n'), svg);
+			svg.includes('<rect x="10" y="5" width="30" height="20" fill-opacity=".2" stroke-width="2"/>') && svg.includes('<text x="75" y="40" text-anchor="middle">B</text>') && svg.includes('viewBox="0 0 100 50"') && blocks(svg).length === 1, svg);
 		const svgCode = laid('<svg viewBox="0 0 9 9">{Array.from({length:3}).map((_,i)=><circle cx={i}/>)}</svg>', '-');
-		expect('gpt layout: SVG built by code stays marked', svgCode.includes('*[diagram – see raw JSON]*'), svgCode);
+		expect('gpt layout: SVG built by code stays marked', svgCode.includes('Diagram – see raw JSON'), svgCode);
 		const chartMd = laid('<Chart content={{"chartType":"line","meta":{"footer":"Daily data"},"xKey":"date","series":[{"dataKey":"clicks","label":"Clicks"}],"data":[{"date":"10 Oct","clicks":42},{"date":"11 Oct","clicks":70}]}}/>', '-');
-		expect('gpt layout: chart data becomes a table', chartMd.includes('| date | Clicks |\n| --- | --- |\n| 10 Oct | 42 |\n| 11 Oct | 70 |') && chartMd.includes('*Daily data*'), chartMd);
+		expect('gpt layout: chart data becomes bars with values', chartMd.includes('<span class="ccs-gpt-bar-label">10 Oct</span><span class="ccs-gpt-bar-track"><span class="ccs-gpt-bar" style="width:60%"></span></span><span class="ccs-gpt-bar-value">42</span>') && chartMd.includes('Daily data'), chartMd);
 		const flatCite = cleanMarkers('See \uE200cite\uE202turn1search1\uE201.', [], new Map([['turn1search1', { url: 'https://example.net/guide', label: 'Guide' }]]));
 		expect('gpt flat version: source chip resolved by ref', flatCite === 'See [Guide](<https://example.net/guide>).', flatCite);
 		const gpt3 = { index: { c: { updated_at: '', synced: '', json: 'G/R/c.json', md: 'G/R/c.md', older: ['G/R/c (older 1).json'] } as IndexEntry }, fileIndex: {} };

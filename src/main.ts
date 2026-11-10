@@ -11,6 +11,7 @@ import { followRename } from './follow';
 import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { StopError } from './api';
 import { runGptSync } from './chatgpt/sync';
+import { registerLayoutIcons } from './chatgpt/layout-view';
 import { runLumoSync } from './lumo/sync';
 import { runGeminiSync } from './gemini/sync';
 import { runStudioSync } from './studio/sync';
@@ -59,6 +60,7 @@ export default class AIChatBridge extends Plugin {
 			}
 		}
 		if (adopted) await this.saveSettings();
+		registerLayoutIcons(this);
 		this.statusEl = this.addStatusBarItem();
 
 		this.addCommand({

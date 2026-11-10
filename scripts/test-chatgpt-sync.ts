@@ -60,6 +60,7 @@ async function testAutomaticResume() {
 			addSettingTab: () => {},
 			registerInterval: () => 0,
 			registerEvent: () => {},
+			registerMarkdownPostProcessor: () => {},
 		});
 		await p.onload();
 		return p;
