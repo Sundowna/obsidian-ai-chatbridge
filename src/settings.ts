@@ -27,6 +27,10 @@ export interface ClaudeWebSettings {
 	onlyProjects: boolean;
 	projects: string[];
 	projectCatalog?: ProjectCatalog;
+	/** With onlyProjects: let a selected project use a folder of its own (projectFolders). */
+	customProjectFolders?: boolean;
+	/** Picker row ID (project ID, or ":no-project") -> vault folder. Missing = the default folder. */
+	projectFolders?: Record<string, string>;
 	/** Folder for normal claude.ai chats (platform CLAUDE_AI). */
 	chatFolder: string;
 	/** Folder for Claude Code sessions (any other platform). */
@@ -53,6 +57,10 @@ export interface GptSettings {
 	onlyProjects: boolean;
 	projects: string[];
 	projectCatalog?: ProjectCatalog;
+	/** With onlyProjects: let a selected project use a folder of its own (projectFolders). */
+	customProjectFolders?: boolean;
+	/** Picker row ID (project ID, or ":no-project") -> vault folder. Missing = the default folder. */
+	projectFolders?: Record<string, string>;
 	index: Record<string, IndexEntry>;
 	fileIndex: Record<string, string>;
 	/** The workspace the login belongs to (not secret); matches Codex sessions to this account. */
@@ -75,6 +83,10 @@ export interface LumoSettings {
 	onlyProjects: boolean;
 	projects: string[];
 	projectCatalog?: ProjectCatalog;
+	/** With onlyProjects: let a selected project use a folder of its own (projectFolders). */
+	customProjectFolders?: boolean;
+	/** Picker row ID (project ID, or ":no-project") -> vault folder. Missing = the default folder. */
+	projectFolders?: Record<string, string>;
 	index: Record<string, IndexEntry>;
 	/** The Proton account behind this login (not secret), to notice the same login twice. */
 	userId?: string;

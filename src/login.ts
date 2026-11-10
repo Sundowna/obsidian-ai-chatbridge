@@ -89,6 +89,8 @@ interface Session {
 		set(details: { url: string; name: string; value: string; domain?: string; path: string; secure: boolean; httpOnly: boolean }): Promise<void>;
 	};
 	clearStorageData(): Promise<void>;
+	setPermissionRequestHandler?(handler: (webContents: unknown, permission: string, callback: (granted: boolean) => void) => void): void;
+	setPermissionCheckHandler?(handler: (webContents: unknown, permission: string) => boolean): void;
 	setUserAgent(ua: string): void;
 	getUserAgent(): string;
 	webRequest: {
@@ -146,8 +148,21 @@ export function firefoxUserAgent(chromeAgent: string, now = Date.now()): string 
 	return `Mozilla/5.0 (${system}; rv:${version}.0) Gecko/20100101 Firefox/${version}.0`;
 }
 
+/** What a login window's pages may use. Signing in needs none of camera, microphone, location, notifications or devices. */
+const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write']);
+
+/**
+ * Electron grants every permission a page asks for unless told otherwise, and these windows
+ * open whatever the login sites link to. So: refuse everything a sign-in does not need.
+ */
+function lockPermissions(ses: Session): void {
+	ses.setPermissionRequestHandler?.((_wc, permission, callback) => callback(ALLOWED_PERMISSIONS.has(permission)));
+	ses.setPermissionCheckHandler?.((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
+}
+
 /** Sets the browser name a login's windows use. Firefox sends no Chromium "client hints", so those go too. */
 function prepareSession(ses: Session, site: Site): void {
+	lockPermissions(ses);
 	if (!site.asFirefox) {
 		ses.setUserAgent(plainUserAgent(ses));
 		return;
@@ -267,6 +282,7 @@ export async function openHiddenPage(login: LoginRef, url: string, apiUrls: stri
 	if (!r) throw new Error('Login windows are not available in this Obsidian (desktop only).');
 	const windowKey = partition(login);
 	const ses = r.session.fromPartition(windowKey);
+	lockPermissions(ses);
 	ses.setUserAgent(plainUserAgent(ses));
 	const sent = new Map<number, { uid: string; appVersion: string }>();
 	let identity: { uid: string; appVersion: string } | null = null;

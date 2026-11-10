@@ -34,6 +34,13 @@ function attrs(source: string): string | null {
 			else if (/^"[^"]*"$|^'[^']*'$/.test(v)) value = v.slice(1, -1);
 			else return null;
 		}
+		// Links only to parts of the same drawing (<use href="#a"/>): nothing loads from elsewhere when the note opens.
+		// (xlink:href and JSX's xlinkHref become the plain href SVG 2 reads.)
+		if (/href$/i.test(name!)) {
+			if (!value.trim().startsWith('#')) continue;
+			out += ` href="${escapeAttr(value)}"`;
+			continue;
+		}
 		out += ` ${attrName(name!)}="${escapeAttr(value)}"`;
 	}
 	return source.slice(pos).trim() ? null : out;

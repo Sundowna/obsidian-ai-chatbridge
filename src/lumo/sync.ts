@@ -9,7 +9,7 @@ import type AIChatBridge from '../main';
 import { baseName, dailyNoteName, localStamp } from '../naming';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
-import { DEFAULT_RECENT, filterByProjects, nothingSelected, pickTodo, projectSubfolder, type Todo } from '../select';
+import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, pickTodo, projectSubfolder, type Todo } from '../select';
 import { cleanFolder, MIN_DELAY_SECONDS, type LumoAccount } from '../settings';
 import type { ListItem } from '../types';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
@@ -128,7 +128,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 				result.failed.push(item.name);
 				continue;
 			}
-			const folder = g.projectSubfolders ? `${base}/${projectSubfolder(item, recent)}` : base;
+			const folder = customProjectFolder(item, g, recent) ?? (g.projectSubfolders ? `${base}/${projectSubfolder(item, recent)}` : base);
 			await ensureFolder(app, folder);
 			const suffix = isRecovery ? ' (recovered)' : isUpdate ? ` (updated ${localStamp(item.updated_at)})` : '';
 			const stem = freeStem(app, folder, baseName(item.created_at, item.name) + suffix, item.uuid);

@@ -5,7 +5,7 @@ import { withAccount } from './accounts';
 import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
-import { DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, projectSubfolder, targetFor } from './select';
+import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, projectSubfolder, targetFor } from './select';
 import { baseName, dailyNoteName, localStamp } from './naming';
 import { renderTranscript } from './transcript';
 import type { Chat } from './types';
@@ -240,7 +240,9 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		//    one subfolder per project in scope inside each of them.
 		const folders = { chat: cleanFolder(s.chatFolder), code: cleanFolder(s.codeFolder) };
 		if (!folders.chat || !folders.code) throw new StopError('The Claude Chat or Claude Code folder setting is empty or invalid.');
-		const projectNames = s.projectSubfolders ? projectFolderNames(kept, recent) : [];
+		// Chats with a project folder of their own need no subfolder in the base folders.
+		const custom = (item: ListItem) => customProjectFolder(item, s, recent);
+		const projectNames = s.projectSubfolders ? projectFolderNames(kept.filter((item) => custom(item) === null), recent) : [];
 		for (const base of [folders.chat, folders.code]) {
 			await ensureFolder(app, base);
 			for (const name of projectNames) {
@@ -259,7 +261,9 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			const base = folders[target];
 			if (!base) throw new StopError(`The ${target === 'chat' ? 'Claude Chat' : 'Claude Code'} folder setting is empty or invalid.`);
 			const sub = s.projectSubfolders ? projectSubfolder(item, recent) : '';
-			const folder = sub ? `${base}/${sub}` : base;
+			const own = custom(item);
+			const folder = own ?? (sub ? `${base}/${sub}` : base);
+			if (own && !app.vault.getAbstractFileByPath(own) && !result.foldersCreated.includes(own)) result.foldersCreated.push(own);
 			if (target === 'code') result.otherPlatforms.add(item.platform ?? '?');
 			await ensureFolder(app, folder);
 			await sleep(delayMs);
@@ -339,7 +343,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			} else {
 				const base = folders[targetFor(item)]!;
 				const sub = s.projectSubfolders ? projectSubfolder(item, recent) : '';
-				folder = sub ? `${base}/${sub}` : base;
+				folder = custom(item) ?? (sub ? `${base}/${sub}` : base);
 				await ensureFolder(app, folder);
 				stem = freeStem(app, folder, baseName(chat.created_at, chat.name || item.name), item.uuid);
 			}

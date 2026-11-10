@@ -66,6 +66,44 @@ export function projectSubfolder(item: ListItem, recentName = DEFAULT_RECENT): s
 	return item.project?.name ? safeTitle(item.project.name) : safeTitle(recentName || DEFAULT_RECENT);
 }
 
+/** The settings behind "Choose a folder per project". */
+export interface ProjectFolderOptions {
+	onlyProjects: boolean;
+	customProjectFolders?: boolean;
+	projectFolders?: Record<string, string>;
+}
+
+/**
+ * A folder path as typed: forward slashes, no leading/trailing or doubled slashes.
+ * Null if empty or inside a hidden folder (".obsidian", ".trash" …).
+ */
+export function plainFolder(path: string): string | null {
+	const parts = path.trim().replace(/\\/g, '/').split('/').map((p) => p.trim()).filter(Boolean);
+	if (!parts.length || parts.some((p) => p.startsWith('.'))) return null;
+	return parts.join('/');
+}
+
+/**
+ * The folder you chose for this chat's project, or null for the default folder. Only while
+ * "Only sync selected projects" and "Choose a folder per project" are both on. Matches the
+ * project's ID first, then its name (entries saved before the list knew IDs).
+ */
+export function customProjectFolder(item: ListItem, o: ProjectFolderOptions, recentName = DEFAULT_RECENT): string | null {
+	if (!o.onlyProjects || !o.customProjectFolders || !o.projectFolders) return null;
+	const folders = o.projectFolders;
+	const keys = item.project ? [item.project.uuid, item.project.name] : [NO_PROJECT, recentName || DEFAULT_RECENT];
+	const exact = keys.map((k) => folders[k]).find((f) => f !== undefined);
+	const wanted = keys.map((k) => k.trim().toLowerCase());
+	const loose = exact ?? Object.entries(folders).find(([k]) => wanted.includes(k.trim().toLowerCase()))?.[1];
+	return loose === undefined ? null : plainFolder(loose);
+}
+
+/** Where a project's chats go without a folder of their own: the base folder, or its project subfolder. */
+export function defaultProjectFolder(base: string, projectSubfolders: boolean, projectName: string | null, recentName = DEFAULT_RECENT): string {
+	if (!projectSubfolders) return base;
+	return `${base}/${safeTitle(projectName ?? (recentName || DEFAULT_RECENT))}`;
+}
+
 /** Distinct subfolder names needed for these chats, sorted. */
 export function projectFolderNames(items: ListItem[], recentName = DEFAULT_RECENT): string[] {
 	return [...new Set(items.map((it) => projectSubfolder(it, recentName)))].sort((a, b) => a.localeCompare(b));

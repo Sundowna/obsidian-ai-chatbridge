@@ -9,7 +9,7 @@ import { activeBranch, renderTranscript } from '../src/transcript';
 import { chatFiles, mergeFiles, numbered, safeFileName, visibleFiles } from '../src/files';
 import { decodeMessage, encodeStrings } from '../src/proto';
 import { followRename } from '../src/follow';
-import { nothingSelected, NO_PROJECT } from '../src/select';
+import { customProjectFolder, defaultProjectFolder, nothingSelected, NO_PROJECT, plainFolder } from '../src/select';
 import { isSelected, markNew, onlySelected, pickerRows, rowsFromChats, rowsFromProjects, setRows } from '../src/project-catalog';
 import type { IndexEntry } from '../src/types';
 
@@ -41,6 +41,25 @@ const brain = filterByProjects(list.data, ['2nd Brain']);
 expect('filter "2nd Brain" keeps 1 of 3', brain.length === 1 && brain[0]!.name === 'Second brain setup - test run');
 expect('filter by project uuid works', filterByProjects(list.data, ['01a1a5fa-40cf-731e-abcb-9e29e2c0e5ba']).length === 1);
 expect('empty filter keeps all', filterByProjects(list.data, []).length === 3);
+
+// Folder per project.
+{
+	const inBrain = { uuid: 'c1', name: 'Chat', created_at: '', updated_at: '', project: { uuid: 'p-1', name: '2nd Brain' } };
+	const loose = { uuid: 'c2', name: 'Chat', created_at: '', updated_at: '', project: null };
+	const other = { uuid: 'c3', name: 'Chat', created_at: '', updated_at: '', project: { uuid: 'p-2', name: 'Work' } };
+	const on = { onlyProjects: true, customProjectFolders: true, projectFolders: { 'p-1': 'Projects/Brain/', [NO_PROJECT]: 'Inbox\\AI', 'work': 'Work chats' } };
+	expect('project folder: by project ID, slashes tidied', customProjectFolder(inBrain, on) === 'Projects/Brain');
+	expect('project folder: chats without a project', customProjectFolder(loose, on) === 'Inbox/AI');
+	expect('project folder: an entry saved by name still matches', customProjectFolder(other, on) === 'Work chats');
+	expect('project folder: unset project uses the default', customProjectFolder({ ...other, project: { uuid: 'p-3', name: 'Else' } }, on) === null);
+	expect('project folder: ignored with the option off', customProjectFolder(inBrain, { ...on, customProjectFolders: false }) === null);
+	expect('project folder: ignored without "only selected projects"', customProjectFolder(inBrain, { ...on, onlyProjects: false }) === null);
+	expect('project folder: hidden folder refused', customProjectFolder(inBrain, { ...on, projectFolders: { 'p-1': 'Notes/.obsidian/x' } }) === null);
+	expect('plain folder: empty refused', plainFolder('  / ') === null && plainFolder('a//b/ c ') === 'a/b/c');
+	expect('default folder: project subfolder', defaultProjectFolder('AI Chats/Claude', true, '2nd: Brain') === 'AI Chats/Claude/2nd- Brain');
+	expect('default folder: recent folder for no project', defaultProjectFolder('AI Chats/Claude', true, null, 'Loose') === 'AI Chats/Claude/Loose');
+	expect('default folder: no subfolders', defaultProjectFolder('AI Chats/Claude', false, 'X') === 'AI Chats/Claude');
+}
 
 // Project picker.
 {
@@ -346,6 +365,8 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 			svg.includes('<rect x="10" y="5" width="30" height="20" fill-opacity=".2" stroke-width="2"/>') && svg.includes('<text x="75" y="40" text-anchor="middle">B</text>') && svg.includes('viewBox="0 0 100 50"') && blocks(svg).length === 1, svg);
 		const svgCode = laid('<svg viewBox="0 0 9 9">{Array.from({length:3}).map((_,i)=><circle cx={i}/>)}</svg>', '-');
 		expect('gpt layout: SVG built by code stays marked', svgCode.includes('Diagram – see raw JSON'), svgCode);
+		const svgLinks = laid('<svg viewBox="0 0 9 9"><defs><circle id="d" r="1"/></defs><use href="#d"/><use href="https://example.net/x.svg#d"/><use xlinkHref="//example.net/y.svg"/><circle onClick="x()" r="2"/></svg>', '-');
+		expect('gpt layout: SVG keeps only links inside the drawing', svgLinks.includes('<use href="#d"/>') && !svgLinks.includes('example.net') && !/onclick/i.test(svgLinks), svgLinks);
 		const chartMd = laid('<Chart content={{"chartType":"line","meta":{"footer":"Daily data"},"xKey":"date","series":[{"dataKey":"clicks","label":"Clicks"}],"data":[{"date":"10 Oct","clicks":42},{"date":"11 Oct","clicks":70}]}}/>', '-');
 		expect('gpt layout: chart data becomes bars with values', chartMd.includes('<span class="ccs-gpt-bar-label">10 Oct</span><span class="ccs-gpt-bar-track"><span class="ccs-gpt-bar" style="width:60%"></span></span><span class="ccs-gpt-bar-value">42</span>') && chartMd.includes('Daily data'), chartMd);
 		const flatCite = cleanMarkers('See \uE200cite\uE202turn1search1\uE201.', [], new Map([['turn1search1', { url: 'https://example.net/guide', label: 'Guide' }]]));

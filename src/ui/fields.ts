@@ -8,6 +8,7 @@ import { BROWSE_MESSAGES, browseForVaultFolder } from '../folder-dialog';
 import { FolderSuggest } from '../folder-suggest';
 import type { ProjectCatalog } from '../project-catalog';
 import { cleanFolder } from '../settings';
+import { defaultProjectFolder, NO_PROJECT } from '../select';
 import { projectPicker } from './project-picker';
 
 export interface PanelContext {
@@ -74,6 +75,8 @@ export interface ProjectOptions {
 	onlyProjects: boolean;
 	projects: string[];
 	projectCatalog?: ProjectCatalog;
+	customProjectFolders?: boolean;
+	projectFolders?: Record<string, string>;
 }
 
 /** How chats are filed. */
@@ -117,7 +120,13 @@ export function contentOptions(ctx: PanelContext, el: HTMLElement, provider: Pro
 }
 
 /** Which projects get synced. */
-export function projectFilterOptions(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, o: Pick<ProjectOptions, 'recentFolderName' | 'onlyProjects' | 'projects' | 'projectCatalog'>): void {
+export function projectFilterOptions(
+	ctx: PanelContext,
+	el: HTMLElement,
+	provider: Provider,
+	account: AnyAccount,
+	o: Pick<ProjectOptions, 'projectSubfolders' | 'recentFolderName' | 'onlyProjects' | 'projects' | 'projectCatalog' | 'customProjectFolders' | 'projectFolders'>,
+): void {
 	const save = () => ctx.plugin.saveSettings();
 	new Setting(el)
 		.setName('Only sync selected projects')
@@ -129,5 +138,25 @@ export function projectFilterOptions(ctx: PanelContext, el: HTMLElement, provide
 				ctx.refresh(); // shows or hides the list
 			}),
 		);
-	if (o.onlyProjects) projectPicker(ctx, el, provider, account, o);
+	if (!o.onlyProjects) return;
+
+	const base = () => ('chatFolder' in account.web ? account.web.chatFolder : account.web.folder);
+	const fallback = provider === 'claude'
+		? `the chat folder above${o.projectSubfolders ? ', in a subfolder per project' : ''} (Claude Code sessions: the code folder)`
+		: `the chat folder above${o.projectSubfolders ? ', in a subfolder per project' : ''}`;
+	const perProject = new Setting(el)
+		.setName('Choose a folder per project')
+		.setDesc(`Give any selected project a folder of its own in the list below. Projects you leave empty use ${fallback}.`)
+		.addToggle((t) =>
+			t.setValue(o.customProjectFolders === true).onChange(async (v) => {
+				o.customProjectFolders = v;
+				await save();
+				ctx.refresh(); // shows or hides the folder fields
+			}),
+		);
+	perProject.settingEl.addClass('ccs-sub-setting');
+
+	projectPicker(ctx, el, provider, account, o, o.customProjectFolders
+		? { defaultFor: (row) => defaultProjectFolder(base(), o.projectSubfolders, row.id === NO_PROJECT ? null : row.name, o.recentFolderName) }
+		: undefined);
 }

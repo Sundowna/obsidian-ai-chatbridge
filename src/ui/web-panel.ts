@@ -79,7 +79,7 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 		);
 	new Setting(more)
 		.setName('Organization ID')
-		.setDesc('Filled in from the login. Also decides which Claude desktop sessions belong to this account.')
+		.setDesc('Filled in from the login. Also decides which Claude Desktop sessions belong to this account.')
 		.addText((t) =>
 			t.setPlaceholder('xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx').setValue(s.orgId).onChange(async (v) => {
 				const id = v.trim();

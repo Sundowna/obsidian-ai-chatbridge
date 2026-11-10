@@ -421,6 +421,63 @@
 	padding: 10px 4px 2px;
 }
 
+/* "Choose a folder per project": a sub-option of "Only sync selected projects". */
+.ccs-settings .ccs-sub-setting {
+	padding-left: 24px;
+	border-top: none;
+}
+
+/* The folder field under a selected project, lined up with its name. */
+.ccs-picker-item + .ccs-picker-item {
+	border-top: 1px solid var(--background-modifier-border-hover);
+}
+
+.ccs-picker-folder {
+	padding: 0 4px 8px 28px;
+}
+
+.ccs-picker-folder-line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ccs-picker-folder-line .ccs-glyph {
+	flex: none;
+	color: var(--text-faint);
+}
+
+.ccs-settings .ccs-picker-folder-input {
+	flex: 1;
+	min-width: 0;
+	height: var(--input-height);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-settings .ccs-picker-folder-input::placeholder {
+	font-style: italic;
+}
+
+.ccs-settings .ccs-picker-folder-input.is-invalid {
+	border-color: var(--text-error);
+	box-shadow: 0 0 0 1px var(--text-error);
+}
+
+.ccs-picker-folder-reset {
+	flex: none;
+}
+
+.ccs-picker-folder-note:not(:empty) {
+	margin-top: 4px;
+	padding-left: 22px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.ccs-picker-folder-note.ccs-picker-error {
+	color: var(--text-error);
+}
+
 .ccs-picker-foot:not(:empty) {
 	margin-top: 8px;
 }

@@ -7,7 +7,7 @@ import { loginRef, withAccount } from '../accounts';
 import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
 import { ShapeError } from '../schema';
-import { DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames, projectSubfolder } from '../select';
+import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames, projectSubfolder } from '../select';
 import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
 import { createNew, ensureFolder, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
@@ -295,7 +295,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		// 4. Folders.
 		await ensureFolder(app, base);
 		if (g.projectSubfolders) {
-			for (const name of projectFolderNames(kept, recent)) {
+			for (const name of projectFolderNames(kept.filter((item) => customProjectFolder(item, g, recent) === null), recent)) {
 				const path = `${base}/${name}`;
 				if (!app.vault.getAbstractFileByPath(path)) {
 					await ensureFolder(app, path);
@@ -303,7 +303,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				}
 			}
 		}
-		const folderFor = (item: ListItem) => (g.projectSubfolders ? `${base}/${projectSubfolder(item, recent)}` : base);
+		const folderFor = (item: ListItem) => customProjectFolder(item, g, recent) ?? (g.projectSubfolders ? `${base}/${projectSubfolder(item, recent)}` : base);
 		let activeDownload = 'recovering a saved chat';
 
 

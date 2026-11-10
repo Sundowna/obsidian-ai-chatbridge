@@ -11,7 +11,9 @@ Each chat is saved as the raw JSON the website returns, plus a readable Markdown
 - Multiple accounts per provider e.g. 2x Claude Pro accounts
 - Includes downloads of everything you put in and got out of AI - all media, files and artifacts
 - Same folders as in the apps - projects, recent chats, Claude Code groups, Codex projects, etc.
-- New feature: Selective project sync (e.g. when you have multiple vaults) - choose which folders get synced per vault
+- Selective project sync (e.g. when you have multiple vaults) - choose which folders get synced per vault
+- New feature: Target folder per project - e.g. send your "Thesis" project straight into `10 Projects/Thesis`, the rest stays in the default folders
+- New feature: ChatGPT's visual answers (cards, charts, diagrams, source chips) and voice chats come through readable - not as "see raw JSON"
 - Background sync job with timer
 - Automatic retry for large imports i.e. HTTP 429 - Too many requests error (no waiting for days for OpenAI to send you your data)
 - Only new or changed chats get synced again - and moving or renaming notes in Obsidian is tracked
@@ -20,6 +22,8 @@ Each chat is saved as the raw JSON the website returns, plus a readable Markdown
 ### Note:
 Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many request" errors from provider servers - but still a lot faster than OpenAI's response to data request :)
 
+Changing a project's target folder only applies to chats synced from then on - already saved chats stay where they are. Just move them in Obsidian, the plugin keeps track.
+
 > **Unofficial.** This plugin is not affiliated with, endorsed by, or supported by Anthropic, OpenAI, Google or Proton. It reads the same web endpoints your browser uses, which can change without notice.
 
 ## What gets synced
@@ -27,7 +31,7 @@ Large imports (i.e. 1,000+ chats) may take a while due to "429 - Too many reques
 | From | What | Files |
 | --- | --- | --- |
 | **Claude** (claude.ai) | Chats per project + Claude Code sessions listed on claude.ai | Artifacts & uploads |
-| **ChatGPT** | Chats per project, archived chats optional - custom GPT chats go to `Recent` | Generated files & uploads |
+| **ChatGPT** | Chats per project, archived chats optional - custom GPT chats go to `Recent`. Visual answers become cards, voice chats keep their words | Generated files & uploads |
 | **Gemini** | Chats | Pictures as links |
 | **Proton Lumo** | Chats & projects - decrypted on your computer | Coming... |
 | **Claude Code** (desktop app & CLI) | Sessions from this computer, same groups as the Code sidebar | (Stored locally) |
@@ -108,6 +112,7 @@ Want your Claude Code and Codex sessions too? Turn on the **Desktop app** side o
 
 - **Project folders** - one subfolder per project, or everything in one folder
 - **Only sync selected projects** - fetch your project list and tick the ones you want (chats without a project are in the list too)
+- **Choose a folder per project** - turn it on under **Only sync selected projects** and every ticked project gets a folder field. Type a path or pick an existing folder. Empty means the default, shown greyed in the field: the chat folder, in the project's subfolder if **Project folders** is on. Folders that don't exist yet are created on the next sync. A project with its own folder takes all its chats, Claude Code sessions included
 - **Download files and images** - on or off per Claude and ChatGPT account
 - **Automatic sync** - every 30 minutes or more. After an error it pauses until you sync by hand, so nothing runs in a loop
 
@@ -139,6 +144,8 @@ This plugin needs network access to work. Please read this before using it.
 - **Services contacted:** `claude.ai`, `chatgpt.com`, `gemini.google.com`, `aistudio.google.com` (with its API host `alkalimakersuite-pa.clients6.google.com`) and `lumo.proton.me`, plus their login pages e.g. `auth.openai.com`, `accounts.google.com` and `account.proton.me` - only when you log in or sync. Nothing is sent anywhere else. No telemetry
 - **What is sent:** the same requests your browser sends to list and read your own chats and files, with your login
 - **Accounts:** you need your own account with each provider you sync
+- **Login windows:** a normal sign-in page in a window of its own, locked down - pages opened there can't use your camera, microphone, location, notifications or connected devices
+- **ChatGPT's visual answers:** turned into plain HTML and pictures in your notes - nothing from a chat is ever run, and drawings can't load anything from other websites
 - **Where logins are stored:** in each login window's own storage on this computer, outside the vault, separately per account. Never in `data.json`, notes or logs. **Log out** and **Remove** in the settings clear them
 - **Account identifiers:** the name you give an account, and its claude.ai organization ID or ChatGPT workspace ID, are stored in `data.json` - these are not secrets
 - **Pasted login fallback (claude.ai, ChatGPT, Gemini and AI Studio):** if the login window doesn't work you can paste a login cookie from your browser instead, under the account's advanced settings - claude.ai's `sessionKey`, ChatGPT's `__Secure-next-auth.session-token` (or the whole Cookie header), or the whole Cookie header of a `gemini.google.com` request for Google. It's kept in Obsidian's secret storage on this computer - never in the vault, `data.json`, notes or logs - and the login window wins if both are set. Google's cookies only go into a separate hidden window kept in memory, which is emptied after each sync. Lumo has no fallback: unlocking its encrypted chats needs keys only its login window holds. The ChatGPT and Google fallbacks are new
@@ -207,13 +214,14 @@ Tests run offline - `npm run test:gemini`, `test:lumo`, `test:desktop`, `test:in
 ## Releasing
 
 1. Update `minAppVersion` in `manifest.json` if needed
-2. Run `npm version patch` (or `minor` / `major`). This bumps `package.json`, `manifest.json` and `versions.json`, commits, and creates a tag without a `v` prefix
-3. Push the commit and tag: `git push --follow-tags`
-4. The **Release Obsidian plugin** workflow builds the plugin and creates a draft GitHub release with `main.js`, `manifest.json` and `styles.css`. Review it and publish
+2. Add a `## x.y.z - YYYY-MM-DD` section to [CHANGELOG.md](CHANGELOG.md) - it becomes the release notes
+3. Run `npm version patch` (or `minor` / `major`). This bumps `package.json`, `manifest.json` and `versions.json`, commits, and creates a tag without a `v` prefix
+4. Push the commit and tag: `git push --follow-tags`
+5. The **Release Obsidian plugin** workflow builds the plugin and creates a draft GitHub release with `main.js`, `manifest.json` and `styles.css`, and this version's changelog as notes. Review it and publish
 
 ## Support
 
-Found a bug or have an idea? [Open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues).
+Found a bug or have an idea? [Open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues). What changed in each version is in the [changelog](CHANGELOG.md).
 
 ## License
 

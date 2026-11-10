@@ -18,7 +18,7 @@ export async function diagnoseActiveChat(plugin: AIChatBridge): Promise<void> {
 	const file = app.workspace.getActiveFile();
 	const uuid = file instanceof TFile ? (app.metadataCache.getFileCache(file)?.frontmatter?.uuid as unknown) : undefined;
 	if (!isUuid(uuid)) {
-		new Notice('Open a synced chat transcript first (its frontmatter has the chat uuid).');
+		new Notice('Open a synced chat transcript first (its frontmatter has the chat UUID).');
 		return;
 	}
 	const account = s.claude.find((a) => a.web.index[uuid]) ?? s.claude[0]!;

@@ -1,17 +1,26 @@
 // The checkbox list behind "Only sync selected projects". Each tick saves at once. Only this
 // block redraws, so the filter and the scroll position stay where they are.
 
+import { setIcon } from 'obsidian';
 import { SITE_LABEL, type AnyAccount } from '../accounts';
+import { FolderSuggest } from '../folder-suggest';
 import type { Provider } from '../login';
 import { isSelected, onlySelected, pickerRows, setRows, type PickerRow, type ProjectCatalog } from '../project-catalog';
 import { fetchFailure, fetchProjectCatalog } from '../project-list';
-import { DEFAULT_RECENT } from '../select';
+import { DEFAULT_RECENT, plainFolder } from '../select';
 import { count, type PanelContext } from './fields';
 
 export interface PickerOptions {
 	recentFolderName: string;
 	projects: string[];
 	projectCatalog?: ProjectCatalog;
+	projectFolders?: Record<string, string>;
+}
+
+/** "Choose a folder per project" is on: each selected row gets a folder field. */
+export interface FolderChoice {
+	/** Where the row's chats go when its field is empty, shown greyed in the field. */
+	defaultFor(row: PickerRow): string;
 }
 
 interface Run {
@@ -78,7 +87,7 @@ function fetchedAgo(iso: string): string {
 	return `on ${new Date(iso).toLocaleDateString()}`;
 }
 
-export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: Provider, account: AnyAccount, o: PickerOptions): void {
+export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: Provider, account: AnyAccount, o: PickerOptions, folders?: FolderChoice): void {
 	const site = SITE_LABEL[provider];
 	const recent = () => recentOf(o);
 	const catalogNow = () => catalogOf(provider, o);
@@ -101,7 +110,8 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 	const footEl = root.createDiv({ cls: 'ccs-picker-foot' });
 
 	let rows: PickerRow[] = [];
-	const inputs = new Map<string, { row: PickerRow; label: HTMLElement; input: HTMLInputElement }>();
+	const inputs = new Map<string, { row: PickerRow; label: HTMLElement; input: HTMLInputElement; folderEl?: HTMLElement }>();
+	const ownFolders = () => rows.filter((r) => isSelected(r, o.projects, recent()) && plainFolder(o.projectFolders?.[r.id] ?? '')).length;
 
 	const save = () => {
 		keepSelectedNames(provider, o);
@@ -111,12 +121,15 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 	const drawCount = () => {
 		const chosen = rows.filter((r) => isSelected(r, o.projects, recent())).length;
 		const catalog = catalogNow();
-		countEl.setText(catalog ? `${chosen} of ${rows.length} selected` : chosen ? `${chosen} selected` : 'No projects loaded yet');
+		const own = folders ? ownFolders() : 0;
+		const ownText = own ? ` · ${own} with ${own === 1 ? 'its' : 'their'} own folder` : '';
+		countEl.setText((catalog ? `${chosen} of ${rows.length} selected` : chosen ? `${chosen} selected` : 'No projects loaded yet') + ownText);
 		metaEl.setText(catalog ? `Fetched ${fetchedAgo(catalog.fetchedAt)}` : runs.has(o) ? '' : `Select "Fetch projects" to load them from ${site}.`);
 		footEl.empty();
 		if (!o.projects.some((p) => p.trim())) footEl.createDiv({ cls: 'ccs-picker-warning', text: 'Nothing is selected, so this account will not sync.' });
 		if (catalog?.note) footEl.createDiv({ cls: 'ccs-picker-warning', text: catalog.note });
 		if (catalog && provider === 'claude') footEl.createDiv({ cls: 'ccs-picker-hint', text: 'Projects without chats are not listed.' });
+		if (folders) footEl.createDiv({ cls: 'ccs-picker-hint', text: 'A new folder applies to chats synced from then on. Chats already saved stay where they are; move them in Obsidian and the plugin keeps track.' });
 	};
 
 	const shown = () => [...inputs.values()].filter(({ label }) => !label.hasClass('ccs-picker-hidden'));
@@ -143,16 +156,75 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 		fetchButton.toggleClass('mod-cta', !run && !catalogNow());
 	};
 
+	/** The folder field under a selected row: empty = the default (greyed), saved when you leave the field. */
+	const folderField = (item: HTMLElement, row: PickerRow, choice: FolderChoice): HTMLElement => {
+		const wrap = item.createDiv({ cls: 'ccs-picker-folder' });
+		const line = wrap.createDiv({ cls: 'ccs-picker-folder-line' });
+		setIcon(line.createSpan({ cls: 'ccs-glyph', attr: { 'aria-hidden': 'true' } }), 'folder');
+		const fallback = choice.defaultFor(row);
+		const field = line.createEl('input', {
+			type: 'text',
+			cls: 'ccs-picker-folder-input',
+			attr: { placeholder: `Default: ${fallback}`, spellcheck: 'false', 'aria-label': `Folder for "${row.name}"` },
+		});
+		field.value = o.projectFolders?.[row.id] ?? '';
+		const reset = line.createEl('button', { cls: 'clickable-icon ccs-picker-folder-reset', attr: { 'aria-label': 'Use the default folder', title: 'Use the default folder' } });
+		setIcon(reset, 'rotate-ccw');
+		const note = wrap.createDiv({ cls: 'ccs-picker-folder-note', attr: { 'aria-live': 'polite' } });
+
+		const show = () => {
+			const typed = field.value.trim();
+			const path = plainFolder(typed);
+			const bad = typed !== '' && path === null;
+			field.toggleClass('is-invalid', bad);
+			field.setAttr('aria-invalid', String(bad));
+			reset.toggleClass('ccs-picker-hidden', typed === '');
+			note.toggleClass('ccs-picker-error', bad);
+			note.setText(bad ? `Choose a folder inside the vault, not a hidden one such as ${ctx.app.vault.configDir}.`
+				: path && !ctx.app.vault.getFolderByPath(path) ? 'New folder: created on the next sync.' : '');
+		};
+		const commit = (value: string) => {
+			const path = plainFolder(value);
+			if (value.trim() !== '' && path === null) return show(); // keep the last good folder
+			const next = { ...(o.projectFolders ?? {}) };
+			if (path) next[row.id] = path;
+			else delete next[row.id];
+			o.projectFolders = next;
+			field.value = path ?? '';
+			show();
+			save();
+			drawCount();
+		};
+		field.addEventListener('input', show);
+		field.addEventListener('change', () => commit(field.value)); // leaving the field, or Enter
+		field.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') field.blur();
+		});
+		const suggest = new FolderSuggest(ctx.app, field, (path) => commit(path));
+		reset.addEventListener('click', () => {
+			commit('');
+			// Keep the keyboard here, without opening the folder list.
+			field.focus();
+			suggest.close();
+		});
+		show();
+		return wrap;
+	};
+
 	const draw = () => {
 		rows = pickerRows(catalogNow(), o.projects, recent());
 		inputs.clear();
 		listEl.empty();
 		for (const row of rows) {
-			const label = listEl.createEl('label', { cls: 'ccs-picker-row' });
+			const item = listEl.createDiv({ cls: 'ccs-picker-item' });
+			const label = item.createEl('label', { cls: 'ccs-picker-row' });
 			const input = label.createEl('input', { type: 'checkbox' });
 			input.checked = isSelected(row, o.projects, recent());
+			const folderEl = folders ? folderField(item, row, folders) : undefined;
+			folderEl?.toggleClass('ccs-picker-hidden', !input.checked);
 			input.addEventListener('change', () => {
 				o.projects = setRows(o.projects, rows, recent(), [row.id], input.checked);
+				folderEl?.toggleClass('ccs-picker-hidden', !input.checked);
 				save();
 				drawCount();
 			});
@@ -160,7 +232,7 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 			if (row.isNew) label.createSpan({ cls: 'ccs-picker-tag is-new', text: 'New' });
 			if (row.orphan) label.createSpan({ cls: 'ccs-picker-tag', text: 'Not found', attr: { title: `The last fetch did not list this on ${site}. Clear it if it is gone.` } });
 			if (row.chats !== undefined) label.createSpan({ cls: 'ccs-picker-chats', text: count(row.chats, 'chat') });
-			inputs.set(row.id, { row, label, input });
+			inputs.set(row.id, { row, label: item, input, folderEl });
 		}
 		listEl.toggleClass('ccs-picker-hidden', rows.length === 0);
 		filter.toggleClass('ccs-picker-hidden', rows.length <= FILTER_FROM);
@@ -190,7 +262,10 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 	const setShown = (on: boolean) => {
 		const targets = shown();
 		o.projects = setRows(o.projects, rows, recent(), targets.map(({ row }) => row.id), on);
-		for (const { input } of targets) input.checked = on;
+		for (const { input, folderEl } of targets) {
+			input.checked = on;
+			folderEl?.toggleClass('ccs-picker-hidden', !on);
+		}
 		save();
 		drawCount();
 	};

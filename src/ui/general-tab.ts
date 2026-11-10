@@ -14,7 +14,7 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 	new Setting(el).setName('Sync').setHeading();
 	new Setting(el)
 		.setName('Max chats per run')
-		.setDesc('Per account. 0 means no limit. Keep it small while testing.')
+		.setDesc('Per account (0 = no limit). Keep it small while testing.')
 		.addText((t) =>
 			t.setValue(String(s.maxChatsPerRun)).onChange(async (v) => {
 				const n = Number(v);
