@@ -849,3 +849,45 @@
 .ccs-settings .ccs-hidden {
 	display: none;
 }
+
+/* Stop sync: the ribbon icon while a sync runs, and the status bar text you can select to stop it. */
+.ccs-ribbon.is-syncing {
+	color: var(--text-error);
+}
+
+.ccs-status-stoppable {
+	cursor: pointer;
+}
+
+.ccs-status-stoppable:hover {
+	color: var(--text-normal);
+}
+
+.ccs-progress-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 8px;
+}
+
+/* Refresh index: the last result reads as a result, not a hint. */
+.ccs-settings .setting-item-description.ccs-result {
+	color: var(--text-normal);
+}
+
+/* The folder moves "Move into the new layout" would make. */
+.ccs-move-list {
+	margin: 6px 0;
+	padding-left: 18px;
+}
+
+.ccs-move-list li {
+	margin: 2px 0;
+}
+
+.ccs-move-label {
+	color: var(--text-muted);
+}
+
+.ccs-layout-move .setting-item-info {
+	flex: 1 1 auto;
+}

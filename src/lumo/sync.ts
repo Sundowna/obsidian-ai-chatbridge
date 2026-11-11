@@ -6,10 +6,10 @@ import { withAccount } from '../accounts';
 import { StopError } from '../api';
 import { appendLog } from '../log';
 import type AIChatBridge from '../main';
-import { baseName, dailyNoteName, localStamp } from '../naming';
+import { baseName, dailyNoteName, localStamp, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
-import { DEFAULT_RECENT, filterByProjects, nothingSelected, pickTodo, type Todo } from '../select';
+import { DEFAULT_RECENT, filterByProjects, newestFirst, nothingSelected, pickTodo, type Todo } from '../select';
 import { cleanFolder, MIN_DELAY_SECONDS, type LumoAccount } from '../settings';
 import type { ListItem } from '../types';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
@@ -112,7 +112,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 		};
 		const recoveries: Todo[] = items.filter(lost).map((item) => ({ item, isUpdate: true }));
 		result.unchanged = items.length - todo.length - recoveries.length;
-		const jobs = [...todo, ...recoveries];
+		const jobs = newestFirst([...todo, ...recoveries]);
 		const batch = s.maxChatsPerRun > 0 ? jobs.slice(0, s.maxChatsPerRun) : jobs;
 		result.leftForLater = jobs.length - batch.length;
 
@@ -137,7 +137,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 			const json = `${rawFolder}/${stem}.json`;
 			const md = `${folder}/${stem}.md`;
 			await createNew(app, json, JSON.stringify(chat, null, '\t'));
-			await createNew(app, md, renderLumoTranscript(chat, rawLink(folder, json)));
+			await createNew(app, md, tagAccount(renderLumoTranscript(chat, rawLink(folder, json)), account.label));
 			g.index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString() };
 			await plugin.saveSettings();
 			if (isRecovery) result.restored.push(stem);

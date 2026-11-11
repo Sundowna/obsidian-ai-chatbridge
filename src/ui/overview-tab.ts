@@ -1,9 +1,9 @@
 // The first thing you see: every account at a glance, and one button to sync it all.
 
-import { Notice, setIcon } from 'obsidian';
+import { setIcon } from 'obsidian';
 import { accountsOf, loginRef, PROVIDER_LABEL, type AnyAccount } from '../accounts';
 import { isLoggedIn, type Provider } from '../login';
-import { count, type PanelContext } from './fields';
+import { bindSyncButton, count, type PanelContext } from './fields';
 import { providerIcon } from './icons';
 import { addAccountButton } from './provider-tab';
 
@@ -42,15 +42,8 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 		web.dot.toggleClass('is-on', ok);
 		web.text.setText(ok ? count(chats, 'chat') : 'Not logged in');
 	});
-	sync.addEventListener('click', () => {
-		void (async () => {
-			new Notice(`${account.label}: sync starting…`);
-			if (await ctx.plugin.canSyncWeb(provider, account)) await ctx.plugin.syncAccount(provider, account, 'web');
-			if (app?.enabled) await ctx.plugin.syncAccount(provider, account, 'desktop');
-			if (studio?.enabled && (await ctx.plugin.canSyncWeb(provider, account))) await ctx.plugin.syncAccount(provider, account, 'studio');
-			ctx.refresh();
-		})();
-	});
+	// One run for the whole account, so Stop ends all of it.
+	bindSyncButton(ctx, sync, () => ctx.plugin.isSyncing(provider, account.id), () => void ctx.plugin.syncWholeAccount(provider, account).then(ctx.refresh));
 }
 
 export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
@@ -63,10 +56,8 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 	words.createDiv({ cls: 'ccs-hero-title', text: 'Sync all accounts' });
 	words.createDiv({ cls: 'ccs-hero-desc', text: `${count(chats, 'chat')} and ${count(sessions, 'desktop session')} saved so far.` });
 	const button = hero.createEl('button', { text: 'Sync all', cls: 'mod-cta' });
-	button.addEventListener('click', () => {
-		new Notice('Sync all: starting…');
-		void ctx.plugin.syncAll('manual').then(ctx.refresh);
-	});
+	// Stops whatever is running, whichever account it is.
+	bindSyncButton(ctx, button, () => true, () => void ctx.plugin.syncAll('manual').then(ctx.refresh));
 
 	for (const provider of ['claude', 'chatgpt', 'lumo', 'gemini'] as const) {
 		const head = el.createDiv({ cls: 'ccs-provider-head' });

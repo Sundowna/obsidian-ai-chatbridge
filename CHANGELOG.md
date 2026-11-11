@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.25.0 - 2026-11-11
+
+### New
+- **Stop a running sync** - while a sync runs, the ribbon icon becomes a stop button, the progress notice has **Stop**, the status bar text stops it when selected, and the **Sync** buttons in the settings turn into **Stop** for the account that is syncing (greyed out for the others). There is also a **Stop the running sync** command. The sync ends after the current chat: everything saved so far stays, and the next sync carries on from there
+- **Refresh index** - General → **Refresh index** (and a command) finds synced notes you moved outside Obsidian, e.g. in the file manager or while the plugin was off, by the chat ID in their properties, and their raw files by link or by a unique name. The next sync then doesn't save them a second time. Shows how many were found and how many are nowhere
+- **New folder layout** - one folder per provider, split by where the chats live: `Claude/Chat/<project>`, `Claude/Code-Cloud`, `Claude/Code-Local/<computer>/<repo>`, `ChatGPT/Chat/<project>`, `ChatGPT/Codex-Local/<computer>`. New vaults start with it, and the raw files folder mirrors it (`80 Archive/raw/…`)
+- **Accounts share folders** - a new account saves into the same folders as the first one, and every transcript gets `account: "<name>"` in its properties so Dataview or Bases can tell them apart
+- **Move into the new layout** - General → **Folder layout** lists every folder that would move, from where to where, and asks before moving. Second accounts' folders merge into the shared ones, the raw files follow, emptied old folders are cleaned up, and folders you picked yourself stay where they are. Nothing is overwritten: a file whose name is already taken stays put and is listed
+
+### Changed
+- Every sync saves the newest chats first, desktop sessions and repaired chats included, so a limited or stopped run always has your latest chats
+- The Overview's **Sync** on an account card runs website, desktop app and AI Studio as one sync, so **Stop** ends all of it, and it tells you when the account has nothing it can sync
+- Fewer duplicate "starting…" notices
+
 ## 0.24.1 - 2026-11-11
 
 ### Changed

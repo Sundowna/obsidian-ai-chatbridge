@@ -18,6 +18,9 @@ import { claudeAuth } from '../src/claude-auth';
 import { followRename } from '../src/follow';
 import { type ChatgptAccount, type ClaudeAccount, type Settings } from '../src/settings';
 import { TFile, TFolder } from 'obsidian';
+import { newestFirst } from '../src/select';
+import { tagAccount, untagAccount } from '../src/naming';
+import { refreshEntries, type IndexedPaths } from '../src/reindex';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -185,7 +188,7 @@ const vault = {
 	process: async () => undefined,
 };
 const settings: Settings = normalizeSettings({ maxChatsPerRun: 0, chatFolder: '30 Sources/AI Chats/Claude Chat', logPath: 'log.md' }).settings;
-expect('settings: app layout next to Claude Chat', settings.claude[0]!.desktop.folder === '30 Sources/AI Chats/Claude Desktop/Code' && settings.chatgpt[0]!.desktop.folder === '30 Sources/AI Chats/ChatGPT Desktop/Codex');
+expect('settings: layout next to Claude Chat', settings.claude[0]!.desktop.folder === '30 Sources/AI Chats/Claude/Code-Local/This computer' && settings.chatgpt[0]!.desktop.folder === '30 Sources/AI Chats/ChatGPT/Codex-Local/This computer');
 {
 	const catalog = { fetchedAt: 't', rows: [{ id: 'a', name: 'Ticked' }, { id: 'b', name: 'Private' }] };
 	const lumoWeb = (projects: string[]) => normalizeSettings({ claude: [{}], chatgpt: [{}], lumo: [{ web: { projects, projectCatalog: catalog } }] }).settings.lumo[0]!.web;
@@ -196,10 +199,51 @@ expect('settings: app layout next to Claude Chat', settings.claude[0]!.desktop.f
 }
 expect('settings: saved values win', mergeDesktop({ claude: { enabled: false, folder: 'X', extraFolders: [], index: {} } } as never, 'A/B').claude.folder === 'X');
 const from016 = mergeDesktop({ claude: { enabled: true, folder: 'S/Claude Desktop', extraFolders: [], index: {} }, codex: { enabled: true, folder: 'S/Codex', extraFolders: [], index: {} } } as never, 'S/Claude Chat');
-expect('settings: unused 0.16.0 folders move to the app layout', from016.claude.folder === 'S/Claude Desktop/Code' && from016.codex.folder === 'S/ChatGPT Desktop/Codex');
+expect('settings: unused 0.16.0 folders move to the layout', from016.claude.folder === 'S/Claude/Code-Local/This computer' && from016.codex.folder === 'S/ChatGPT/Codex-Local/This computer');
 const used016 = mergeDesktop({ codex: { enabled: true, folder: 'S/Codex', extraFolders: [], index: { t: {} } } } as never, 'S/Claude Chat');
 expect('settings: used 0.16.0 folder is kept', used016.codex.folder === 'S/Codex');
-expect('layout: root next to or above the chat folder', layoutRoot('S/Claude Chat') === 'S' && layoutRoot('S/Claude Desktop/Chat') === 'S' && layoutRoot('Claude Chat') === '');
+expect('layout: root next to or above the chat folder', layoutRoot('S/Claude Chat') === 'S' && layoutRoot('S/Claude Desktop/Chat') === 'S' && layoutRoot('S/Claude/Chat') === 'S' && layoutRoot('Claude Chat') === '');
+
+// Sync order: newest change first, also for chats being repaired.
+{
+	const job = (id: string, at: string) => ({ item: { uuid: id, updated_at: at } });
+	const order = newestFirst([job('old', '2026-01-01T00:00:00Z'), job('new', '2026-11-10T00:00:00Z'), job('mid', '2026-06-01T00:00:00Z')]).map((j) => j.item.uuid).join();
+	expect('order: newest first', order === 'new,mid,old', order);
+}
+
+// account: in the front matter.
+{
+	const md = '---\nuuid: x\nunread: true\n---\n\nHi';
+	const tagged = tagAccount(md, 'B - Yearly');
+	expect('account: right after the opening line, quoted', tagged === '---\naccount: "B - Yearly"\nuuid: x\nunread: true\n---\n\nHi', tagged);
+	expect('account: left out for comparing', untagAccount(tagged) === md && untagAccount(md) === md);
+	expect('account: nothing added without front matter', tagAccount('Hi', 'A') === 'Hi');
+}
+
+// Refresh index: finds moved notes by chat ID, raw files by link or unique name.
+{
+	const files = new Set(['New/a.md', 'New/b.md', 'New/c.md', 'Raw/a.json', 'Other/b.json', 'Twice/c.json', 'Again/c.json']);
+	const entry = (id: string, md: string, raws: string[]) => {
+		const e = { id, md, raws: [...raws] } as IndexedPaths;
+		e.setMd = (p) => (e.md = p);
+		e.setRaw = (k, p) => (e.raws[k] = p);
+		return e;
+	};
+	const moved = entry('a', 'Old/a.md', ['Old/a.json']);
+	const rawOnly = entry('b', 'New/b.md', ['Gone/b.json']);
+	const ambiguous = entry('c', 'New/c.md', ['Gone/c.json']);
+	const lost = entry('d', 'Old/d.md', ['Old/d.json']);
+	const r = refreshEntries([moved, rawOnly, ambiguous, lost], {
+		exists: (p) => files.has(p),
+		transcriptOf: (id) => (id === 'a' ? 'New/a.md' : null),
+		rawLinkOf: (md) => (md === 'New/a.md' ? 'Raw/a.json' : null),
+		uniqueByName: (name) => ({ 'b.json': 'Other/b.json' } as Record<string, string>)[name] ?? null,
+	});
+	expect('reindex: moved transcript found by chat ID', moved.md === 'New/a.md' && moved.raws[0] === 'Raw/a.json');
+	expect('reindex: raw file found by unique name', rawOnly.raws[0] === 'Other/b.json');
+	expect('reindex: a name found twice is not guessed', ambiguous.raws[0] === 'Gone/c.json');
+	expect('reindex: counts', r.checked === 4 && r.relinked === 3 && r.missing === 1 && lost.md === 'Old/d.md', JSON.stringify(r));
+}
 const plugin = { app: { vault, fileManager: { processFrontMatter: async () => undefined } }, settings, saveSettings: async () => undefined } as never;
 
 (async () => {
@@ -232,12 +276,12 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	expect('sync 1: 4 new (claude, fork, codex, extra folder)', r1.newCount === 4, JSON.stringify(r1));
 	expect('sync 1: active session waits', r1.active === 1);
 	expect('sync 1: empty + guardian skipped', r1.empty === 2);
-	const code = '30 Sources/AI Chats/Claude Desktop/Code';
+	const code = '30 Sources/AI Chats/Claude/Code-Local/This computer';
 	const claudeMd = `${code}/Obsidian/2026-11-06 Sidebar title.md`;
 	expect('sync 1: claude session in its sidebar group', vaultFiles.has(claudeMd), [...vaultFiles.keys()].join(' | '));
 	expect('sync 1: fork nested under its parent in the same group', vaultFiles.has(`${code}/Obsidian/Sidebar title/2026-11-06 Sidebar title (fork).md`));
 	expect('sync 1: session outside a group by working folder', vaultFiles.has(`${code}/BrainTest/2026-11-06 My title.md`));
-	expect('sync 1: codex thread in its project', vaultFiles.has('30 Sources/AI Chats/ChatGPT Desktop/Codex/2nd Brain/2026-11-06 Fix ChatBridge sync.md'));
+	expect('sync 1: codex thread in its project', vaultFiles.has('30 Sources/AI Chats/ChatGPT/Codex-Local/This computer/2nd Brain/2026-11-06 Fix ChatBridge sync.md'));
 	expect('sync 1: section in frontmatter', vaultFiles.get(claudeMd)!.includes('section: "Obsidian"'));
 	expect('sync 1: no raw copy by default', ![...vaultFiles.keys()].some((p) => p.endsWith('.jsonl')));
 
@@ -291,7 +335,7 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	expect('sync 5: deleted transcript restored', r5.restored.length === 1 && vaultFiles.has(codexMd));
 
 	// Moving the folder in Obsidian updates the desktop index.
-	const n = followRename(settings, '30 Sources/AI Chats/ChatGPT Desktop/Codex', '30 Sources/AI Chats/OpenAI Codex');
+	const n = followRename(settings, '30 Sources/AI Chats/ChatGPT/Codex-Local/This computer', '30 Sources/AI Chats/OpenAI Codex');
 	expect('rename: desktop index follows', n === 1 && settings.chatgpt[0]!.desktop.index[TID]!.md.startsWith('30 Sources/AI Chats/OpenAI Codex/'));
 
 	settings.claude[0]!.desktop.enabled = false;
@@ -330,7 +374,8 @@ async function accountsTest() {
 	expect('name: keeping your own name is fine', !nameProblem(s.claude, 'Main', s.claude[0]));
 	const work = addAccount(s, 'claude', 'Work') as ClaudeAccount;
 	const gptWork = addAccount(s, 'chatgpt', 'Work') as ChatgptAccount;
-	expect('add: own folders next to the first account', work.web.chatFolder === 'S/Claude Desktop (Work)/Chat' && work.web.codeFolder === 'S/Claude Desktop (Work)/Code' && work.desktop.folder === 'S/Claude Desktop (Work)/Code' && gptWork.web.folder === 'S/ChatGPT Desktop (Work)/Chat' && gptWork.desktop.folder === 'S/ChatGPT Desktop (Work)/Codex');
+	const [c0, g0] = [s.claude[0]!, s.chatgpt[0]!];
+	expect('add: shares the first account\'s folders', work.web.chatFolder === c0.web.chatFolder && work.web.codeFolder === c0.web.codeFolder && work.desktop.folder === c0.desktop.folder && gptWork.web.folder === g0.web.folder && gptWork.desktop.folder === g0.desktop.folder);
 	expect('add: own login storage and own history', work.id !== 'default' && work.web.index !== s.claude[0]!.web.index);
 	work.web.orgId = ORG_B;
 	gptWork.web.workspaceId = 'ws-work';
@@ -373,7 +418,8 @@ async function accountsTest() {
 	work.desktop.enabled = true;
 	const r1 = await runDesktopSync(p, undefined, fs, NOW, { provider: 'claude', id: work.id });
 	expect('sync: one account\'s button only saves that account', r1.newCount === 1 && !!work.desktop.index.theirs, JSON.stringify(r1));
-	expect('sync: each session lands in its own account\'s folder', [...written.keys()].some((k) => k.startsWith('S/Claude Desktop (Work)/Code/')) && [...written.keys()].some((k) => k.startsWith('S/Claude Desktop/Code/')));
+	const notesOf = (label: string) => [...written.entries()].filter(([k, v]) => k.endsWith('.md') && v.startsWith(`---\naccount: "${label}"\n`));
+	expect('sync: both accounts share one folder, each note names its account', notesOf('Work').length > 0 && notesOf('Main').length > 0 && [...written.keys()].filter((k) => k.startsWith('S/') && k.endsWith('.md')).every((k) => k.startsWith(`${c0.desktop.folder}/`) || k.startsWith(`${g0.desktop.folder}/`)), [...written.keys()].join(' | '));
 	expect('sync: unmatched CLI session goes to the first account', !!s.claude[0]!.desktop.index['cli-only'] && !!s.claude[0]!.desktop.index.mine);
 	expect('sync: Codex split by workspace and by folder', !!s.chatgpt[0]!.desktop.index['t-main'] && !!gptWork.desktop.index['t-work'] && !!gptWork.desktop.index['t-home']);
 	expect('sync: titles read from the second Codex home', [...written.keys()].some((k) => k.includes('From second home')));
@@ -406,8 +452,8 @@ async function accountsTest() {
 	expect('org: an ID typed by hand survives upgrades and syncs', (await claudeAuth(authPlugin, typed)).orgId === ORG_B && (await claudeAuth(authPlugin, typed)).orgId === ORG_B);
 	Object.assign(globalThis, { window: realWindow });
 
-	const n = followRename(s, 'S/Claude Desktop (Work)/Code', 'S/Moved');
-	expect('rename: every account\'s index follows', n === 1 && work.desktop.index.theirs!.md.startsWith('S/Moved/'));
+	const n = followRename(s, 'S/Claude/Code-Local/This computer', 'S/Moved');
+	expect('rename: every account\'s index follows', n >= 1 && work.desktop.index.theirs!.md.startsWith('S/Moved/') && s.claude[0]!.desktop.index.mine!.md.startsWith('S/Moved/'));
 	expect('remove: keeps at least one account', removeAccount(s, 'claude', work) && s.claude.length === 1 && !removeAccount(s, 'claude', s.claude[0]!));
 }
 
@@ -459,32 +505,47 @@ async function layoutTest(handEdited: boolean) {
 		},
 	};
 	const R = '30 Sources/AI Chats';
-	add(`${R}/Claude Chat/2nd Brain/2026-11-05 a.md`, false);
-	add(`${R}/Claude Chat/Recent/2026-11-01 b.json`, false);
-	add(`${R}/ChatGPT Chat/Recent/Artifacts/2026-10-01 c/img.png`, false);
-	add(`${R}/ChatGPT Chat/Recent/2026-10-01 c.md`, false);
-	add(`${R}/Claude Desktop/Chat`, true);
-	add(`${R}/ChatGPT Desktop/Chat`, true);
-	add(`${R}/ChatGPT Desktop/Codex`, true);
-	const s = normalizeSettings({ chatFolder: `${R}/Claude Chat`, codeFolder: `${R}/Claude Code`, gpt: { folder: `${R}/ChatGPT Chat`, index: { x: { updated_at: '', json: '', md: `${R}/ChatGPT Chat/Recent/2026-10-01 c.md`, synced: '' } }, fileIndex: { f: `${R}/ChatGPT Chat/Recent/Artifacts/2026-10-01 c/img.png` } }, index: { y: { updated_at: '', json: `${R}/Claude Chat/Recent/2026-11-01 b.json`, md: '', synced: '' } }, fileIndex: {}, desktop: { claude: { enabled: true, folder: `${R}/Claude Desktop`, extraFolders: [], index: {} }, codex: { enabled: true, folder: `${R}/Codex`, extraFolders: [], index: {} } } }).settings;
-	const first = s.claude[0]!;
-	const gptFirst = s.chatgpt[0]!;
+	const PC = 'This computer';
+	// A vault in the 0.17-0.24 layout, with a second account, a leftover flat folder and a hand-picked folder.
+	add(`${R}/Claude Desktop/Chat/2nd Brain/2026-11-05 a.md`, false);
+	add(`${R}/Claude Desktop/Code/Obsidian/2026-11-06 s.md`, false);
+	add(`${R}/Claude Desktop (B)/Chat/2nd Brain/2026-11-07 w.md`, false);
+	add(`${R}/Claude Desktop (B)/Chat/2nd Brain/2026-11-05 a.md`, false);
+	add(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/2026-10-01 c/img.png`, false);
+	add(`${R}/ChatGPT Desktop/Chat/Recent/2026-10-01 c.md`, false);
+	add(`${R}/ChatGPT Desktop/Codex/Recent/2026-10-02 t.md`, false);
+	add(`${R}/ChatGPT Chat/Recent/2026-09-01 old.md`, false);
+	add(`${R}/Lumo/Chat/2026-09-02 l.md`, false);
+	add('10 Projects/Code/keep.md', false);
+	const claudeA = { id: 'default', label: 'A', web: { chatFolder: `${R}/Claude Desktop/Chat`, codeFolder: `${R}/Claude Desktop/Code`, index: { y: { updated_at: '', json: '', md: `${R}/Claude Desktop/Chat/2nd Brain/2026-11-05 a.md`, synced: '' } } }, desktop: { enabled: true, folder: `${R}/Claude Desktop/Code`, extraFolders: [], index: { s1: { updated: '', size: 0, mtime: 0, source: '', md: `${R}/Claude Desktop/Code/Obsidian/2026-11-06 s.md`, synced: '' } } } };
+	const claudeB = { id: 'b', label: 'B', web: { chatFolder: `${R}/Claude Desktop (B)/Chat`, codeFolder: '10 Projects/Code', index: {} }, desktop: { enabled: true, folder: `${R}/Claude Desktop (B)/Code`, extraFolders: [], index: {} } };
+	const gpt = { id: 'default', label: 'Main', web: { folder: `${R}/ChatGPT Desktop/Chat`, index: { x: { updated_at: '', json: '', md: `${R}/ChatGPT Desktop/Chat/Recent/2026-10-01 c.md`, synced: '' } }, fileIndex: { f: `${R}/ChatGPT Desktop/Chat/Recent/Artifacts/2026-10-01 c/img.png` } }, desktop: { enabled: true, folder: `${R}/ChatGPT Desktop/Codex`, extraFolders: [], index: {} } };
+	const s = normalizeSettings({ claude: [claudeA, claudeB], chatgpt: [gpt], lumo: [{ id: 'default', label: 'Main', web: { folder: `${R}/Lumo/Chat`, index: {} } }] } as never).settings;
+	const [a, b] = [s.claude[0]!, s.claude[1]!];
+	const g = s.chatgpt[0]!;
 	if (handEdited) {
-		// What happened in the real vault: the chat folder fields were switched to the new folders, nothing moved.
-		first.web.chatFolder = `${R}/Claude Desktop/Chat`;
-		gptFirst.web.folder = `${R}/ChatGPT Desktop/Chat`;
+		// The folder fields were switched to the new folders by hand; the chats are still in the old ones.
+		a.web.chatFolder = `${R}/Claude/Chat`;
+		g.web.folder = `${R}/ChatGPT/Chat`;
 	}
 	const isFolder = (p: string) => nodes.get(p) instanceof TFolder;
-	const moves = layoutMoves(s, isFolder);
-	expect(`${tag}: planned moves`, moves.map((m) => m.label).join() === 'claude.ai chats,Claude Code chats listed on claude.ai,ChatGPT chats' && moves[0]!.from === `${R}/Claude Chat` && moves[2]!.from === `${R}/ChatGPT Chat`, moves.map((m) => `${m.label}: ${m.from} -> ${m.to}`).join(' | '));
-	const r = await moveToAppLayout(app as never, s, async () => undefined);
-	expect(`${tag}: chats moved into Claude Desktop/Chat`, nodes.has(`${R}/Claude Desktop/Chat/2nd Brain/2026-11-05 a.md`) && nodes.has(`${R}/Claude Desktop/Chat/Recent/2026-11-01 b.json`));
-	expect(`${tag}: ChatGPT chats and their files moved`, nodes.has(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/2026-10-01 c/img.png`));
-	expect(`${tag}: emptied old folders removed`, !nodes.has(`${R}/Claude Chat`) && !nodes.has(`${R}/ChatGPT Chat`));
-	expect(`${tag}: whole subfolders moved in one rename each`, r.moved === 3 && r.conflicts.length === 0, JSON.stringify(renamed));
-	expect(`${tag}: settings point at the new folders`, first.web.chatFolder === `${R}/Claude Desktop/Chat` && first.web.codeFolder === `${R}/Claude Desktop/Code` && gptFirst.web.folder === `${R}/ChatGPT Desktop/Chat` && first.desktop.folder === `${R}/Claude Desktop/Code` && gptFirst.desktop.folder === `${R}/ChatGPT Desktop/Codex`);
-	expect(`${tag}: indexes follow the move`, first.web.index.y!.json.startsWith(`${R}/Claude Desktop/Chat/Recent/`) && gptFirst.web.index.x!.md.startsWith(`${R}/ChatGPT Desktop/Chat/`) && gptFirst.web.fileIndex.f!.startsWith(`${R}/ChatGPT Desktop/Chat/Recent/Artifacts/`));
-	expect(`${tag}: nothing left to move`, layoutMoves(s, isFolder).length === 0);
+	const moves = layoutMoves(s, isFolder, PC);
+	const plan = moves.map((m) => `${m.from} -> ${m.to}`);
+	expect(`${tag}: planned moves`, plan.includes(`${R}/Claude Desktop/Chat -> ${R}/Claude/Chat`) && plan.includes(`${R}/Claude Desktop/Code -> ${R}/Claude/Code-Local/${PC}`)
+		&& plan.includes(`${R}/Claude Desktop (B)/Chat -> ${R}/Claude/Chat`) && plan.includes(`${R}/ChatGPT Chat -> ${R}/ChatGPT/Chat`)
+		&& !plan.some((m) => m.startsWith('10 Projects') || m.startsWith(`${R}/Lumo/`)), plan.join(' | '));
+	const r = await moveToAppLayout(app as never, s, async () => undefined, PC);
+	expect(`${tag}: both accounts' chats in one project folder`, nodes.has(`${R}/Claude/Chat/2nd Brain/2026-11-05 a.md`) && nodes.has(`${R}/Claude/Chat/2nd Brain/2026-11-07 w.md`));
+	expect(`${tag}: a same-name file stays where it was`, r.conflicts.length === 1 && nodes.has(`${R}/Claude Desktop (B)/Chat/2nd Brain/2026-11-05 a.md`), JSON.stringify(r.conflicts));
+	expect(`${tag}: local sessions under this computer`, nodes.has(`${R}/Claude/Code-Local/${PC}/Obsidian/2026-11-06 s.md`) && nodes.has(`${R}/ChatGPT/Codex-Local/${PC}/Recent/2026-10-02 t.md`));
+	expect(`${tag}: ChatGPT chats, their files and the old flat folder`, nodes.has(`${R}/ChatGPT/Chat/Recent/Artifacts/2026-10-01 c/img.png`) && nodes.has(`${R}/ChatGPT/Chat/Recent/2026-09-01 old.md`));
+	expect(`${tag}: emptied old folders removed`, !nodes.has(`${R}/Claude Desktop`) && !nodes.has(`${R}/ChatGPT Desktop`) && !nodes.has(`${R}/ChatGPT Chat`), [...nodes.keys()].filter((k) => k.split('/').length === 3).join(' | '));
+	expect(`${tag}: folders chosen by hand stay`, nodes.has('10 Projects/Code/keep.md') && b.web.codeFolder === '10 Projects/Code' && nodes.has(`${R}/Lumo/Chat/2026-09-02 l.md`));
+	expect(`${tag}: settings point at the new folders`, a.web.chatFolder === `${R}/Claude/Chat` && a.web.codeFolder === `${R}/Claude/Code-Cloud` && a.desktop.folder === `${R}/Claude/Code-Local/${PC}`
+		&& b.web.chatFolder === `${R}/Claude/Chat` && b.desktop.folder === `${R}/Claude/Code-Local/${PC}` && g.web.folder === `${R}/ChatGPT/Chat` && g.desktop.folder === `${R}/ChatGPT/Codex-Local/${PC}`);
+	expect(`${tag}: indexes follow the move`, a.web.index.y!.md === `${R}/Claude/Chat/2nd Brain/2026-11-05 a.md` && a.desktop.index.s1!.md.startsWith(`${R}/Claude/Code-Local/${PC}/`)
+		&& g.web.index.x!.md.startsWith(`${R}/ChatGPT/Chat/`) && g.web.fileIndex.f!.startsWith(`${R}/ChatGPT/Chat/Recent/Artifacts/`));
+	expect(`${tag}: nothing left to move`, layoutMoves(s, isFolder, PC).length === 0, layoutMoves(s, isFolder, PC).map((m) => `${m.from} -> ${m.to}`).join(' | '));
 }
 
 /** Real session files -> in-memory vault: shows where each session would be saved. Nothing on disk changes. */

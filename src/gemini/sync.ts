@@ -3,6 +3,7 @@
 
 import { StopError } from '../api';
 import { loginRef } from '../accounts';
+import { tagAccount } from '../naming';
 import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
@@ -40,7 +41,7 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 				if (e instanceof GeminiError) return null;
 				throw e;
 			}
-			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => renderGeminiTranscript(chat, name) };
+			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
 		}, progress, result);
 	} catch (e) {
 		if (e instanceof StopError) result.stopped = e.message;

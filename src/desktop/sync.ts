@@ -6,7 +6,7 @@
 import { TFile } from 'obsidian';
 import type AIChatBridge from '../main';
 import { appendLog } from '../log';
-import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
+import { baseName, dailyNoteName, localStamp, safeTitle, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
 import { createNew, ensureFolder } from '../vaultio';
@@ -241,7 +241,7 @@ export async function runDesktopSync(
 					// Transcript deleted from the vault: write it again under the same name, so links stay valid.
 					const folder = entry.md.split('/').slice(0, -1).join('/');
 					await ensureFolder(app, folder);
-					await createNew(app, entry.md, renderDesktopTranscript(session, { source: file.path, rawFileName: entry.raw && exists(entry.raw) ? rawLink(folder, entry.raw) : undefined }));
+					await createNew(app, entry.md, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: entry.raw && exists(entry.raw) ? rawLink(folder, entry.raw) : undefined }), owner.label));
 					result.restored.push(entry.md.split('/').pop()!.replace(/\.md$/, ''));
 					continue;
 				}
@@ -250,8 +250,8 @@ export async function runDesktopSync(
 			await plugin.saveSettings();
 		}
 
-		// Oldest first, so a limited run keeps the vault's order sensible.
-		todo.sort((a, b) => a.session.updated.localeCompare(b.session.updated));
+		// Newest first, like the web syncs: a limited run saves what you worked on last.
+		todo.sort((a, b) => b.session.updated.localeCompare(a.session.updated));
 		const limit = s.maxChatsPerRun > 0 ? s.maxChatsPerRun : todo.length;
 		result.leftForLater = Math.max(0, todo.length - limit);
 
@@ -272,7 +272,7 @@ export async function runDesktopSync(
 			const mdPath = `${folder}/${stem}.md`;
 			const rawPath = d.keepRaw ? `${rawFolder}/${stem}.jsonl` : undefined;
 			if (rawPath) await createNew(app, rawPath, text);
-			await createNew(app, mdPath, renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? rawLink(folder, rawPath) : undefined }));
+			await createNew(app, mdPath, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? rawLink(folder, rawPath) : undefined }), owner.label));
 			conf.index[session.id] = { updated: session.updated, size: file.size, mtime: file.mtime, source: file.path, md: mdPath, raw: rawPath, synced: new Date().toISOString() };
 			await plugin.saveSettings();
 			result.written.push(stem);

@@ -6,7 +6,7 @@ import { DEFAULT_OVERLAP_MINUTES } from '../chatgpt/inventory';
 import { isLoggedIn, logout, openLogin, type Provider } from '../login';
 import { isUuid } from '../schema';
 import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount } from '../settings';
-import { advanced, contentOptions, count, filingOptions, folderSetting, projectFilterOptions, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
+import { advanced, bindSyncButton, contentOptions, count, filingOptions, folderSetting, projectFilterOptions, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { googleRawMoves, webRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
 
@@ -20,10 +20,9 @@ function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, accoun
 	row.settingEl.addClass('ccs-primary-row');
 	const sync = (cta: boolean) =>
 		row.addButton((b) => {
-			b.setButtonText('Sync now').onClick(() => {
-				void plugin.syncAccount(provider, account, surface).then(ctx.refresh);
-			});
+			b.setButtonText('Sync now');
 			if (cta) b.setCta();
+			bindSyncButton(ctx, b.buttonEl, () => plugin.isSyncing(provider, account.id), () => void plugin.syncAccount(provider, account, surface).then(ctx.refresh));
 		});
 	void isLoggedIn(ref).then((ok) => {
 		if (!row.settingEl.isConnected) return;

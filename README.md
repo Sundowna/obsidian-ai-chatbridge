@@ -8,12 +8,15 @@ Each chat is saved as the raw JSON the website returns, plus a readable Markdown
 ### Overview:
 - Sync chats from Claude, ChatGPT, Gemini, Google AI Studio and Proton Lumo - web & desktop interfaces (other models coming)
 - Claude Code and Codex sessions from your computer too
-- Multiple accounts per provider e.g. 2x Claude Pro accounts
+- Multiple accounts per provider e.g. 2x Claude Pro accounts - they share one folder per provider, `account:` in each note tells them apart
 - Includes downloads of everything you put in and got out of AI - all media, files and artifacts
 - Same folders as in the apps - projects, recent chats, Claude Code groups, Codex projects, etc.
 - Selective project sync (e.g. when you have multiple vaults) - choose which folders get synced per vault
 - New feature: Target folder per project - e.g. send your "Thesis" project straight into `10 Projects/Thesis`, the rest stays in the default folders
 - New feature: ChatGPT's visual answers (cards, charts, diagrams, source chips) and voice chats come through readable - not as "see raw JSON"
+- New feature: Stop button - stop a running sync anytime from the ribbon, the settings or the status bar, everything saved so far stays
+- New feature: Refresh index - moved notes around in your file manager? One click and the plugin finds them again, so nothing gets downloaded twice
+- Newest chats first - a limited or stopped sync always has your latest chats
 - Background sync job with timer
 - Automatic retry for large imports i.e. HTTP 429 - Too many requests error (no waiting for days for OpenAI to send you your data)
 - Only new or changed chats get synced again - and moving or renaming notes in Obsidian is tracked
@@ -41,33 +44,42 @@ Changing a project's target folder only applies to chats synced from then on - a
 
 ```text
 AI Chats/
-├── Claude Desktop/
-│   ├── Chat/
+├── Claude/
+│   ├── Chat/                          ← claude.ai chats, all accounts
 │   │   ├── Recent/
-│   │   │   ├── 2026-11-05 Trip to Lisbon.md
-│   │   │   └── 2026-11-05 Trip to Lisbon.json
+│   │   │   └── 2026-11-05 Trip to Lisbon.md
 │   │   └── Thesis/                    ← a claude.ai project
 │   │       ├── Artifacts/…            ← files Claude made
 │   │       └── Attachments/…          ← files you uploaded
-│   └── Code/                          ← Claude Code sessions
-├── ChatGPT Desktop/
+│   ├── Code-Cloud/                    ← Claude Code sessions listed on claude.ai
+│   └── Code-Local/
+│       └── Tower/                     ← this computer's name
+│           └── my-repo/               ← sidebar group or working folder
+├── ChatGPT/
 │   ├── Chat/
-│   └── Codex/
+│   └── Codex-Local/
+│       └── Tower/
 ├── Gemini/
 │   ├── Chat/
 │   └── AI Studio/
 └── Lumo/
     └── Chat/
+
+80 Archive/raw/                        ← the raw .json files, same paths as above
+└── AI Chats/Claude/Chat/Recent/2026-11-05 Trip to Lisbon.json
 ```
+
+Already using an older version? **Settings → AI ChatBridge → General → Move into the new layout** shows what would move where, and moves it with Obsidian's own move - links, the sync history and the raw files follow. Folders you picked yourself stay where they are.
 
 Each transcript has front matter (handy for Dataview or Bases) and then the chat:
 
 ```markdown
 ---
+account: "Main"
 uuid: c_1a2b3c4d5e6f7a8b
 created: 2026-09-03T09:14:54.888Z
 updated: 2026-09-03T09:16:06.168Z
-raw: "[[2026-09-03 Sourdough starter tips.json]]"
+raw: "[[80 Archive/raw/AI Chats/Gemini/Chat/2026-09-03 Sourdough starter tips.json]]"
 unread: true
 ---
 ## You · 2026-09-03 11:14
@@ -104,8 +116,10 @@ Want your Claude Code and Codex sessions too? Turn on the **Desktop app** side o
 | **Sync Lumo chats** | All Proton Lumo accounts you're logged in to |
 | **Sync desktop app chats (Claude, Codex)** | Local Claude Code and Codex sessions |
 | **Reconcile all ChatGPT chats** | Check all ChatGPT chats again, not just the recent changes |
+| **Stop the running sync** | Stops after the current chat - also the ribbon icon, the status bar text or **Stop** in the settings |
 | **Cancel pending chat sync retry** | Stop a waiting retry after a 429 pause |
-| **Move synced chats into the app layout (Claude Desktop, ChatGPT Desktop)** | Moves folders from older versions into `Claude Desktop/…` and `ChatGPT Desktop/…` - links and the sync index follow |
+| **Refresh index: find synced notes moved outside the app** | Finds notes you moved in the file manager (or while the plugin was off) by their chat ID, so the next sync doesn't save them twice |
+| **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |
 | **Diagnose: save claude.ai answers for the open chat** | Saves the raw answers of the open chat, for bug reports |
 
 ## Choosing what to sync
@@ -115,10 +129,11 @@ Want your Claude Code and Codex sessions too? Turn on the **Desktop app** side o
 - **Choose a folder per project** - turn it on under **Only sync selected projects** and every ticked project gets a folder field. Type a path or pick an existing folder. Empty means the default, shown greyed in the field: the chat folder, in the project's subfolder if **Project folders** is on. Folders that don't exist yet are created on the next sync. A project with its own folder takes all its chats, Claude Code sessions included
 - **Download files and images** - on or off per Claude and ChatGPT account
 - **Automatic sync** - every 30 minutes or more. After an error it pauses until you sync by hand, so nothing runs in a loop
+- **Stop** - the ribbon icon turns into a stop button while a sync runs; **Sync** buttons in the settings turn into **Stop** for the account that's syncing. It stops after the current chat, and the next sync carries on from there
 
 ## Multiple accounts
 
-On any provider tab select **Add account** and give it a name e.g. `Work`. Each account gets its own login and its own folders e.g. `Claude Desktop (Work)/Chat`.
+On any provider tab select **Add account** and give it a name e.g. `Work`. Each account gets its own login, and saves into the same folders as your other accounts - a project you use in both ends up in one folder. Each note has `account: "Work"` in its properties, so Dataview or Bases can still tell them apart.
 
 Two accounts can share one desktop app without anything being saved twice. A session goes:
 

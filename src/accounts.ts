@@ -2,7 +2,6 @@
 // Pure code, no Obsidian UI.
 
 import type { LoginRef, Provider } from './login';
-import { CHATGPT_APP, CLAUDE_APP, layoutRoot } from './desktop/layout';
 import { safeTitle } from './naming';
 import { DEFAULT_CLAUDE_WEB, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_LUMO, DEFAULT_STUDIO, desktopApp, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 
@@ -34,7 +33,7 @@ export function withAccount(base: string, list: readonly AnyAccount[], account: 
 	return list.length > 1 ? `${base} (${account.label})` : base;
 }
 
-/** Why this account name cannot be used, or null. Names become folder names, so they must differ. */
+/** Why this account name cannot be used, or null. Names tell accounts apart in the notes, so they must differ. */
 export function nameProblem(list: readonly AnyAccount[], name: string, self?: AnyAccount): string | null {
 	const n = name.trim();
 	if (!n) return 'Enter a name.';
@@ -45,48 +44,52 @@ export function nameProblem(list: readonly AnyAccount[], name: string, self?: An
 }
 
 const newId = (): string => `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-const under = (root: string, rest: string) => (root ? `${root}/${rest}` : rest);
 
 /**
- * A new account, with folders of its own next to the first account's
- * (e.g. "AI Chats/Claude Desktop (Work)/Chat"), so two accounts' chats never mix.
+ * A new account. It saves into the same folders as the provider's first account: the notes
+ * say which account they came from (`account:` in the front matter), so chats of several
+ * accounts can sit side by side in one project folder.
  */
 export function addAccount(s: Settings, provider: Provider, label: string): AnyAccount {
 	const name = label.trim();
-	const root = layoutRoot(s.claude[0]!.web.chatFolder);
 	if (provider === 'claude') {
-		const app = under(root, `${CLAUDE_APP} (${name})`);
+		const first = s.claude[0]!;
 		const account: ClaudeAccount = {
 			id: newId(),
 			label: name,
-			web: { ...DEFAULT_CLAUDE_WEB, projects: [], index: {}, fileIndex: {}, chatFolder: `${app}/Chat`, codeFolder: `${app}/Code` },
-			desktop: desktopApp(`${app}/Code`),
+			web: {
+				...DEFAULT_CLAUDE_WEB, projects: [], index: {}, fileIndex: {},
+				chatFolder: first.web.chatFolder, codeFolder: first.web.codeFolder,
+				chatRawFolder: first.web.chatRawFolder, codeRawFolder: first.web.codeRawFolder,
+			},
+			desktop: { ...desktopApp(first.desktop.folder), rawFolder: first.desktop.rawFolder },
 		};
 		s.claude.push(account);
 		return account;
 	}
 	if (provider === 'lumo') {
-		const account: LumoAccount = { id: newId(), label: name, web: { ...DEFAULT_LUMO, projects: [], index: {}, folder: under(root, `Lumo (${name})/Chat`) } };
+		const first = s.lumo[0]!;
+		const account: LumoAccount = { id: newId(), label: name, web: { ...DEFAULT_LUMO, projects: [], index: {}, folder: first.web.folder, rawFolder: first.web.rawFolder } };
 		s.lumo.push(account);
 		return account;
 	}
 	if (provider === 'gemini') {
-		const app = under(root, `Gemini (${name})`);
+		const first = s.gemini[0]!;
 		const account: GeminiAccount = {
 			id: newId(),
 			label: name,
-			web: { ...DEFAULT_GEMINI, index: {}, folder: `${app}/Chat` },
-			studio: { ...DEFAULT_STUDIO, index: {}, folder: `${app}/AI Studio` },
+			web: { ...DEFAULT_GEMINI, index: {}, folder: first.web.folder, rawFolder: first.web.rawFolder },
+			studio: { ...DEFAULT_STUDIO, index: {}, folder: first.studio.folder, rawFolder: first.studio.rawFolder },
 		};
 		s.gemini.push(account);
 		return account;
 	}
-	const app = under(root, `${CHATGPT_APP} (${name})`);
+	const first = s.chatgpt[0]!;
 	const account: ChatgptAccount = {
 		id: newId(),
 		label: name,
-		web: { ...DEFAULT_GPT, projects: [], index: {}, fileIndex: {}, folder: `${app}/Chat` },
-		desktop: desktopApp(`${app}/Codex`),
+		web: { ...DEFAULT_GPT, projects: [], index: {}, fileIndex: {}, folder: first.web.folder, rawFolder: first.web.rawFolder },
+		desktop: { ...desktopApp(first.desktop.folder), rawFolder: first.desktop.rawFolder },
 	};
 	s.chatgpt.push(account);
 	return account;

@@ -24,7 +24,39 @@ export interface PanelContext {
 	openSections: Set<string>;
 }
 
-export const count = (n: number, noun: string): string => `${n.toLocaleString()} ${noun}${n === 1 ? '' : 's'}`;
+/**
+ * Makes a Sync button follow the running sync: "Stop" while `mine` is the one syncing,
+ * greyed out while another sync runs, and back to `idle` when nothing runs.
+ */
+export function bindSyncButton(ctx: PanelContext, button: HTMLButtonElement, mine: () => boolean, start: () => void, idle = button.getText()): void {
+	const { plugin } = ctx;
+	const cta = button.hasClass('mod-cta');
+	const draw = () => {
+		const running = plugin.syncing;
+		const stoppable = running && mine();
+		button.setText(stoppable ? (plugin.stopping ? 'Stopping…' : 'Stop') : idle);
+		button.toggleClass('mod-warning', stoppable);
+		button.toggleClass('mod-cta', cta && !stoppable);
+		button.disabled = (running && !stoppable) || (stoppable && plugin.stopping);
+		if (running && !stoppable) button.setAttr('title', 'Another sync is running');
+		else if (stoppable) button.setAttr('title', 'Stops after the current chat. Everything saved so far stays.');
+		else button.removeAttribute('title');
+	};
+	const off = plugin.onBusyChange(() => {
+		if (!button.isConnected) {
+			off();
+			return;
+		}
+		draw();
+	});
+	button.addEventListener('click', () => {
+		if (plugin.syncing && mine()) plugin.requestStop();
+		else if (!plugin.syncing) start();
+	});
+	draw();
+}
+
+export const count =(n: number, noun: string): string => `${n.toLocaleString()} ${noun}${n === 1 ? '' : 's'}`;
 
 /** Fired (bubbling) when a folder setting was committed, so the "move saved files" row recounts. */
 export const FOLDERS_CHANGED = 'ccs-folders-changed';

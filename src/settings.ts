@@ -4,6 +4,7 @@
 // of that secret (secretId).
 
 import { normalizePath } from 'obsidian';
+import { layoutFolders } from './desktop/layout';
 import type { IndexEntry } from './types';
 import type { AssetRetry, Capture } from './chatgpt/recovery';
 import type { Inventories } from './chatgpt/inventory';
@@ -180,13 +181,16 @@ export interface Settings {
 	desktop: DesktopSettings;
 }
 
+/** Where a new vault's chats go: the layout below "AI Chats" (see desktop/layout.ts). */
+const FIRST = layoutFolders('AI Chats');
+
 export const DEFAULT_CLAUDE_WEB: ClaudeWebSettings = {
 	orgId: '',
 	secretId: '',
 	onlyProjects: false,
 	projects: [],
-	chatFolder: 'AI Chats/Claude Desktop/Chat',
-	codeFolder: 'AI Chats/Claude Desktop/Code',
+	chatFolder: FIRST.claudeChat,
+	codeFolder: FIRST.claudeCodeCloud,
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
 	downloadFiles: true,
@@ -195,7 +199,7 @@ export const DEFAULT_CLAUDE_WEB: ClaudeWebSettings = {
 };
 
 export const DEFAULT_GPT: GptSettings = {
-	folder: 'AI Chats/ChatGPT Desktop/Chat',
+	folder: FIRST.chatgptChat,
 	secretId: '',
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
@@ -207,7 +211,7 @@ export const DEFAULT_GPT: GptSettings = {
 };
 
 export const DEFAULT_LUMO: LumoSettings = {
-	folder: 'AI Chats/Lumo/Chat',
+	folder: FIRST.lumoChat,
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
 	onlyProjects: false,
@@ -216,14 +220,14 @@ export const DEFAULT_LUMO: LumoSettings = {
 };
 
 export const DEFAULT_GEMINI: GeminiSettings = {
-	folder: 'AI Chats/Gemini/Chat',
+	folder: FIRST.geminiChat,
 	secretId: '',
 	index: {},
 };
 
 export const DEFAULT_STUDIO: StudioSettings = {
 	enabled: true,
-	folder: 'AI Chats/Gemini/AI Studio',
+	folder: FIRST.studio,
 	index: {},
 };
 
@@ -248,8 +252,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	logPath: 'AI Chats/AI ChatBridge log.md',
 	rawRootOn: true,
 	rawRoot: '80 Archive/raw',
-	claude: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_CLAUDE_WEB, desktop: desktopApp('AI Chats/Claude Desktop/Code') }],
-	chatgpt: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GPT, desktop: desktopApp('AI Chats/ChatGPT Desktop/Codex') }],
+	claude: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_CLAUDE_WEB, desktop: desktopApp(FIRST.claudeCodeLocal) }],
+	chatgpt: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GPT, desktop: desktopApp(FIRST.codexLocal) }],
 	lumo: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_LUMO }],
 	gemini: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GEMINI, studio: DEFAULT_STUDIO }],
 	desktop: DEFAULT_DESKTOP,

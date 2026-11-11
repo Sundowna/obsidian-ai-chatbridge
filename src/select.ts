@@ -42,8 +42,13 @@ export function pickTodo(items: ListItem[], index: Record<string, IndexEntry>): 
 		if (!known) todo.push({ item, isUpdate: false });
 		else if (known.updated_at !== item.updated_at) todo.push({ item, isUpdate: true });
 	}
-	todo.sort((a, b) => Date.parse(b.item.updated_at) - Date.parse(a.item.updated_at));
-	return todo;
+	return newestFirst(todo);
+}
+
+/** Newest change first, so a limited or stopped run has saved what you worked on last. */
+export function newestFirst<T extends { item: { updated_at: string } }>(jobs: T[]): T[] {
+	const at = (t: T) => Date.parse(t.item.updated_at) || 0;
+	return jobs.sort((a, b) => at(b) - at(a));
 }
 
 export type Target = 'chat' | 'code';
