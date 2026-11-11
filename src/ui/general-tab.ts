@@ -2,8 +2,9 @@
 
 import { Setting } from 'obsidian';
 import { folderExists, layoutMoves } from '../desktop/layout';
-import { MIN_DELAY_SECONDS, MIN_INTERVAL_MINUTES } from '../settings';
-import type { PanelContext } from './fields';
+import { DEFAULT_SETTINGS, MIN_DELAY_SECONDS, MIN_INTERVAL_MINUTES } from '../settings';
+import { allRawMoves } from '../raw-move';
+import { rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 
 export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 	const { plugin } = ctx;
@@ -56,6 +57,26 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 
+	new Setting(el).setName('Raw files').setHeading();
+	const raw = el.createDiv();
+	rawFolderSetting(ctx, raw, {
+		name: 'Raw files folder',
+		what: 'raw files',
+		partner: 'transcript folders',
+		placeholder: 'Next to the transcripts',
+		resetTo: DEFAULT_SETTINGS.rawRoot,
+		standalone: true,
+		toggle: { get: () => s.rawRootOn, set: (on) => (s.rawRootOn = on) },
+		get: () => s.rawRoot || undefined,
+		set: (p) => (s.rawRoot = p ?? ''),
+		describe: (where, on) => !on
+			? 'Off: each account chooses its own JSON folders in its folder settings, or keeps the raw files next to the transcripts.'
+			: where
+				? `Every raw .json (and kept .jsonl) goes here, at the same path as its transcript, e.g. ${where}/${s.claude[0]!.web.chatFolder}/Recent. Transcripts stay where they are. While this is on, the accounts' JSON folder fields are hidden and not used.`
+				: "Empty: raw files stay next to their transcripts. While this is on, the accounts' JSON folder fields are hidden and not used.",
+	});
+	rawMoveRow(ctx, raw, () => allRawMoves(ctx.app, s), 'raw file');
+
 	new Setting(el).setName('Desktop sessions').setHeading();
 	new Setting(el)
 		.setName('Mirror the apps’ sidebar as subfolders')
@@ -79,7 +100,7 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 		);
 	new Setting(el)
 		.setName('Keep the raw session file')
-		.setDesc('Also copy the app’s .jsonl, next to each transcript or into a raw session folder chosen in each account’s desktop settings. These can be several MB and contain tool output in full.')
+		.setDesc('Also copy the app’s .jsonl, into the raw files folder above (with that off: next to each transcript, or into each account’s raw session folder). These can be several MB and contain tool output in full.')
 		.addToggle((t) =>
 			t.setValue(d.keepRaw).onChange(async (v) => {
 				d.keepRaw = v;

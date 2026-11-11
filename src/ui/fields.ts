@@ -10,7 +10,7 @@ import type { ProjectCatalog } from '../project-catalog';
 import { cleanFolder } from '../settings';
 import { defaultProjectFolder, NO_PROJECT, plainFolder } from '../select';
 import { projectPicker } from './project-picker';
-import { projectRawDefault, type RawMove } from '../raw-folders';
+import { masterRaw, projectRawDefault, type RawMove } from '../raw-folders';
 import { moveRawFiles } from '../raw-move';
 import { ConfirmModal } from './modals';
 
@@ -76,6 +76,16 @@ export interface RawFolderOptions {
 	set: (path: string | undefined) => void;
 	/** Mirrors project or app subfolders (all but Gemini and AI Studio). */
 	mirrors?: boolean;
+	/** Replaces the description (the master raw folder under General). */
+	describe?: (where: string | undefined, on: boolean) => string;
+	/** Greyed text while empty; default: where the raw files go then. */
+	placeholder?: string;
+	/** The value the reset button restores; default empty. */
+	resetTo?: string;
+	/** A setting of its own, not drawn indented under a transcript folder. */
+	standalone?: boolean;
+	/** An on/off switch at the end of the row; while off, the field and its buttons are hidden. */
+	toggle?: { get: () => boolean; set: (on: boolean) => void };
 }
 
 /**
@@ -83,10 +93,18 @@ export interface RawFolderOptions {
  * transcripts (the greyed placeholder says so), so nothing changes until you choose one.
  */
 export function rawFolderSetting(ctx: PanelContext, el: HTMLElement, o: RawFolderOptions): void {
+	// One raw files folder (General) is on: it decides alone, so the per-account fields go away.
+	if (!o.standalone && masterRaw(ctx.plugin.settings) !== undefined) return;
 	let text: TextComponent | null = null;
 	let reset: HTMLElement | null = null;
 	const row = new Setting(el).setName(o.name);
-	row.settingEl.addClass('ccs-sub-setting', 'ccs-raw-folder');
+	row.settingEl.addClass('ccs-raw-folder');
+	if (!o.standalone) row.settingEl.addClass('ccs-sub-setting');
+	else {
+		// Long text: under the name, field and buttons, full width.
+		row.settingEl.addClass('ccs-desc-below');
+		row.settingEl.appendChild(row.descEl);
+	}
 	const describe = (problem?: string) => {
 		row.descEl.empty();
 		if (problem) {
@@ -94,10 +112,11 @@ export function rawFolderSetting(ctx: PanelContext, el: HTMLElement, o: RawFolde
 			return;
 		}
 		const where = o.get();
-		row.descEl.setText(where
+		const on = o.toggle ? o.toggle.get() : true;
+		row.descEl.setText(o.describe ? o.describe(where, on) : where
 			? `Where ${o.what} goes${o.mirrors ? ', in the same subfolders as the transcripts' : ''}. Transcripts stay in the ${o.partner}.`
 			: `Where ${o.what} goes. Empty keeps it next to the transcripts; choose a folder to keep the ${o.partner} free of raw files.`);
-		if (where && !ctx.app.vault.getFolderByPath(where)) row.descEl.createDiv({ cls: 'ccs-raw-folder-new', text: 'New folder: created on the next sync.' });
+		if (on && where && !ctx.app.vault.getFolderByPath(where)) row.descEl.createDiv({ cls: 'ccs-raw-folder-new', text: 'New folder: created on the next sync.' });
 	};
 	const commit = async (value: string) => {
 		const typed = value.trim();
@@ -112,14 +131,14 @@ export function rawFolderSetting(ctx: PanelContext, el: HTMLElement, o: RawFolde
 		text?.inputEl.setAttr('aria-invalid', 'false');
 		o.set(path ?? undefined);
 		if (text && text.getValue() !== (path ?? '')) text.setValue(path ?? '');
-		reset?.toggleClass('ccs-invisible', !path);
+		reset?.toggleClass('ccs-invisible', (path ?? '') === (o.resetTo ?? ''));
 		describe();
 		await ctx.plugin.saveSettings();
 		foldersChanged(row.settingEl);
 	};
 	row.addText((t) => {
 		text = t;
-		t.setPlaceholder('Next to the transcripts').setValue(o.get() ?? '');
+		t.setPlaceholder(o.placeholder ?? 'Next to the transcripts').setValue(o.get() ?? '');
 		t.inputEl.setAttr('aria-label', o.name);
 		t.inputEl.setAttr('spellcheck', 'false');
 		// Saved when you leave the field or press Enter, so half-typed paths never become folders.
@@ -138,13 +157,14 @@ export function rawFolderSetting(ctx: PanelContext, el: HTMLElement, o: RawFolde
 	row.addExtraButton((b) => {
 		reset = b.extraSettingsEl;
 		b.setIcon('rotate-ccw')
-			.setTooltip('Keep the raw files next to the transcripts')
-			.onClick(() => void commit(''));
-		reset.toggleClass('ccs-invisible', !o.get());
+			.setTooltip(o.resetTo ? `Back to ${o.resetTo}` : 'Keep the raw files next to the transcripts')
+			.onClick(() => void commit(o.resetTo ?? ''));
+		reset.toggleClass('ccs-invisible', (o.get() ?? '') === (o.resetTo ?? ''));
 	});
-	row.addButton((b) =>
-		b
-			.setButtonText('Browse…')
+	let browse: HTMLElement | null = null;
+	row.addButton((b) => {
+		browse = b.buttonEl;
+		b.setButtonText('Browse…')
 			.setTooltip('Pick a folder in the vault with the system folder dialog')
 			.onClick(async () => {
 				const r = browseForVaultFolder(ctx.app, o.get() ?? '', `Choose the ${o.name.toLowerCase()}`);
@@ -154,8 +174,25 @@ export function rawFolderSetting(ctx: PanelContext, el: HTMLElement, o: RawFolde
 					return;
 				}
 				await commit(r.path);
+			});
+	});
+	if (o.toggle) {
+		const t = o.toggle;
+		const show = () => {
+			const on = t.get();
+			for (const e of [text?.inputEl, browse, reset]) e?.toggleClass('ccs-hidden', !on);
+		};
+		row.addToggle((tg) =>
+			tg.setValue(t.get()).onChange(async (v) => {
+				t.set(v);
+				show();
+				describe();
+				await ctx.plugin.saveSettings();
+				foldersChanged(row.settingEl);
 			}),
-	);
+		);
+		show();
+	}
 	describe();
 	el.addEventListener(FOLDERS_CHANGED, () => {
 		if (!row.settingEl.isConnected || text?.inputEl.hasClass('is-invalid')) return;
@@ -330,7 +367,7 @@ export function projectFilterOptions(
 			defaultFor: (row) => defaultProjectFolder(base(), o.projectSubfolders, projectName(row), o.recentFolderName),
 			rawDefaultFor: (row) => {
 				const md = mdFor(row);
-				const raw = projectRawDefault(md, rawSetting(), o.projectSubfolders, projectName(row), o.recentFolderName);
+				const raw = projectRawDefault(md, rawSetting(), o.projectSubfolders, projectName(row), o.recentFolderName, masterRaw(ctx.plugin.settings));
 				return raw === md ? null : raw;
 			},
 		}

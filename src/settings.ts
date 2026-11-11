@@ -164,6 +164,13 @@ export interface Settings {
 	/** Runs "Sync all" once, shortly after Obsidian has started. */
 	syncOnStartup: boolean;
 	logPath: string;
+	/**
+	 * One folder for all raw files (.json, .jsonl): each goes to this folder plus its transcript
+	 * folder's own path. While on, the per-account and per-project JSON folders are not used.
+	 */
+	rawRootOn: boolean;
+	/** That folder; empty = next to the transcripts. */
+	rawRoot: string;
 	/** Always at least one. The first account also receives desktop sessions no account claims. */
 	claude: ClaudeAccount[];
 	chatgpt: ChatgptAccount[];
@@ -239,6 +246,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	intervalMinutes: 0,
 	syncOnStartup: false,
 	logPath: 'AI Chats/AI ChatBridge log.md',
+	rawRootOn: true,
+	rawRoot: '80 Archive/raw',
 	claude: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_CLAUDE_WEB, desktop: desktopApp('AI Chats/Claude Desktop/Code') }],
 	chatgpt: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GPT, desktop: desktopApp('AI Chats/ChatGPT Desktop/Codex') }],
 	lumo: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_LUMO }],

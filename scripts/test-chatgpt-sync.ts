@@ -280,6 +280,7 @@ async function testJsonFolder() {
 		page_info: { has_previous_page: false },
 	};
 	const h = harness();
+	h.settings.rawRootOn = false; // the account's own JSON folder is only used with the raw files folder off
 	h.settings.chatgpt[0]!.web.rawFolder = 'Raw/ChatGPT';
 	const connect = GptApi.connect;
 	let chatFetches = 0;

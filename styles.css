@@ -427,8 +427,18 @@
 	border-top: none;
 }
 
+/* A setting whose description runs full width under the name, field and buttons. */
+.ccs-settings .ccs-desc-below {
+	flex-wrap: wrap;
+}
+
+.ccs-settings .ccs-desc-below > .setting-item-description {
+	flex-basis: 100%;
+	padding-top: 6px;
+}
+
 /* A JSON folder belongs to the folder above it: indented, no divider in between. */
-.ccs-settings .ccs-raw-folder .setting-item-name::before {
+.ccs-settings .ccs-raw-folder.ccs-sub-setting .setting-item-name::before {
 	content: "↳ ";
 	color: var(--text-faint);
 }
@@ -835,3 +845,7 @@
 .ccs-gpt ul,
 .ccs-gpt ol { margin: 0; }
 .ccs-gpt svg { max-width: 100%; height: auto; }
+
+.ccs-settings .ccs-hidden {
+	display: none;
+}

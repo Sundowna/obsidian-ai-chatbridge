@@ -8,6 +8,7 @@ import type { Provider } from '../login';
 import { isSelected, onlySelected, pickerRows, setRows, type PickerRow, type ProjectCatalog } from '../project-catalog';
 import { fetchFailure, fetchProjectCatalog } from '../project-list';
 import { DEFAULT_RECENT, plainFolder } from '../select';
+import { masterRaw } from '../raw-folders';
 import { count, foldersChanged, type PanelContext } from './fields';
 
 export interface PickerOptions {
@@ -228,7 +229,7 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 		let redrawRaw = () => {};
 		folderLine(wrap, row, 'projectFolders', 'folder', 'Transcripts', () => choice.defaultFor(row), () => redrawRaw());
 		// The JSON default follows the transcript folder when there is no JSON folder above.
-		redrawRaw = folderLine(wrap, row, 'projectRawFolders', 'braces', 'JSON', () => choice.rawDefaultFor(row) ?? 'next to the transcripts', () => {});
+		if (masterRaw(ctx.plugin.settings) === undefined) redrawRaw = folderLine(wrap, row, 'projectRawFolders', 'braces', 'JSON', () => choice.rawDefaultFor(row) ?? 'next to the transcripts', () => {});
 		return wrap;
 	};
 

@@ -27,7 +27,7 @@ import { gptChatFiles } from '../src/chatgpt/files';
 import { cleanMarkers, renderGptTranscript } from '../src/chatgpt/transcript';
 import { describePage, fallbackCookie, findAccessToken } from '../src/chatgpt/token';
 import { cookiePairs, cookieText, googleCookies } from '../src/cookies';
-import { baseRoot, chatFolders, projectRawDefault, projectRoots, rawLink, rawMoves } from '../src/raw-folders';
+import { baseRoot, chatFolders, mirrorRaw, projectRawDefault, projectRoots, rawLink, rawMoves } from '../src/raw-folders';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -450,6 +450,33 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 	expect('move: clearing the JSON folder moves files back', back2[0]?.to === 'AI/Chat/Recent/c.json');
 	const clash = rawMoves([{ md: 'A/x.md', raws: ['A/x.json'] }, { md: 'A/y/../x.md', raws: [] }, { md: 'B/x.md', raws: ['B/x.json'] }], [{ md: 'A', raw: 'R' }, { md: 'B', raw: 'R' }], (p) => p.startsWith('A/') || p.startsWith('B/'));
 	expect('move: two files never claim one place', clash.length === 1, JSON.stringify(clash));
+}
+
+{
+	// Master raw folder (General): the transcript folder's own path under it.
+	const brain = { uuid: 'r1', name: 'x', created_at: '', updated_at: '', project: { uuid: 'p-1', name: '2nd Brain' } };
+	const loose = { uuid: 'r2', name: 'y', created_at: '', updated_at: '', project: null };
+	const o = { projectSubfolders: true };
+	const base = '30 Sources/AI Chats/Claude/Chat';
+	expect('master raw: mirrorRaw joins the path', mirrorRaw(`${base}/Recent`, '80 Archive/raw') === `80 Archive/raw/${base}/Recent`);
+	expect('master raw: empty or hidden root = next to transcripts', mirrorRaw('A/B', '') === 'A/B' && mirrorRaw('A/B', undefined) === 'A/B' && mirrorRaw('A/B', '.obsidian') === 'A/B');
+	expect('master raw: chat without project', chatFolders(loose, o, base, undefined, 'Recent', '80 Archive/raw').raw === `80 Archive/raw/${base}/Recent`);
+	expect('master raw: chat in a project', chatFolders(brain, o, base, undefined, 'Recent', '80 Archive/raw').raw === `80 Archive/raw/${base}/2nd Brain`);
+	expect('master raw: transcripts stay put', chatFolders(brain, o, base, undefined, 'Recent', '80 Archive/raw').md === `${base}/2nd Brain`);
+	expect('master raw: wins over a surface JSON folder', chatFolders(brain, o, base, 'Raw/Claude', 'Recent', '80 Archive/raw').raw === `80 Archive/raw/${base}/2nd Brain`);
+	expect('master raw: wins over a project JSON folder', chatFolders(brain, { ...o, onlyProjects: true, projects: ['p-1'], customProjectFolders: true, projectRawFolders: { 'p-1': 'Raw/Own' } }, base, undefined, 'Recent', '80 Archive/raw').raw === `80 Archive/raw/${base}/2nd Brain`);
+	expect('master raw: on but empty = next to transcripts', chatFolders(brain, o, base, 'Raw/Claude', 'Recent', '').raw === `${base}/2nd Brain`);
+	const custom = { ...o, onlyProjects: true, projects: ['p-1'], customProjectFolders: true, projectFolders: { 'p-1': '10 Projects/Brain' } };
+	expect('master raw: own project folder is mirrored too', chatFolders(brain, custom, base, undefined, 'Recent', '80 Archive/raw').raw === '80 Archive/raw/10 Projects/Brain');
+	expect('master raw: picker default', projectRawDefault('10 Projects/Brain', undefined, true, '2nd Brain', 'Recent', '80 Archive/raw') === '80 Archive/raw/10 Projects/Brain');
+	const roots = [baseRoot(base, undefined, '80 Archive/raw'), ...projectRoots(custom, base, undefined, (id) => (id === 'p-1' ? '2nd Brain' : undefined), 'Recent', '80 Archive/raw')];
+	const moves = rawMoves([
+		{ md: `${base}/Recent/a.md`, raws: [`${base}/Recent/a.json`] },
+		{ md: '10 Projects/Brain/b.md', raws: ['10 Projects/Brain/b.json'] },
+		{ md: `${base}/Recent/c.md`, raws: [`80 Archive/raw/${base}/Recent/c.json`] },
+	], roots, (p) => !p.startsWith('80 Archive/'));
+	const to = Object.fromEntries(moves.map((m) => [m.from, m.to]));
+	expect('master raw: move plan into the archive', to[`${base}/Recent/a.json`] === `80 Archive/raw/${base}/Recent/a.json` && to['10 Projects/Brain/b.json'] === '80 Archive/raw/10 Projects/Brain/b.json' && moves.length === 2, JSON.stringify(moves));
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll passed');

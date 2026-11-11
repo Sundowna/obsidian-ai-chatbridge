@@ -8,6 +8,7 @@ import type { Provider } from '../login';
 import type { ChatgptAccount, ClaudeAccount } from '../settings';
 import { advanced, count, folderSetting, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { desktopRawMoves } from '../raw-move';
+import { masterRaw } from '../raw-folders';
 
 /** How this account's sessions are told apart from another account's. */
 function matchText(provider: Provider, account: DesktopAccount, isFirst: boolean, several: boolean): string {
@@ -54,7 +55,7 @@ export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provi
 	folderSetting(ctx, el, folderName, 'Where these sessions are saved.', () => conf.folder, (p) => (conf.folder = p));
 	if (ctx.plugin.settings.desktop.keepRaw) {
 		rawFolderSetting(ctx, el, { name: 'Raw session folder', what: 'the copy of each session file (.jsonl)', partner: folderName.toLowerCase(), mirrors: true, get: () => conf.rawFolder, set: (p) => (conf.rawFolder = p) });
-		rawMoveRow(ctx, el, () => desktopRawMoves(ctx.app, account), 'raw session file');
+		rawMoveRow(ctx, el, () => desktopRawMoves(ctx.app, account, masterRaw(ctx.plugin.settings)), 'raw session file');
 	}
 	new Setting(el)
 		.setName('Reads from')

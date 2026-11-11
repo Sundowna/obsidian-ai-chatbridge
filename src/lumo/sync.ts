@@ -13,7 +13,7 @@ import { DEFAULT_RECENT, filterByProjects, nothingSelected, pickTodo, type Todo 
 import { cleanFolder, MIN_DELAY_SECONDS, type LumoAccount } from '../settings';
 import type { ListItem } from '../types';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
-import { chatFolders, rawLink } from '../raw-folders';
+import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import { loginRef } from '../accounts';
 import { LumoApi } from './api';
 import { decryptChat, decryptListing, shallowMessages, type LumoEntry } from './chat';
@@ -129,7 +129,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 				result.failed.push(item.name);
 				continue;
 			}
-			const { md: folder, raw: rawFolder } = chatFolders(item, g, base, g.rawFolder, recent);
+			const { md: folder, raw: rawFolder } = chatFolders(item, g, base, g.rawFolder, recent, masterRaw(plugin.settings));
 			await ensureFolder(app, folder);
 			await ensureFolder(app, rawFolder);
 			const suffix = isRecovery ? ' (recovered)' : isUpdate ? ` (updated ${localStamp(item.updated_at)})` : '';

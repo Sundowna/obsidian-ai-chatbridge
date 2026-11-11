@@ -7,7 +7,7 @@ import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
-import { rawBase } from '../raw-folders';
+import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
 import { pastedSession } from '../cookies';
 import { GeminiApi } from './api';
 import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from './save';
@@ -31,7 +31,7 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 		api = a;
 		const items = await a.listChats(wait, (page) => progress(`reading Gemini chat list… page ${page}`));
 		const byId = new Map<string, GeminiListItem>(items.map((it) => [it.uuid, it]));
-		await saveChats(plugin, items, g.index, folder, rawBase(g.rawFolder) ?? folder, async (item) => {
+		await saveChats(plugin, items, g.index, folder, masterRaw(plugin.settings) !== undefined ? mirrorRaw(folder, masterRaw(plugin.settings)) : rawBase(g.rawFolder) ?? folder, async (item) => {
 			let chat;
 			try {
 				chat = buildChat(byId.get(item.uuid)!, await a.chatTurns(item.uuid, wait));

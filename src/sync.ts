@@ -8,7 +8,7 @@ import { checkChat, checkListPage, ShapeError } from './schema';
 import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, targetFor } from './select';
 import { baseName, dailyNoteName, localStamp } from './naming';
 import { renderTranscript } from './transcript';
-import { chatFolders, dirOf, rawLink } from './raw-folders';
+import { chatFolders, dirOf, masterRaw, rawLink } from './raw-folders';
 import type { Chat } from './types';
 import { createNew, ensureFolder, freeFileName, freeStem } from './vaultio';
 import { appendLog } from './log';
@@ -245,7 +245,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		/** Transcript and raw folders for a chat, as the settings say today. */
 		const foldersOf = (item: ListItem) => {
 			const target = targetFor(item);
-			return chatFolders(item, s, folders[target]!, rawSetting[target], recent);
+			return chatFolders(item, s, folders[target]!, rawSetting[target], recent, masterRaw(plugin.settings));
 		};
 		// Chats with a project folder of their own need no subfolder in the base folders.
 		const projectNames = s.projectSubfolders ? projectFolderNames(kept.filter((item) => customProjectFolder(item, s, recent) === null), recent) : [];

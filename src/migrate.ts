@@ -156,6 +156,8 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			intervalMinutes: saved.intervalMinutes ?? DEFAULT_SETTINGS.intervalMinutes,
 			syncOnStartup: saved.syncOnStartup ?? DEFAULT_SETTINGS.syncOnStartup,
 			logPath: saved.logPath ?? DEFAULT_SETTINGS.logPath,
+			rawRootOn: saved.rawRootOn ?? DEFAULT_SETTINGS.rawRootOn,
+			rawRoot: saved.rawRoot ?? DEFAULT_SETTINGS.rawRoot,
 			claude: hydratedClaude,
 			chatgpt: chatgpt.map(hydrateGpt),
 			lumo: saved.lumo?.length ? saved.lumo.map(hydrateLumo) : firstLumo(hydratedClaude[0]!.web.chatFolder),

@@ -23,7 +23,7 @@ import { gptChatFiles, type GptFileTask } from './files';
 import { automaticRetryDeadline, fingerprint, GptRateLimitError, retryAsset, type Capture } from './recovery';
 import { accountInventory, compareRevision, completeInventoryJob, DEFAULT_OVERLAP_MINUTES, scanInventory, type ScanStats } from './inventory';
 import { renderGptTranscript } from './transcript';
-import { chatFolders, rawLink } from '../raw-folders';
+import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
 
@@ -305,7 +305,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				}
 			}
 		}
-		const foldersFor = (item: ListItem) => chatFolders(item, g, base, g.rawFolder, recent);
+		const foldersFor = (item: ListItem) => chatFolders(item, g, base, g.rawFolder, recent, masterRaw(plugin.settings));
 		let activeDownload = 'recovering a saved chat';
 
 

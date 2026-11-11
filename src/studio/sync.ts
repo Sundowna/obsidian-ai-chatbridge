@@ -6,7 +6,7 @@ import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
-import { rawBase } from '../raw-folders';
+import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
 import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from '../gemini/save';
 import { renderStudioTranscript } from '../gemini/transcript';
 import { pastedSession } from '../cookies';
@@ -27,7 +27,7 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 		const a = await StudioApi.connect(loginRef('gemini', account), pastedSession(plugin.app, account.web.secretId));
 		api = a;
 		const items = await a.listPrompts(wait, (page) => progress(`reading AI Studio library… page ${page}`));
-		await saveChats(plugin, items, st.index, folder, rawBase(st.rawFolder) ?? folder, async (item) => {
+		await saveChats(plugin, items, st.index, folder, masterRaw(plugin.settings) !== undefined ? mirrorRaw(folder, masterRaw(plugin.settings)) : rawBase(st.rawFolder) ?? folder, async (item) => {
 			const p = await a.prompt(item.uuid, wait);
 			if (!p) return null;
 			const created = p.messages.find((m) => m.createdAt)?.createdAt ?? p.updatedAt;

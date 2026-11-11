@@ -24,10 +24,26 @@ const nameOf = (p: string): string => p.split('/').pop() ?? p;
 /** A usable JSON folder setting, or null for "next to the transcripts". */
 export const rawBase = (setting: string | undefined): string | null => plainFolder(setting ?? '');
 
+/**
+ * The raw files folder from General while it is switched on, else undefined. While on it decides
+ * alone: the per-account and per-project JSON folders are not used ("" = next to the transcripts).
+ */
+export const masterRaw = (s: { rawRootOn: boolean; rawRoot: string }): string | undefined => (s.rawRootOn ? s.rawRoot : undefined);
+
+/**
+ * Under the raw files folder, at the transcript folder's own path; without one, next to the
+ * transcripts. E.g. "80 Archive/raw" + "30 Sources/AI Chats/Claude/Chat/Recent".
+ */
+export function mirrorRaw(mdFolder: string, rawRoot: string | undefined): string {
+	const root = plainFolder(rawRoot ?? '');
+	return root ? `${root}/${mdFolder}` : mdFolder;
+}
+
 /** Where a chat's transcript and its raw files go. */
-export function chatFolders(item: ListItem, o: RawFolderOptions, base: string, rawSetting: string | undefined, recentName = DEFAULT_RECENT): ChatFolders {
+export function chatFolders(item: ListItem, o: RawFolderOptions, base: string, rawSetting: string | undefined, recentName = DEFAULT_RECENT, rawRoot?: string): ChatFolders {
 	const sub = o.projectSubfolders ? projectSubfolder(item, recentName) : '';
 	const md = customProjectFolder(item, o, recentName) ?? join(base, sub);
+	if (rawRoot !== undefined) return { md, raw: mirrorRaw(md, rawRoot) };
 	const ownRaw = customProjectFolder(item, { ...o, projectFolders: o.projectRawFolders }, recentName);
 	const rb = rawBase(rawSetting);
 	return { md, raw: ownRaw ?? (rb ? join(rb, sub) : md) };
@@ -37,7 +53,8 @@ export function chatFolders(item: ListItem, o: RawFolderOptions, base: string, r
  * The picker's greyed default for a project's JSON folder: the JSON folder (mirrored), or the
  * project's transcript folder when there is no JSON folder.
  */
-export function projectRawDefault(mdFolder: string, rawSetting: string | undefined, projectSubfolders: boolean, projectName: string | null, recentName = DEFAULT_RECENT): string {
+export function projectRawDefault(mdFolder: string, rawSetting: string | undefined, projectSubfolders: boolean, projectName: string | null, recentName = DEFAULT_RECENT, rawRoot?: string): string {
+	if (rawRoot !== undefined) return mirrorRaw(mdFolder, rawRoot);
 	const rb = rawBase(rawSetting);
 	return rb ? defaultProjectFolder(rb, projectSubfolders, projectName, recentName) : mdFolder;
 }
@@ -57,15 +74,15 @@ export interface RawRoot {
 }
 
 /** A base transcript folder and the JSON folder its raw files mirror into. */
-export function baseRoot(base: string, rawSetting: string | undefined): RawRoot {
-	return { md: base, raw: rawBase(rawSetting) ?? base };
+export function baseRoot(base: string, rawSetting: string | undefined, rawRoot?: string): RawRoot {
+	return { md: base, raw: rawRoot !== undefined ? mirrorRaw(base, rawRoot) : rawBase(rawSetting) ?? base };
 }
 
 /**
  * One root per project with a folder of its own (transcripts, raw files or both), so moves
  * follow "Choose a folder per project". `nameOf` gives a project's name from its picker ID.
  */
-export function projectRoots(o: RawFolderOptions, base: string, rawSetting: string | undefined, nameOf: (id: string) => string | undefined, recentName = DEFAULT_RECENT): RawRoot[] {
+export function projectRoots(o: RawFolderOptions, base: string, rawSetting: string | undefined, nameOf: (id: string) => string | undefined, recentName = DEFAULT_RECENT, rawRoot?: string): RawRoot[] {
 	if (!o.onlyProjects || !o.customProjectFolders) return [];
 	const own = o.projectFolders ?? {};
 	const ownRaw = o.projectRawFolders ?? {};
@@ -74,7 +91,7 @@ export function projectRoots(o: RawFolderOptions, base: string, rawSetting: stri
 		const loose = id === NO_PROJECT || id.trim().toLowerCase() === (recentName || DEFAULT_RECENT).toLowerCase();
 		const name = loose ? null : nameOf(id) ?? id; // older entries were saved by name
 		const md = plainFolder(own[id] ?? '') ?? defaultProjectFolder(base, o.projectSubfolders, name, recentName);
-		const raw = plainFolder(ownRaw[id] ?? '') ?? projectRawDefault(md, rawSetting, o.projectSubfolders, name, recentName);
+		const raw = (rawRoot === undefined ? plainFolder(ownRaw[id] ?? '') : null) ?? projectRawDefault(md, rawSetting, o.projectSubfolders, name, recentName, rawRoot);
 		out.push({ md, raw });
 	}
 	return out;

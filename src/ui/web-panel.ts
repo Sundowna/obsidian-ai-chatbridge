@@ -8,6 +8,7 @@ import { isUuid } from '../schema';
 import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount } from '../settings';
 import { advanced, contentOptions, count, filingOptions, folderSetting, projectFilterOptions, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { googleRawMoves, webRawMoves } from '../raw-move';
+import { masterRaw } from '../raw-folders';
 
 /** Login state with only the buttons that make sense for it. */
 function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string, surface: 'web' | 'studio' = 'web'): void {
@@ -65,7 +66,7 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 	rawFolderSetting(ctx, el, { name: 'Chat JSON folder', what: 'the raw .json of each chat', partner: 'chat folder', mirrors: true, get: () => s.chatRawFolder, set: (p) => (s.chatRawFolder = p) });
 	folderSetting(ctx, el, 'Code folder', 'Where Claude Code sessions listed on claude.ai are saved.', () => s.codeFolder, (p) => (s.codeFolder = p));
 	rawFolderSetting(ctx, el, { name: 'Code JSON folder', what: 'the raw .json of each session', partner: 'code folder', mirrors: true, get: () => s.codeRawFolder, set: (p) => (s.codeRawFolder = p) });
-	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'claude', account));
+	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'claude', account, masterRaw(ctx.plugin.settings)));
 	filingOptions(ctx, el, 'claude.ai', s);
 
 	new Setting(el).setName('Content').setHeading();
@@ -105,7 +106,7 @@ export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAc
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'Chat folder', 'Where Lumo chats are saved.', () => g.folder, (p) => (g.folder = p));
 	rawFolderSetting(ctx, el, { name: 'JSON folder', what: 'the decrypted .json of each chat', partner: 'chat folder', mirrors: true, get: () => g.rawFolder, set: (p) => (g.rawFolder = p) });
-	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'lumo', account));
+	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'lumo', account, masterRaw(ctx.plugin.settings)));
 	filingOptions(ctx, el, 'Lumo', g);
 
 	new Setting(el).setName('Content').setHeading();
@@ -119,7 +120,7 @@ export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: Gemi
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'Chat folder', 'Where Gemini chats are saved.', () => g.folder, (p) => (g.folder = p));
 	rawFolderSetting(ctx, el, { name: 'JSON folder', what: 'the .json of each chat', partner: 'chat folder', get: () => g.rawFolder, set: (p) => (g.rawFolder = p) });
-	rawMoveRow(ctx, el, () => googleRawMoves(ctx.app, account, 'web'));
+	rawMoveRow(ctx, el, () => googleRawMoves(ctx.app, account, 'web', masterRaw(ctx.plugin.settings)));
 	new Setting(el)
 		.setName('What is saved')
 		.setDesc("Each chat's prompts and answers, including the reasoning Gemini shows. Images and files in chats are listed but not downloaded. Gemini has no public API, so the plugin reads what the website itself loads; if Google changes that, the sync stops instead of saving something wrong.");
@@ -153,7 +154,7 @@ export function studioPanel(ctx: PanelContext, el: HTMLElement, account: GeminiA
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'AI Studio folder', 'Where AI Studio chats and prompts are saved.', () => st.folder, (p) => (st.folder = p));
 	rawFolderSetting(ctx, el, { name: 'JSON folder', what: 'the .json of each prompt', partner: 'AI Studio folder', get: () => st.rawFolder, set: (p) => (st.rawFolder = p) });
-	rawMoveRow(ctx, el, () => googleRawMoves(ctx.app, account, 'studio'));
+	rawMoveRow(ctx, el, () => googleRawMoves(ctx.app, account, 'studio', masterRaw(ctx.plugin.settings)));
 }
 
 export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: ChatgptAccount): void {
@@ -167,7 +168,7 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'Chat folder', 'Where ChatGPT chats are saved.', () => g.folder, (p) => (g.folder = p));
 	rawFolderSetting(ctx, el, { name: 'JSON folder', what: 'the raw .json of each chat (and the older parts of long chats)', partner: 'chat folder', mirrors: true, get: () => g.rawFolder, set: (p) => (g.rawFolder = p) });
-	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'chatgpt', account));
+	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'chatgpt', account, masterRaw(ctx.plugin.settings)));
 	filingOptions(ctx, el, 'ChatGPT', g);
 
 	new Setting(el).setName('Content').setHeading();
