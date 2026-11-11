@@ -51,10 +51,10 @@ export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provi
 	}
 	if (!conf.enabled) return;
 
-	const folderName = provider === 'claude' ? 'Code folder' : 'Codex folder';
+	const folderName = provider === 'claude' ? 'Code Local folder' : 'Codex Local folder';
 	folderSetting(ctx, el, folderName, 'Where these sessions are saved.', () => conf.folder, (p) => (conf.folder = p));
 	if (ctx.plugin.settings.desktop.keepRaw) {
-		rawFolderSetting(ctx, el, { name: 'Raw session folder', what: 'the copy of each session file (.jsonl)', partner: folderName.toLowerCase(), mirrors: true, get: () => conf.rawFolder, set: (p) => (conf.rawFolder = p) });
+		rawFolderSetting(ctx, el, { name: 'Raw session folder', what: 'the copy of each session file (.jsonl)', partner: folderName, mirrors: true, get: () => conf.rawFolder, set: (p) => (conf.rawFolder = p) });
 		rawMoveRow(ctx, el, () => desktopRawMoves(ctx.app, account, masterRaw(ctx.plugin.settings)), 'raw session file');
 	}
 	new Setting(el)

@@ -240,7 +240,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		// 4. Make sure the folders exist: both base folders, and (if mirroring)
 		//    one subfolder per project in scope inside each of them.
 		const folders = { chat: cleanFolder(s.chatFolder), code: cleanFolder(s.codeFolder) };
-		if (!folders.chat || !folders.code) throw new StopError('The Claude Chat or Claude Code folder setting is empty or invalid.');
+		if (!folders.chat || !folders.code) throw new StopError('The Chat or Code Cloud folder setting is empty or invalid.');
 		const rawSetting = { chat: s.chatRawFolder, code: s.codeRawFolder };
 		/** Transcript and raw folders for a chat, as the settings say today. */
 		const foldersOf = (item: ListItem) => {
@@ -264,7 +264,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		for (const [i, { item, isUpdate }] of todo.entries()) {
 			progress(`${i + 1} of ${todo.length} chats: ${item.name}`, i, todo.length);
 			const target = targetFor(item);
-			if (!folders[target]) throw new StopError(`The ${target === 'chat' ? 'Claude Chat' : 'Claude Code'} folder setting is empty or invalid.`);
+			if (!folders[target]) throw new StopError(`The ${target === 'chat' ? 'Chat' : 'Code Cloud'} folder setting is empty or invalid.`);
 			const { md: folder, raw: rawFolder } = foldersOf(item);
 			for (const f of new Set([folder, rawFolder])) {
 				if (!app.vault.getAbstractFileByPath(f) && !result.foldersCreated.includes(f)) result.foldersCreated.push(f);
@@ -443,7 +443,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 	if (r.viewNotRead.length) parts.push(`chat-view files not readable (will retry): ${r.viewNotRead.join(', ')}`);
 	if (r.filesSkipped.length) parts.push(`files not saved: ${r.filesSkipped.join(', ')}`);
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
-	if (r.otherPlatforms.size) parts.push(`to Claude Code folder: platform ${[...r.otherPlatforms].join(', ')}`);
+	if (r.otherPlatforms.size) parts.push(`to Code Cloud folder: platform ${[...r.otherPlatforms].join(', ')}`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – ${who}${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');

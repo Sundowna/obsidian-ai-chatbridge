@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.24.1 - 2026-11-11
+
+### Changed
+- Clearer folder names in the settings: Claude's **Code folder** is now **Code Cloud folder** (Claude Code sessions listed on claude.ai), and the desktop app folders are **Code Local folder** (Claude) and **Codex Local folder** (ChatGPT). Only the labels changed; your folders stay as they are
+
 ## 0.24.0 - 2026-11-11
 
 ### New

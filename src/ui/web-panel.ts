@@ -64,8 +64,8 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'Chat folder', 'Where claude.ai chats are saved.', () => s.chatFolder, (p) => (s.chatFolder = p));
 	rawFolderSetting(ctx, el, { name: 'Chat JSON folder', what: 'the raw .json of each chat', partner: 'chat folder', mirrors: true, get: () => s.chatRawFolder, set: (p) => (s.chatRawFolder = p) });
-	folderSetting(ctx, el, 'Code folder', 'Where Claude Code sessions listed on claude.ai are saved.', () => s.codeFolder, (p) => (s.codeFolder = p));
-	rawFolderSetting(ctx, el, { name: 'Code JSON folder', what: 'the raw .json of each session', partner: 'code folder', mirrors: true, get: () => s.codeRawFolder, set: (p) => (s.codeRawFolder = p) });
+	folderSetting(ctx, el, 'Code Cloud folder', 'Where Claude Code cloud sessions listed on claude.ai are saved.', () => s.codeFolder, (p) => (s.codeFolder = p));
+	rawFolderSetting(ctx, el, { name: 'Code Cloud JSON folder', what: 'the raw .json of each session', partner: 'Code Cloud folder', mirrors: true, get: () => s.codeRawFolder, set: (p) => (s.codeRawFolder = p) });
 	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'claude', account, masterRaw(ctx.plugin.settings)));
 	filingOptions(ctx, el, 'claude.ai', s);
 
