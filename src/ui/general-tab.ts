@@ -2,8 +2,9 @@
 
 import { Setting } from 'obsidian';
 import { folderExists, layoutMoves } from '../desktop/layout';
-import { MIN_DELAY_SECONDS, MIN_INTERVAL_MINUTES } from '../settings';
-import type { PanelContext } from './fields';
+import { DEFAULT_SETTINGS, MIN_DELAY_SECONDS, MIN_INTERVAL_MINUTES } from '../settings';
+import { allRawMoves } from '../raw-move';
+import { rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 
 export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 	const { plugin } = ctx;
@@ -35,6 +36,15 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 	new Setting(el)
+		.setName('Sync all on startup')
+		.setDesc('Runs "Sync all" once, 10 seconds after the vault opens. Only accounts you are logged in to; it tells you when new chats are saved or something goes wrong.')
+		.addToggle((t) =>
+			t.setValue(s.syncOnStartup).onChange(async (v) => {
+				s.syncOnStartup = v;
+				await save();
+			}),
+		);
+	new Setting(el)
 		.setName('Automatic sync (minutes)')
 		.setDesc(`Runs "Sync all". 0 is off, minimum ${MIN_INTERVAL_MINUTES}. Pauses after an error until you sync by hand.`)
 		.addText((t) =>
@@ -46,6 +56,26 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 				plugin.restartTimer();
 			}),
 		);
+
+	new Setting(el).setName('Raw files').setHeading();
+	const raw = el.createDiv();
+	rawFolderSetting(ctx, raw, {
+		name: 'Raw files folder',
+		what: 'raw files',
+		partner: 'transcript folders',
+		placeholder: 'Next to the transcripts',
+		resetTo: DEFAULT_SETTINGS.rawRoot,
+		standalone: true,
+		toggle: { get: () => s.rawRootOn, set: (on) => (s.rawRootOn = on) },
+		get: () => s.rawRoot || undefined,
+		set: (p) => (s.rawRoot = p ?? ''),
+		describe: (where, on) => !on
+			? 'Off: each account chooses its own JSON folders in its folder settings, or keeps the raw files next to the transcripts.'
+			: where
+				? `Every raw .json (and kept .jsonl) goes here, at the same path as its transcript, e.g. ${where}/${s.claude[0]!.web.chatFolder}/Recent. Transcripts stay where they are. While this is on, the accounts' JSON folder fields are hidden and not used.`
+				: "Empty: raw files stay next to their transcripts. While this is on, the accounts' JSON folder fields are hidden and not used.",
+	});
+	rawMoveRow(ctx, raw, () => allRawMoves(ctx.app, s), 'raw file');
 
 	new Setting(el).setName('Desktop sessions').setHeading();
 	new Setting(el)
@@ -70,7 +100,7 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 		);
 	new Setting(el)
 		.setName('Keep the raw session file')
-		.setDesc('Also copy the app’s .jsonl next to each transcript. These can be several MB and contain tool output in full.')
+		.setDesc('Also copy the app’s .jsonl, into the raw files folder above (with that off: next to each transcript, or into each account’s raw session folder). These can be several MB and contain tool output in full.')
 		.addToggle((t) =>
 			t.setValue(d.keepRaw).onChange(async (v) => {
 				d.keepRaw = v;

@@ -1,7 +1,7 @@
 {
 	"id": "ai-chatbridge",
 	"name": "AI ChatBridge",
-	"version": "0.23.0",
+	"version": "0.24.0",
 	"minAppVersion": "1.11.4",
 	"description": "Sync your claude.ai, ChatGPT, Proton Lumo, Gemini and AI Studio chats into your vault as raw JSON plus a readable Markdown transcript. Read-only and unofficial.",
 	"author": "Sundowna",

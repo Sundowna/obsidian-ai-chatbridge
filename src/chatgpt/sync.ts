@@ -7,7 +7,7 @@ import { loginRef, withAccount } from '../accounts';
 import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
 import { ShapeError } from '../schema';
-import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames, projectSubfolder } from '../select';
+import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames } from '../select';
 import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
 import { createNew, ensureFolder, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
@@ -23,6 +23,7 @@ import { gptChatFiles, type GptFileTask } from './files';
 import { automaticRetryDeadline, fingerprint, GptRateLimitError, retryAsset, type Capture } from './recovery';
 import { accountInventory, compareRevision, completeInventoryJob, DEFAULT_OVERLAP_MINUTES, scanInventory, type ScanStats } from './inventory';
 import { renderGptTranscript } from './transcript';
+import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
 
@@ -143,8 +144,9 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		}
 		return m;
 	};
-	const transcript = (chat: GptChat, item: ListItem, stem: string) =>
-		renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: `${stem}.json`, filePaths: savedPaths(chat) });
+	/** `paths`: where the transcript and the main raw .json are (or will be). */
+	const transcript = (chat: GptChat, item: ListItem, paths: { json: string; md: string }) =>
+		renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(paths.md.split('/').slice(0, -1).join('/'), paths.json), filePaths: savedPaths(chat) });
 	const viewHash = (value: string): Promise<string> => fingerprint(value.replace(/^(---\r?\n[\s\S]*?\r?\n)unread: false(?=\r?\n)/, '$1unread: true'));
 
 	const sameContent = async (bytes: ArrayBuffer, folder: string, stem: string): Promise<string | null> => {
@@ -303,7 +305,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				}
 			}
 		}
-		const folderFor = (item: ListItem) => customProjectFolder(item, g, recent) ?? (g.projectSubfolders ? `${base}/${projectSubfolder(item, recent)}` : base);
+		const foldersFor = (item: ListItem) => chatFolders(item, g, base, g.rawFolder, recent, masterRaw(plugin.settings));
 		let activeDownload = 'recovering a saved chat';
 
 
@@ -386,15 +388,16 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 					}
 				}
 				if (!entry) {
-					const folder = folderFor(item);
+					const { md: folder, raw: rawFolder } = foldersFor(item);
 					await ensureFolder(app, folder);
-					const stem = freeStem(app, folder, baseName(item.created_at, item.name) + suffix, item.uuid);
+					await ensureFolder(app, rawFolder);
+					const stem = freeStem(app, folder, baseName(item.created_at, item.name) + suffix, item.uuid, rawFolder);
 					entry = {
 						updated_at: item.updated_at,
 						synced: new Date().toISOString(),
-						json: `${folder}/${stem}.json`,
+						json: `${rawFolder}/${stem}.json`,
 						md: `${folder}/${stem}.md`,
-						older: loaded.bytes.slice(1).map((_bytes, i) => olderPartPath(folder, stem, i + 1)),
+						older: loaded.bytes.slice(1).map((_bytes, i) => olderPartPath(rawFolder, stem, i + 1)),
 						pageHashes: hashes,
 					};
 					pending[item.uuid] = entry;
@@ -405,7 +408,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				}
 			}
 			if (!entry) throw new Error('ChatGPT capture has no saved journal entry.');
-			const view = transcript(chat, item, stemOf(entry.json));
+			const view = transcript(chat, item, entry);
 			if (!exists(entry.md)) await createNew(app, entry.md, view);
 			const isNew = !g.index[item.uuid];
 			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(await app.vault.adapter.read(entry.md)) };
@@ -416,11 +419,11 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		};
 
 		const refreshView = async (chat: GptChat, item: ListItem, entry: IndexEntry): Promise<void> => {
-			const view = transcript(chat, item, stemOf(entry.json));
+			const view = transcript(chat, item, entry);
 			const hash = await viewHash(view);
 			const latest = entry.view ?? entry.md;
 			if (exists(entry.md) && exists(latest) && (entry.viewHash === hash || (await viewHash(await app.vault.adapter.read(latest))) === hash)) return;
-			const path = !exists(entry.md) ? entry.md : `${dirOf(entry.json)}/${stemOf(entry.json)} (transcript ${hash.slice(0, 16)}).md`;
+			const path = !exists(entry.md) ? entry.md : `${dirOf(entry.md)}/${stemOf(entry.json)} (transcript ${hash.slice(0, 16)}).md`;
 			if (!exists(path)) {
 				await createNew(app, path, view);
 				if (path === entry.md) result.restored.push(stemOf(path));
@@ -451,7 +454,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			else result.newCount++;
 			progress(`Checking files for ${item.name}`, i + 1, batch.length,
 				position === undefined ? 'checking files for an updated chat' : `checking files for chat ${position}`);
-			await backfill(a, saved.chat, dirOf(saved.entry.json), stem);
+			await backfill(a, saved.chat, dirOf(saved.entry.md), stem);
 			await refreshView(saved.chat, item, g.index[item.uuid]!);
 		}
 
@@ -472,7 +475,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				result.restored.push(stemOf(entry.json));
 			}
 			const before = result.filesSaved;
-			await backfill(a, chat, dirOf(entry.json), stemOf(entry.json));
+			await backfill(a, chat, dirOf(entry.md), stemOf(entry.json));
 			if (result.filesSaved > before) result.backfilledChats++;
 			await refreshView(chat, item, entry);
 		}

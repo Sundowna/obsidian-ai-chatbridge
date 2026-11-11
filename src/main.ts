@@ -131,6 +131,7 @@ export default class AIChatBridge extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			this.restartTimer();
 			this.scheduleGptResume();
+			if (this.settings.syncOnStartup) this.scheduleStartupSync();
 			// Moves/renames in Obsidian update the index (registered after load, so the
 			// vault's start-up scan is not mistaken for renames).
 			this.registerEvent(
@@ -233,6 +234,20 @@ export default class AIChatBridge extends Plugin {
 	private refreshIdleStatus(): void {
 		if (this.unloaded || this.running || this.showingGptCooldown || this.nextGptResume()) return;
 		this.statusEl?.setText(this.idleStatus());
+	}
+
+	/** Seconds after start-up before "Sync all" runs, so Obsidian and other plugins can settle first. */
+	private static readonly STARTUP_DELAY_SECONDS = 10;
+
+	/** Runs "Sync all" once, shortly after Obsidian has started. Quiet, like the automatic sync. */
+	private scheduleStartupSync(): void {
+		this.statusEl?.setText(`AI ChatBridge: syncing in ${AIChatBridge.STARTUP_DELAY_SECONDS} s`);
+		const t = window.setTimeout(() => {
+			if (this.unloaded) return;
+			this.refreshIdleStatus();
+			void this.syncAll('auto');
+		}, AIChatBridge.STARTUP_DELAY_SECONDS * 1000);
+		this.register(() => window.clearTimeout(t));
 	}
 
 	restartTimer() {

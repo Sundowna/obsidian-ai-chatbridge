@@ -12,21 +12,24 @@ export async function ensureFolder(app: App, folder: string): Promise<void> {
 	}
 }
 
-function taken(app: App, folder: string, stem: string): boolean {
+function taken(app: App, folder: string, rawFolder: string, stem: string): boolean {
 	return (
-		app.vault.getAbstractFileByPath(normalizePath(`${folder}/${stem}.json`)) !== null ||
+		app.vault.getAbstractFileByPath(normalizePath(`${rawFolder}/${stem}.json`)) !== null ||
 		app.vault.getAbstractFileByPath(normalizePath(`${folder}/${stem}.md`)) !== null
 	);
 }
 
-/** Finds a free "<stem>" so that neither <stem>.json nor <stem>.md exists. */
-export function freeStem(app: App, folder: string, stem: string, uuid: string): string {
-	if (!taken(app, folder, stem)) return stem;
+/**
+ * Finds a free "<stem>" so that neither <folder>/<stem>.md nor <rawFolder>/<stem>.json exists.
+ * rawFolder is where the raw .json goes; by default next to the transcript.
+ */
+export function freeStem(app: App, folder: string, stem: string, uuid: string, rawFolder = folder): string {
+	if (!taken(app, folder, rawFolder, stem)) return stem;
 	const withId = `${stem} (${uuid.slice(0, 8)})`;
-	if (!taken(app, folder, withId)) return withId;
+	if (!taken(app, folder, rawFolder, withId)) return withId;
 	for (let i = 2; i < 1000; i++) {
 		const s = `${withId} ${i}`;
-		if (!taken(app, folder, s)) return s;
+		if (!taken(app, folder, rawFolder, s)) return s;
 	}
 	throw new Error(`No free file name for ${stem}`);
 }

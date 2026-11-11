@@ -427,6 +427,66 @@
 	border-top: none;
 }
 
+/* A setting whose description runs full width under the name, field and buttons. */
+.ccs-settings .ccs-desc-below {
+	flex-wrap: wrap;
+}
+
+.ccs-settings .ccs-desc-below > .setting-item-description {
+	flex-basis: 100%;
+	padding-top: 6px;
+}
+
+/* A JSON folder belongs to the folder above it: indented, no divider in between. */
+.ccs-settings .ccs-raw-folder.ccs-sub-setting .setting-item-name::before {
+	content: "↳ ";
+	color: var(--text-faint);
+}
+
+.ccs-settings .ccs-raw-folder input[type="text"]::placeholder {
+	font-style: italic;
+}
+
+.ccs-settings .ccs-raw-folder input[type="text"].is-invalid {
+	border-color: var(--text-error);
+	box-shadow: 0 0 0 1px var(--text-error);
+}
+
+.ccs-raw-folder-error {
+	color: var(--text-error);
+}
+
+.ccs-raw-folder-new {
+	margin-top: 2px;
+	color: var(--text-faint);
+}
+
+.ccs-settings .ccs-invisible {
+	visibility: hidden;
+}
+
+/* "N JSON files in the old place": an accent bar, so it reads as a to-do, not a setting. */
+.ccs-settings .ccs-raw-move-row {
+	margin: 4px 0 8px 24px;
+	padding: 10px 12px;
+	border: none;
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+}
+
+.ccs-raw-move-icon {
+	display: inline-flex;
+	vertical-align: -3px;
+	margin-right: 6px;
+	color: var(--interactive-accent);
+}
+
+.ccs-raw-move-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
 /* The folder field under a selected project, lined up with its name. */
 .ccs-picker-item + .ccs-picker-item {
 	border-top: 1px solid var(--background-modifier-border-hover);
@@ -434,6 +494,11 @@
 
 .ccs-picker-folder {
 	padding: 0 4px 8px 28px;
+}
+
+/* The JSON line under the transcript line. */
+.ccs-picker-folder-note + .ccs-picker-folder-line {
+	margin-top: 6px;
 }
 
 .ccs-picker-folder-line {
@@ -780,3 +845,7 @@
 .ccs-gpt ul,
 .ccs-gpt ol { margin: 0; }
 .ccs-gpt svg { max-width: 100%; height: auto; }
+
+.ccs-settings .ccs-hidden {
+	display: none;
+}

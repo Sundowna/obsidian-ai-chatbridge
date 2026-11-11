@@ -10,6 +10,7 @@ import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
 import { createNew, ensureFolder } from '../vaultio';
+import { masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
 import { parseClaudeSession } from './claude-code';
 import { codexTitles, parseCodexSession } from './codex';
 import { findLatestJson } from './leveldb';
@@ -108,8 +109,8 @@ export async function runDesktopSync(
 
 	const pathTaken = (p: string) => app.vault.getAbstractFileByPath(p) !== null;
 	/** A stem free for both the .md and the raw .jsonl. */
-	const freeStem = (folder: string, stem: string, id: string): string => {
-		const free = (x: string) => !pathTaken(`${folder}/${x}.md`) && !pathTaken(`${folder}/${x}.jsonl`);
+	const freeStem = (folder: string, stem: string, id: string, rawFolder = folder): string => {
+		const free = (x: string) => !pathTaken(`${folder}/${x}.md`) && !pathTaken(`${rawFolder}/${x}.jsonl`);
 		if (free(stem)) return stem;
 		const withId = `${stem} (${id.slice(0, 8)})`;
 		if (free(withId)) return withId;
@@ -240,7 +241,7 @@ export async function runDesktopSync(
 					// Transcript deleted from the vault: write it again under the same name, so links stay valid.
 					const folder = entry.md.split('/').slice(0, -1).join('/');
 					await ensureFolder(app, folder);
-					await createNew(app, entry.md, renderDesktopTranscript(session, { source: file.path, rawFileName: exists(entry.raw) ? entry.raw!.split('/').pop() : undefined }));
+					await createNew(app, entry.md, renderDesktopTranscript(session, { source: file.path, rawFileName: entry.raw && exists(entry.raw) ? rawLink(folder, entry.raw) : undefined }));
 					result.restored.push(entry.md.split('/').pop()!.replace(/\.md$/, ''));
 					continue;
 				}
@@ -258,15 +259,20 @@ export async function runDesktopSync(
 			progress(`${i + 1} of ${Math.min(limit, todo.length)} sessions: ${session.title}`, i, Math.min(limit, todo.length));
 			const conf = owner.desktop;
 			const base = cleanFolder(conf.folder)!;
-			const folder = d.projectSubfolders && session.section ? `${base}/${session.section}` : base;
+			const sub = d.projectSubfolders && session.section ? session.section : '';
+			const folder = sub ? `${base}/${sub}` : base;
+			const root = masterRaw(s);
+			const rb = d.keepRaw && root === undefined ? rawBase(conf.rawFolder) : null;
+			const rawFolder = root !== undefined ? mirrorRaw(folder, root) : rb ? (sub ? `${rb}/${sub}` : rb) : folder;
 			await ensureFolder(app, folder);
+			if (d.keepRaw) await ensureFolder(app, rawFolder);
 			let stem = baseName(session.created, session.title);
 			if (isUpdate) stem = `${stem} (updated ${localStamp(session.updated)})`;
-			stem = freeStem(folder, stem, session.id);
+			stem = freeStem(folder, stem, session.id, rawFolder);
 			const mdPath = `${folder}/${stem}.md`;
-			const rawPath = d.keepRaw ? `${folder}/${stem}.jsonl` : undefined;
+			const rawPath = d.keepRaw ? `${rawFolder}/${stem}.jsonl` : undefined;
 			if (rawPath) await createNew(app, rawPath, text);
-			await createNew(app, mdPath, renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? `${stem}.jsonl` : undefined }));
+			await createNew(app, mdPath, renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? rawLink(folder, rawPath) : undefined }));
 			conf.index[session.id] = { updated: session.updated, size: file.size, mtime: file.mtime, source: file.path, md: mdPath, raw: rawPath, synced: new Date().toISOString() };
 			await plugin.saveSettings();
 			result.written.push(stem);

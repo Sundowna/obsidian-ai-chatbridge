@@ -11,6 +11,7 @@ import { pickTodo, type Todo } from '../select';
 import type { GeminiAccount } from '../settings';
 import type { IndexEntry, ListItem } from '../types';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
+import { rawLink } from '../raw-folders';
 
 export interface GoogleSyncResult {
 	listed: number;
@@ -31,7 +32,8 @@ export const emptyResult = (): GoogleSyncResult => ({ listed: 0, unchanged: 0, n
 export interface Saved {
 	createdAt: string;
 	json: string;
-	md: (jsonFileName: string) => string;
+	/** Gets the transcript's link to the raw .json: its file name, or its path when in another folder. */
+	md: (jsonLink: string) => string;
 }
 
 export async function saveChats(
@@ -39,6 +41,8 @@ export async function saveChats(
 	items: ListItem[],
 	index: Record<string, IndexEntry>,
 	folder: string,
+	/** Where the raw .json files go; the transcript folder when they have no folder of their own. */
+	rawFolder: string,
 	read: (item: ListItem) => Promise<Saved | null>,
 	progress: ProgressFn,
 	result: GoogleSyncResult,
@@ -68,12 +72,13 @@ export async function saveChats(
 			continue;
 		}
 		await ensureFolder(app, folder);
+		await ensureFolder(app, rawFolder);
 		const suffix = isRecovery ? ' (recovered)' : isUpdate ? ` (updated ${localStamp(item.updated_at)})` : '';
-		const stem = freeStem(app, folder, baseName(saved.createdAt, item.name) + suffix, item.uuid);
-		const json = `${folder}/${stem}.json`;
+		const stem = freeStem(app, folder, baseName(saved.createdAt, item.name) + suffix, item.uuid, rawFolder);
+		const json = `${rawFolder}/${stem}.json`;
 		const md = `${folder}/${stem}.md`;
 		await createNew(app, json, saved.json);
-		await createNew(app, md, saved.md(`${stem}.json`));
+		await createNew(app, md, saved.md(rawLink(folder, json)));
 		index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString() };
 		await plugin.saveSettings();
 		if (isRecovery) result.restored.push(stem);

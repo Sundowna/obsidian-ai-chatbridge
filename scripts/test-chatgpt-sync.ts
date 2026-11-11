@@ -268,6 +268,69 @@ async function testVoiceReimport() {
 	}
 }
 
+/** With a JSON folder, the raw files go there (mirrored), the transcript links them by path, and a deleted .json comes back there. */
+async function testJsonFolder() {
+	const chatId = '11111111-2222-3333-4444-555555555555';
+	const chat = {
+		conversation_id: chatId, title: 'Split', create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [
+			{ id: 'u1', author: { role: 'user' }, create_time: 1793955600, content: { content_type: 'text', parts: ['Hello'] } },
+			{ id: 'a1', author: { role: 'assistant' }, create_time: 1793955610, content: { content_type: 'text', parts: ['Hi'] }, recipient: 'all', channel: 'final' },
+		],
+		page_info: { has_previous_page: false },
+	};
+	const h = harness();
+	h.settings.rawRootOn = false; // the account's own JSON folder is only used with the raw files folder off
+	h.settings.chatgpt[0]!.web.rawFolder = 'Raw/ChatGPT';
+	const connect = GptApi.connect;
+	let chatFetches = 0;
+	GptApi.connect = async () => ({
+		inventoryKey: 'account:json-folder-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean) => 'list:' + [offset, tpp, archived].join(':'),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: () => 'chat',
+		olderPath: () => 'older',
+		redact: (value: string) => value,
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: [{ id: chatId, title: 'Split', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat') {
+				chatFetches++;
+				return raw(chat);
+			}
+			throw new Error('Unexpected request ' + path);
+		},
+	} as unknown as GptApi);
+	try {
+		const first = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(first.newCount, 1, first.stopped);
+		const entry = h.settings.chatgpt[0]!.web.index[chatId]!;
+		assert.match(entry.md, /^Chats\/Recent\/[^/]+\.md$/, 'transcript in the chat folder');
+		assert.match(entry.json, /^Raw\/ChatGPT\/Recent\/[^/]+\.json$/, 'raw .json in the JSON folder, same subfolder');
+		assert(![...h.entries.keys()].some((p) => p.startsWith('Chats/') && p.endsWith('.json')), 'no .json in the chat folder');
+		assert(h.read(entry.md).includes(`raw: "[[${entry.json}]]"`), 'transcript links the raw file by its path');
+
+		const settled = h.entries.size;
+		const again = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(again.newCount + again.changedCount + again.refreshedViews, 0, 'second sync changes nothing');
+		assert.equal(h.entries.size, settled);
+
+		// Deleted raw file: fetched again into the JSON folder, never next to the transcript.
+		h.entries.delete(entry.json);
+		const fetches = chatFetches;
+		await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		const back = h.settings.chatgpt[0]!.web.index[chatId]!;
+		assert.equal(chatFetches, fetches + 1, 'fetched once more');
+		assert.match(back.json, /^Raw\/ChatGPT\/Recent\//);
+		assert(h.entries.has(back.json));
+		assert(![...h.entries.keys()].some((p) => p.startsWith('Chats/') && p.endsWith('.json')), 'still no .json in the chat folder');
+		console.log('JSON folder passed: raw files mirrored into their own folder, linked by path, restored there.');
+	} finally {
+		GptApi.connect = connect;
+	}
+}
+
 async function main() {
 	assert.equal(retryDeadline('120', 1000), 121000);
 	assert.equal(retryDeadline('invalid', 1000), 601000);
@@ -277,6 +340,7 @@ async function main() {
 	await testAutomaticResume();
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();
+	await testJsonFolder();
 	let calls = 0;
 	let sandboxCalls = 0;
 	let listingLimit = true;

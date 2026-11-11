@@ -61,6 +61,8 @@ export interface DesktopIndexEntry {
 export interface DesktopAppSettings {
 	enabled: boolean;
 	folder: string;
+	/** Folder for the raw .jsonl copies ("Keep the raw session file"). Empty = next to the transcripts. */
+	rawFolder?: string;
 	/** Extra folders with session .jsonl files (one per entry). The app's own folder is always scanned. */
 	extraFolders: string[];
 	index: Record<string, DesktopIndexEntry>;
@@ -74,7 +76,7 @@ export interface DesktopAppSettings {
 export interface DesktopSettings {
 	/** Put each session in a subfolder named after the folder it ran in. */
 	projectSubfolders: boolean;
-	/** Also copy the source .jsonl next to the transcript. */
+	/** Also copy the source .jsonl, next to the transcript or into the account's raw folder. */
 	keepRaw: boolean;
 	/** Leave sessions alone until they have been quiet this long (they are still being written). */
 	quietMinutes: number;
