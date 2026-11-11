@@ -20,7 +20,7 @@ function addAccountDialog(ctx: PanelContext, provider: Provider): void {
 	const list = accountsOf(ctx.plugin.settings, provider);
 	new NameModal(ctx.app, {
 		title: `Add a ${PROVIDER_LABEL[provider]} account`,
-		hint: `A name for telling your accounts apart, such as "Work". The account gets its own login and its own folders in the vault.`,
+		hint: `A name for telling your accounts apart, such as "Work". The account gets its own login and saves into the same folders as your other accounts; each note says which account it came from (account: in its properties).`,
 		action: 'Add account',
 		problem: (name) => nameProblem(list, name),
 		submit: async (name) => {

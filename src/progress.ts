@@ -19,18 +19,29 @@ export class SyncProgress {
 	private notice: Notice | null = null;
 	private textEl: HTMLElement | null = null;
 	private fillEl: HTMLElement | null = null;
+	private stopEl: HTMLButtonElement | null = null;
 
 	constructor(
 		private readonly label: string,
 		private readonly statusEl: HTMLElement | null,
 		showNotice: boolean,
 		private readonly statusPrefix?: () => string | undefined,
+		/** Shows a Stop button in the notice. */
+		onStop?: () => void,
 	) {
 		if (showNotice) {
 			const frag = createFragment((f) => {
 				this.textEl = f.createDiv({ text: `${label}: starting…` });
 				const bar = f.createDiv({ cls: 'ccs-progress is-indeterminate' });
 				this.fillEl = bar.createDiv({ cls: 'ccs-progress-fill' });
+				if (onStop) {
+					const row = f.createDiv({ cls: 'ccs-progress-actions' });
+					this.stopEl = row.createEl('button', { text: 'Stop', cls: 'mod-warning' });
+					this.stopEl.addEventListener('click', (e) => {
+						e.stopPropagation(); // a click on a notice closes it; this one should stay
+						onStop();
+					});
+				}
 			});
 			this.notice = new Notice(frag, 0);
 		}
@@ -51,6 +62,15 @@ export class SyncProgress {
 		const prefix = this.statusPrefix?.();
 		this.statusEl?.setText(prefix ? `${prefix} · ${short}` : `${this.label}: ${short}${pct === null ? '' : ` (${pct}%)`}`);
 	};
+
+	/** A stop was asked for: the current chat finishes first. */
+	stopping(): void {
+		if (this.stopEl) {
+			this.stopEl.disabled = true;
+			this.stopEl.setText('Stopping…');
+		}
+		this.textEl?.setText(`${this.label}: stopping after this chat…`);
+	}
 
 	finish(): void {
 		this.notice?.hide();

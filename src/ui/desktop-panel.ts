@@ -6,7 +6,7 @@ import { defaultRoots, nodeDesktopFs } from '../desktop/scan';
 import type { DesktopApp } from '../desktop/types';
 import type { Provider } from '../login';
 import type { ChatgptAccount, ClaudeAccount } from '../settings';
-import { advanced, count, folderSetting, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
+import { advanced, bindSyncButton, count, folderSetting, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { desktopRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
 
@@ -44,9 +44,7 @@ export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provi
 	row.settingEl.addClass('ccs-primary-row');
 	if (conf.enabled) {
 		row.addButton((b) =>
-			b.setButtonText('Sync now').setCta().onClick(() => {
-				void ctx.plugin.syncAccount(provider, account, 'desktop').then(ctx.refresh);
-			}),
+			bindSyncButton(ctx, b.setButtonText('Sync now').setCta().buttonEl, () => ctx.plugin.isSyncing(provider, account.id), () => void ctx.plugin.syncAccount(provider, account, 'desktop').then(ctx.refresh)),
 		);
 	}
 	if (!conf.enabled) return;

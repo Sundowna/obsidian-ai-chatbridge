@@ -1,7 +1,9 @@
 // Settings that apply to every account.
 
 import { Setting } from 'obsidian';
-import { folderExists, layoutMoves } from '../desktop/layout';
+import { folderExists, layoutMoves, layoutRoot } from '../desktop/layout';
+import { formatClock, reindexText } from '../main';
+import { ConfirmModal } from './modals';
 import { DEFAULT_SETTINGS, MIN_DELAY_SECONDS, MIN_INTERVAL_MINUTES } from '../settings';
 import { allRawMoves } from '../raw-move';
 import { rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
@@ -119,15 +121,56 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 
-	const moves = layoutMoves(s, folderExists(ctx.app));
-	if (!moves.length) return;
-	new Setting(el).setName('Folder layout').setHeading();
-	new Setting(el)
-		.setName('Move into the app layout')
-		.setDesc(`${moves.map((m) => `${m.label}: ${m.from} → ${m.to}`).join('; ')}. Uses Obsidian's own move, so links and the sync index follow.`)
+	new Setting(el).setName('Index').setHeading();
+	const last = plugin.lastReindex;
+	const reindex = new Setting(el)
+		.setName('Refresh index')
+		.setDesc(last
+			? `${reindexText(last)} (${formatClock(last.at)})`
+			: 'Moved or renamed synced notes outside Obsidian, e.g. in the file manager or while the plugin was off? This finds them again by their chat ID, so the next sync does not save them twice. Moves inside Obsidian are followed anyway.')
 		.addButton((b) =>
-			b.setButtonText('Move now').setWarning().onClick(() => {
-				void plugin.moveToAppLayout().then(ctx.refresh);
+			b.setButtonText('Refresh').onClick(async () => {
+				b.setDisabled(true).setButtonText('Refreshing…');
+				await plugin.refreshIndexNow();
+				ctx.refresh();
 			}),
 		);
+	reindex.descEl.toggleClass('ccs-result', !!last);
+
+	const moves = layoutMoves(s, folderExists(ctx.app));
+	if (!moves.length) return;
+	const root = layoutRoot(s.claude[0]!.web.chatFolder);
+	const short = (p: string) => (root && p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p);
+	// A folder two settings shared (older versions' "Code") moves once; the second only switches its setting.
+	const shown = moves.filter((m, i) => moves.findIndex((x) => x.from === m.from) === i);
+	new Setting(el).setName('Folder layout').setHeading();
+	const layout = new Setting(el)
+		.setName('Move into the new layout')
+		.setDesc(createFragment((f) => {
+			f.appendText(`One folder per provider, shared by all its accounts, inside ${root || 'the vault'}. Each note says which account it came from.`);
+			const list = f.createEl('ul', { cls: 'ccs-move-list' });
+			for (const m of shown) {
+				const li = list.createEl('li');
+				li.createSpan({ cls: 'ccs-move-label', text: `${m.label}: ` });
+				li.createEl('code', { text: short(m.from) });
+				li.appendText(' → ');
+				li.createEl('code', { text: short(m.to) });
+			}
+			f.appendText('Uses Obsidian\'s own move, so links and the sync history follow. The raw files folder moves with them.');
+		}))
+		.addButton((b) =>
+			b.setButtonText('Move now…').setWarning().onClick(() => {
+				new ConfirmModal(
+					ctx.app,
+					'Move synced chats into the new layout?',
+					`${shown.length} ${shown.length === 1 ? 'folder moves' : 'folders move'}, with their raw files. Accounts that had folders of their own now share one per provider. Nothing is deleted: if a file with the same name is already there, both stay and you are told which.`,
+					'Move now',
+					async () => {
+						await plugin.moveToAppLayout();
+						ctx.refresh();
+					},
+				).open();
+			}),
+		);
+	layout.settingEl.addClass('ccs-layout-move');
 }

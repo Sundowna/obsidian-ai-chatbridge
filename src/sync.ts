@@ -6,7 +6,7 @@ import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
 import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, targetFor } from './select';
-import { baseName, dailyNoteName, localStamp } from './naming';
+import { baseName, dailyNoteName, localStamp, tagAccount } from './naming';
 import { renderTranscript } from './transcript';
 import { chatFolders, dirOf, masterRaw, rawLink } from './raw-folders';
 import type { Chat } from './types';
@@ -168,7 +168,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			linked.add(p);
 			extraFiles.push({ name: f.name, path: p });
 		}
-		return renderTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(mdFolder, json), filePaths, extraFiles });
+		return tagAccount(renderTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(mdFolder, json), filePaths, extraFiles }), account.label);
 	};
 
 	/** Chat-view files via ReadConversation, or null if claude.ai would not say. */

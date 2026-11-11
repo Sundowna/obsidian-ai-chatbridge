@@ -52,6 +52,19 @@ export function safeTitle(name: string): string {
 	return t;
 }
 
+/**
+ * Adds `account: "<name>"` to a transcript's front matter, right after its opening line, so
+ * chats from several accounts can share one folder and still be told apart (Dataview, Bases).
+ */
+export function tagAccount(md: string, account: string): string {
+	const open = /^---\r?\n/.exec(md);
+	if (!open || !account) return md;
+	return `${open[0]}account: ${JSON.stringify(account)}\n${md.slice(open[0].length)}`;
+}
+
+/** The transcript without the line tagAccount adds, for comparing renderings. */
+export const untagAccount = (md: string): string => md.replace(/^(---\r?\n)account: [^\n]*\n/, '$1');
+
 /** "YYYY-MM-DD <title>" with the date the chat was created. */
 export function baseName(createdAt: string, name: string): string {
 	return `${localDate(createdAt)} ${safeTitle(name)}`;

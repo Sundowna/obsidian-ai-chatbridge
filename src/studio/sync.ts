@@ -2,6 +2,7 @@
 
 import { StopError } from '../api';
 import { loginRef } from '../accounts';
+import { tagAccount } from '../naming';
 import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
@@ -31,7 +32,7 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 			const p = await a.prompt(item.uuid, wait);
 			if (!p) return null;
 			const created = p.messages.find((m) => m.createdAt)?.createdAt ?? p.updatedAt;
-			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => renderStudioTranscript(p, name) };
+			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name), account.label) };
 		}, progress, result);
 	} catch (e) {
 		if (e instanceof StopError) result.stopped = e.message;

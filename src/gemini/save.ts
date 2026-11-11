@@ -7,7 +7,7 @@ import { appendLog } from '../log';
 import type AIChatBridge from '../main';
 import { baseName, dailyNoteName, localStamp } from '../naming';
 import type { ProgressFn } from '../progress';
-import { pickTodo, type Todo } from '../select';
+import { newestFirst, pickTodo, type Todo } from '../select';
 import type { GeminiAccount } from '../settings';
 import type { IndexEntry, ListItem } from '../types';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
@@ -58,7 +58,7 @@ export async function saveChats(
 	const recoveries: Todo[] = items.filter(lost).map((item) => ({ item, isUpdate: true }));
 	result.listed = items.length;
 	result.unchanged = items.length - todo.length - recoveries.length;
-	const jobs = [...todo, ...recoveries];
+	const jobs = newestFirst([...todo, ...recoveries]);
 	const max = plugin.settings.maxChatsPerRun;
 	const batch = max > 0 ? jobs.slice(0, max) : jobs;
 	result.leftForLater = jobs.length - batch.length;

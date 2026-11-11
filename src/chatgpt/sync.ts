@@ -8,7 +8,7 @@ import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
 import { ShapeError } from '../schema';
 import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames } from '../select';
-import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
+import { baseName, dailyNoteName, localStamp, safeTitle, tagAccount, untagAccount } from '../naming';
 import { createNew, ensureFolder, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
 import { cleanFolder, MIN_DELAY_SECONDS } from '../settings';
@@ -146,8 +146,9 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	};
 	/** `paths`: where the transcript and the main raw .json are (or will be). */
 	const transcript = (chat: GptChat, item: ListItem, paths: { json: string; md: string }) =>
-		renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(paths.md.split('/').slice(0, -1).join('/'), paths.json), filePaths: savedPaths(chat) });
-	const viewHash = (value: string): Promise<string> => fingerprint(value.replace(/^(---\r?\n[\s\S]*?\r?\n)unread: false(?=\r?\n)/, '$1unread: true'));
+		tagAccount(renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(paths.md.split('/').slice(0, -1).join('/'), paths.json), filePaths: savedPaths(chat) }), account.label);
+	// The account line is left out, so notes saved before it existed do not count as changed.
+	const viewHash = (value: string): Promise<string> => fingerprint(untagAccount(value).replace(/^(---\r?\n[\s\S]*?\r?\n)unread: false(?=\r?\n)/, '$1unread: true'));
 
 	const sameContent = async (bytes: ArrayBuffer, folder: string, stem: string): Promise<string | null> => {
 		for (const kindFolder of Object.values(KIND_FOLDER)) {

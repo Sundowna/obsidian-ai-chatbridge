@@ -2,7 +2,7 @@
 // had one flat set of fields; those become the first account of each provider, so its login,
 // folders and sync history carry over unchanged.
 
-import { CHATGPT_APP, CLAUDE_APP, layoutRoot } from './desktop/layout';
+import { layoutFolders, layoutRoot } from './desktop/layout';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import { onlySelected } from './project-catalog';
 import {
@@ -35,14 +35,13 @@ const hydrateDesktop = (d: Partial<DesktopAppSettings> | undefined, folder: stri
 
 /**
  * Desktop settings from data.json over the defaults. A vault that never had them gets the
- * app layout next to its Claude Chat folder (e.g. "30 Sources/AI Chats/Claude Desktop/Code").
+ * layout next to its Claude Chat folder (e.g. "30 Sources/AI Chats/Claude/Code-Local/Tower").
  */
 export function mergeDesktop(saved: Partial<LegacyDesktop> | undefined, chatFolder: string): LegacyDesktop {
-	const root = layoutRoot(chatFolder);
+	const to = layoutFolders(layoutRoot(chatFolder));
 	const parent = chatFolder.split('/').slice(0, -1).join('/');
 	const under = (r: string, rest: string) => (r ? `${r}/${rest}` : rest);
-	const app = (s: Partial<DesktopAppSettings> | undefined, rest: string, before016: string): DesktopAppSettings => {
-		const folder = under(root, rest);
+	const app = (s: Partial<DesktopAppSettings> | undefined, folder: string, before016: string): DesktopAppSettings => {
 		// 0.16.0 used ".../Claude Desktop" and ".../Codex"; nothing written there yet -> the new layout.
 		const unused = !Object.keys(s?.index ?? {}).length && s?.folder === under(parent, before016);
 		return hydrateDesktop({ ...s, ...(unused ? { folder } : {}) }, folder);
@@ -50,8 +49,8 @@ export function mergeDesktop(saved: Partial<LegacyDesktop> | undefined, chatFold
 	return {
 		...DEFAULT_DESKTOP,
 		...saved,
-		claude: app(saved?.claude, `${CLAUDE_APP}/Code`, 'Claude Desktop'),
-		codex: app(saved?.codex, `${CHATGPT_APP}/Codex`, 'Codex'),
+		claude: app(saved?.claude, to.claudeCodeLocal, 'Claude Desktop'),
+		codex: app(saved?.codex, to.codexLocal, 'Codex'),
 	};
 }
 
@@ -122,8 +121,7 @@ const hydrateLumo = (a: Partial<LumoAccount>): LumoAccount => {
 
 /** A vault that never had Lumo gets it next to its other chat folders. */
 function firstLumo(claudeChatFolder: string): LumoAccount[] {
-	const root = layoutRoot(claudeChatFolder);
-	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_LUMO, folder: root ? `${root}/Lumo/Chat` : 'Lumo/Chat' } }];
+	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_LUMO, folder: layoutFolders(layoutRoot(claudeChatFolder)).lumoChat } }];
 }
 
 const hydrateGemini = (a: Partial<GeminiAccount>): GeminiAccount => ({
@@ -135,9 +133,8 @@ const hydrateGemini = (a: Partial<GeminiAccount>): GeminiAccount => ({
 
 /** A vault that never had Gemini gets it next to its other chat folders. */
 function firstGemini(claudeChatFolder: string): GeminiAccount[] {
-	const root = layoutRoot(claudeChatFolder);
-	const app = root ? `${root}/Gemini` : 'Gemini';
-	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_GEMINI, index: {}, folder: `${app}/Chat` }, studio: { ...DEFAULT_STUDIO, index: {}, folder: `${app}/AI Studio` } }];
+	const to = layoutFolders(layoutRoot(claudeChatFolder));
+	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_GEMINI, index: {}, folder: to.geminiChat }, studio: { ...DEFAULT_STUDIO, index: {}, folder: to.studio } }];
 }
 
 /** `migrated` = flat settings were converted (the caller keeps a copy of the old file). */

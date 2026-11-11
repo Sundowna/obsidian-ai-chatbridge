@@ -1,10 +1,13 @@
-import { Notice, Plugin } from 'obsidian';
+import { Notice, Plugin, setIcon } from 'obsidian';
 import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 import { accountsOf, hasPastedSession, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
 import { AIChatBridgeSettingTab } from './ui/settings-tab';
 import { anyDesktopEnabled, runDesktopSync, type DesktopOnly } from './desktop/sync';
-import { folderExists, layoutMoves, moveToAppLayout } from './desktop/layout';
+import { folderExists, layoutMoves, moveToAppLayout, pruneEmpty } from './desktop/layout';
+import { masterRaw, mirrorRaw } from './raw-folders';
+import { allRawMoves, moveRawFiles } from './raw-move';
+import { refreshIndex, type ReindexResult } from './reindex';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
@@ -47,6 +50,15 @@ export default class AIChatBridge extends Plugin {
 
 	/** Status bar text while a sync runs (empty otherwise). */
 	private statusEl: HTMLElement | null = null;
+	private ribbonEl: HTMLElement | null = null;
+	/** Stop was asked for: the running sync ends after its current chat. */
+	private stopRequested = false;
+	/** Which account (or desktop app) is syncing right now. */
+	private current: { provider?: Provider; id?: string } | null = null;
+	private progress: SyncProgress | null = null;
+	private readonly busyListeners = new Set<() => void>();
+	/** The last "Refresh index" result, shown in the settings. */
+	lastReindex: (ReindexResult & { at: number }) | null = null;
 
 	async onload() {
 		this.unloaded = false;
@@ -62,6 +74,15 @@ export default class AIChatBridge extends Plugin {
 		if (adopted) await this.saveSettings();
 		registerLayoutIcons(this);
 		this.statusEl = this.addStatusBarItem();
+		// While a sync runs, selecting the status bar text stops it.
+		this.registerDomEvent(this.statusEl, 'click', () => {
+			if (this.syncing) this.requestStop();
+		});
+		this.ribbonEl = this.addRibbonIcon('refresh-cw', 'Sync all chats', () => {
+			if (this.syncing) this.requestStop();
+			else void this.syncAll('manual');
+		});
+		this.ribbonEl.addClass('ccs-ribbon');
 
 		this.addCommand({
 			id: 'sync-claude-chats',
@@ -111,7 +132,7 @@ export default class AIChatBridge extends Plugin {
 
 		this.addCommand({
 			id: 'move-to-app-layout',
-			name: 'Move synced chats into the app layout (Claude Desktop, ChatGPT Desktop)',
+			name: 'Move synced chats into the new folder layout',
 			callback: () => void this.moveToAppLayout(),
 		});
 
@@ -119,6 +140,22 @@ export default class AIChatBridge extends Plugin {
 			id: 'sync-all-chats',
 			name: 'Sync all chats',
 			callback: () => void this.syncAll('manual'),
+		});
+
+		this.addCommand({
+			id: 'stop-sync',
+			name: 'Stop the running sync',
+			checkCallback: (checking) => {
+				if (!this.syncing || this.stopRequested) return false;
+				if (!checking) this.requestStop();
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: 'refresh-index',
+			name: 'Refresh index: find synced notes moved outside the app',
+			callback: () => void this.refreshIndexNow(),
 		});
 
 		this.addCommand({
@@ -345,34 +382,78 @@ export default class AIChatBridge extends Plugin {
 
 	/** One surface of one account (the Sync buttons in the settings). */
 	async syncAccount(provider: Provider, account: AnyAccount, surface: Surface) {
+		await this.guarded('manual', () => this.runSurface(provider, account, surface));
+	}
+
+	/** Everything of one account in one run (the Overview's Sync): website, desktop app, AI Studio. Stop ends it all. */
+	async syncWholeAccount(provider: Provider, account: AnyAccount) {
 		await this.guarded('manual', async () => {
-			if (surface === 'desktop') {
-				const label = withAccount(provider === 'claude' ? 'Claude desktop' : 'Codex', accountsOf(this.settings, provider), account);
-				await this.runOne({ kind: 'desktop', only: { provider, id: account.id }, label }, 'manual');
-			} else if (surface === 'studio') await this.runOne({ kind: 'studio', account: account as GeminiAccount }, 'manual');
-			else if (provider === 'gemini') await this.runOne({ kind: 'gemini', account: account as GeminiAccount }, 'manual');
-			else if (provider === 'claude') await this.runOne({ kind: 'claude', account: account as ClaudeAccount }, 'manual');
-			else if (provider === 'lumo') await this.runOne({ kind: 'lumo', account: account as LumoAccount }, 'manual');
-			else await this.runOne({ kind: 'chatgpt', account: account as ChatgptAccount }, 'manual');
+			const web = await this.canSyncWeb(provider, account);
+			const desktop = 'desktop' in account && account.desktop.enabled;
+			if (!web && !desktop) {
+				new Notice(`${account.label}: not logged in, and its desktop app is off. Select the account to log in.`);
+				return;
+			}
+			if (web) await this.runSurface(provider, account, 'web');
+			if (desktop) await this.runSurface(provider, account, 'desktop');
+			if (web && 'studio' in account && account.studio.enabled) await this.runSurface(provider, account, 'studio');
 		});
 	}
 
-	/** Moves the synced folders into Claude Desktop/{Chat,Code} and ChatGPT Desktop/{Chat,Codex}. */
+	private async runSurface(provider: Provider, account: AnyAccount, surface: Surface): Promise<void> {
+		if (surface === 'desktop') {
+			const label = withAccount(provider === 'claude' ? 'Claude desktop' : 'Codex', accountsOf(this.settings, provider), account);
+			await this.runOne({ kind: 'desktop', only: { provider, id: account.id }, label }, 'manual');
+		} else if (surface === 'studio') await this.runOne({ kind: 'studio', account: account as GeminiAccount }, 'manual');
+		else if (provider === 'gemini') await this.runOne({ kind: 'gemini', account: account as GeminiAccount }, 'manual');
+		else if (provider === 'claude') await this.runOne({ kind: 'claude', account: account as ClaudeAccount }, 'manual');
+		else if (provider === 'lumo') await this.runOne({ kind: 'lumo', account: account as LumoAccount }, 'manual');
+		else await this.runOne({ kind: 'chatgpt', account: account as ChatgptAccount }, 'manual');
+	}
+
+	/**
+	 * Moves the synced folders into the layout (Claude/Chat, Claude/Code-Local/<computer> …),
+	 * then the raw files after them, so the raw files folder keeps mirroring the transcripts.
+	 */
 	async moveToAppLayout(): Promise<void> {
 		await this.guarded('manual', async () => {
 			if (!layoutMoves(this.settings, folderExists(this.app)).length) {
-				new Notice('AI ChatBridge: the folders already follow the app layout.');
+				new Notice('AI ChatBridge: the folders already follow the layout.');
 				return;
 			}
 			const notice = new Notice('AI ChatBridge: moving synced chats…', 0);
 			try {
 				const r = await moveToAppLayout(this.app, this.settings, () => this.saveSettings());
-				const left = r.conflicts.length ? ` ${r.conflicts.length} files left in place (same name already there): ${r.conflicts.slice(0, 5).join(', ')}` : '';
-				new Notice(`AI ChatBridge: moved ${r.moved} folders and files into the app layout.${left}`, 15_000);
+				notice.setMessage('AI ChatBridge: moving the raw files after them…');
+				const raw = await moveRawFiles(this.app, this.settings, allRawMoves(this.app, this.settings), () => this.saveSettings());
+				// Their old folders in the raw files folder, now empty.
+				const root = masterRaw(this.settings);
+				if (root !== undefined) {
+					for (const from of r.from) {
+						await pruneEmpty(this.app, mirrorRaw(from, root));
+						await pruneEmpty(this.app, mirrorRaw(from.split('/').slice(0, -1).join('/'), root));
+					}
+				}
+				const left = r.conflicts.length ? ` ${r.conflicts.length} files stayed where they were, because a file with the same name was already there: ${r.conflicts.slice(0, 5).join(', ')}` : '';
+				const rawText = raw.moved ? `, and ${raw.moved} raw files after them` : '';
+				new Notice(`AI ChatBridge: moved ${r.moved} folders and files into the new layout${rawText}.${left}`, 15_000);
 			} finally {
 				notice.hide();
 			}
 		});
+	}
+
+	/** Finds chats moved outside Obsidian and points the sync history at them. */
+	async refreshIndexNow(): Promise<ReindexResult | null> {
+		if (this.running) {
+			new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is running. Refresh the index when it has finished.');
+			return null;
+		}
+		const r = refreshIndex(this.app, this.settings);
+		if (r.relinked) await this.saveSettings();
+		this.lastReindex = { ...r, at: Date.now() };
+		new Notice(reindexText(r), 10_000);
+		return r;
 	}
 
 	/** Every account you are logged in to, one after the other, then the desktop apps. */
@@ -415,12 +496,67 @@ export default class AIChatBridge extends Plugin {
 		}
 		this.clearGptResumeTimer();
 		this.running = true;
+		this.stopRequested = false;
+		this.busyChanged();
 		if (trigger === 'manual') this.autoPaused = false;
 		try {
 			await fn();
 		} finally {
 			this.running = false;
+			this.stopRequested = false;
+			this.current = null;
+			this.busyChanged();
 			this.scheduleGptResume();
+		}
+	}
+
+	/** A sync (not a project-list fetch) is running, so it can be stopped. */
+	get syncing(): boolean {
+		return this.running && !this.fetchingList;
+	}
+
+	get stopping(): boolean {
+		return this.stopRequested;
+	}
+
+	/** This account (or this account's desktop app) is the one syncing right now. */
+	isSyncing(provider: Provider, id: string): boolean {
+		return this.syncing && this.current?.provider === provider && this.current.id === id;
+	}
+
+	/** Ends the running sync after its current chat. Everything saved so far stays saved. */
+	requestStop(): void {
+		if (!this.syncing || this.stopRequested) return;
+		this.stopRequested = true;
+		this.progress?.stopping();
+		this.statusEl?.setText('AI ChatBridge: stopping after this chat…');
+		if (!this.progress) new Notice('Stopping the sync after this chat…');
+		this.busyChanged();
+	}
+
+	/** Calls `fn` whenever a sync starts, stops or is asked to stop. Returns the way to stop listening. */
+	onBusyChange(fn: () => void): () => void {
+		this.busyListeners.add(fn);
+		return () => this.busyListeners.delete(fn);
+	}
+
+	private busyChanged(): void {
+		const running = this.syncing;
+		if (this.ribbonEl) {
+			setIcon(this.ribbonEl, running ? 'square' : 'refresh-cw');
+			this.ribbonEl.setAttr('aria-label', running ? (this.stopRequested ? 'Stopping the sync…' : 'Stop sync') : 'Sync all chats');
+			this.ribbonEl.toggleClass('is-syncing', running);
+		}
+		const stoppable = running && !this.stopRequested;
+		this.statusEl?.toggleClass('ccs-status-stoppable', stoppable);
+		if (stoppable) this.statusEl?.setAttr('aria-label', 'Select to stop the sync');
+		else this.statusEl?.removeAttribute('aria-label');
+		for (const fn of [...this.busyListeners]) {
+			try {
+				fn();
+			} catch {
+				this.busyListeners.delete(fn);
+			}
 		}
 	}
 
@@ -435,11 +571,13 @@ export default class AIChatBridge extends Plugin {
 		this.clearGptResumeTimer();
 		this.running = true;
 		this.fetchingList = true;
+		this.busyChanged();
 		try {
 			return await fn();
 		} finally {
 			this.running = false;
 			this.fetchingList = false;
+			this.busyChanged();
 			this.scheduleGptResume();
 		}
 	}
@@ -455,20 +593,39 @@ export default class AIChatBridge extends Plugin {
 
 	/** Runs one account or the desktop apps and shows the result. Returns false if it stopped. */
 	private async runOne(target: Target, trigger: SyncTrigger): Promise<boolean> {
+		// After a stop, the accounts still queued in this run are skipped.
+		if (this.stopRequested) return false;
 		const label = this.targetLabel(target);
 		// Progress bar in a notice (manual syncs) and a percentage in the status bar (all syncs).
 		const progress = new SyncProgress(label, this.statusEl, trigger === 'manual',
-			target.kind === 'chatgpt' ? () => chatCountStatus(target.account.web.chatProgress, label) : undefined);
+			target.kind === 'chatgpt' ? () => chatCountStatus(target.account.web.chatProgress, label) : undefined,
+			() => this.requestStop());
+		this.progress = progress;
+		this.current = target.kind === 'desktop'
+			? { provider: target.only?.provider, id: target.only?.id }
+			: { provider: target.kind === 'studio' ? 'gemini' : target.kind, id: target.account.id };
+		this.busyChanged();
+		// Every sync reports progress before each chat: a stop ends it there, between two chats.
+		const update: typeof progress.update = (...args) => {
+			if (this.stopRequested) throw new StopError(STOPPED_BY_YOU);
+			progress.update(...args);
+		};
 		let r;
 		try {
-			r = target.kind === 'claude' ? await runSync(this, target.account, progress.update)
-				: target.kind === 'chatgpt' ? await runGptSync(this, target.account, progress.update, target.forceFull)
-				: target.kind === 'lumo' ? await runLumoSync(this, target.account, progress.update)
-				: target.kind === 'gemini' ? await runGeminiSync(this, target.account, progress.update)
-				: target.kind === 'studio' ? await runStudioSync(this, target.account, progress.update)
-				: await runDesktopSync(this, progress.update, undefined, undefined, target.only);
+			r = target.kind === 'claude' ? await runSync(this, target.account, update)
+				: target.kind === 'chatgpt' ? await runGptSync(this, target.account, update, target.forceFull)
+				: target.kind === 'lumo' ? await runLumoSync(this, target.account, update)
+				: target.kind === 'gemini' ? await runGeminiSync(this, target.account, update)
+				: target.kind === 'studio' ? await runStudioSync(this, target.account, update)
+				: await runDesktopSync(this, update, undefined, undefined, target.only);
 		} finally {
 			progress.finish();
+			this.progress = null;
+		}
+		if (this.stopRequested) {
+			const saved = r.newCount + r.changedCount;
+			new Notice(`${label}: stopped. ${saved ? `${saved} saved before stopping` : 'Nothing new was saved'}; the next sync carries on from there.`, 8000);
+			return false;
 		}
 		if ('nothingSelected' in r && r.nothingSelected) {
 			if (trigger === 'manual') new Notice(`${label}: no projects selected, so nothing was synced. Select some in the plugin settings.`);
@@ -520,6 +677,17 @@ export default class AIChatBridge extends Plugin {
 		await write;
 	}
 }
+
+/** A Refresh index result in words. */
+export function reindexText(r: ReindexResult): string {
+	const n = (x: number, one: string, many: string) => `${x.toLocaleString()} ${x === 1 ? one : many}`;
+	const found = r.relinked ? `${n(r.relinked, 'file', 'files')} found in a new place` : 'nothing had moved';
+	const missing = r.missing ? ` ${n(r.missing, 'chat is', 'chats are')} nowhere in the vault and will be saved again on the next sync.` : '';
+	return `Index refreshed: ${n(r.checked, 'chat', 'chats')} checked, ${found}.${missing}`;
+}
+
+/** The message a sync stops with when you select Stop. */
+export const STOPPED_BY_YOU = 'Stopped by you.';
 
 /** Local time as HH:MM (24-hour). */
 export function formatClock(ms: number): string {
