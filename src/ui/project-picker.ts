@@ -8,20 +8,25 @@ import type { Provider } from '../login';
 import { isSelected, onlySelected, pickerRows, setRows, type PickerRow, type ProjectCatalog } from '../project-catalog';
 import { fetchFailure, fetchProjectCatalog } from '../project-list';
 import { DEFAULT_RECENT, plainFolder } from '../select';
-import { count, type PanelContext } from './fields';
+import { count, foldersChanged, type PanelContext } from './fields';
 
 export interface PickerOptions {
 	recentFolderName: string;
 	projects: string[];
 	projectCatalog?: ProjectCatalog;
 	projectFolders?: Record<string, string>;
+	projectRawFolders?: Record<string, string>;
 }
 
-/** "Choose a folder per project" is on: each selected row gets a folder field. */
+/** "Choose a folder per project" is on: each selected row gets a transcript and a JSON folder field. */
 export interface FolderChoice {
 	/** Where the row's chats go when its field is empty, shown greyed in the field. */
 	defaultFor(row: PickerRow): string;
+	/** Where the row's raw .json files go when that field is empty; null = next to the transcripts. */
+	rawDefaultFor(row: PickerRow): string | null;
 }
+
+type FolderKey = 'projectFolders' | 'projectRawFolders';
 
 interface Run {
 	status: string;
@@ -111,7 +116,8 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 
 	let rows: PickerRow[] = [];
 	const inputs = new Map<string, { row: PickerRow; label: HTMLElement; input: HTMLInputElement; folderEl?: HTMLElement }>();
-	const ownFolders = () => rows.filter((r) => isSelected(r, o.projects, recent()) && plainFolder(o.projectFolders?.[r.id] ?? '')).length;
+	const ownFolders = () => rows.filter((r) => isSelected(r, o.projects, recent())
+		&& (plainFolder(o.projectFolders?.[r.id] ?? '') || plainFolder(o.projectRawFolders?.[r.id] ?? ''))).length;
 
 	const save = () => {
 		keepSelectedNames(provider, o);
@@ -129,7 +135,7 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 		if (!o.projects.some((p) => p.trim())) footEl.createDiv({ cls: 'ccs-picker-warning', text: 'Nothing is selected, so this account will not sync.' });
 		if (catalog?.note) footEl.createDiv({ cls: 'ccs-picker-warning', text: catalog.note });
 		if (catalog && provider === 'claude') footEl.createDiv({ cls: 'ccs-picker-hint', text: 'Projects without chats are not listed.' });
-		if (folders) footEl.createDiv({ cls: 'ccs-picker-hint', text: 'A new folder applies to chats synced from then on. Chats already saved stay where they are; move them in Obsidian and the plugin keeps track.' });
+		if (folders) footEl.createDiv({ cls: 'ccs-picker-hint', text: 'A new folder applies to chats synced from then on. Chats already saved stay where they are; move them in Obsidian and the plugin keeps track. Saved JSON files can be moved with one click under Folders above.' });
 	};
 
 	const shown = () => [...inputs.values()].filter(({ label }) => !label.hasClass('ccs-picker-hidden'));
@@ -156,21 +162,23 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 		fetchButton.toggleClass('mod-cta', !run && !catalogNow());
 	};
 
-	/** The folder field under a selected row: empty = the default (greyed), saved when you leave the field. */
-	const folderField = (item: HTMLElement, row: PickerRow, choice: FolderChoice): HTMLElement => {
-		const wrap = item.createDiv({ cls: 'ccs-picker-folder' });
+	/**
+	 * One folder line under a selected row: empty = the default (greyed), saved when you leave
+	 * the field. Returns a function that redraws the greyed default.
+	 */
+	const folderLine = (wrap: HTMLElement, row: PickerRow, key: FolderKey, icon: string, label: string, fallback: () => string, onCommit: () => void): (() => void) => {
 		const line = wrap.createDiv({ cls: 'ccs-picker-folder-line' });
-		setIcon(line.createSpan({ cls: 'ccs-glyph', attr: { 'aria-hidden': 'true' } }), 'folder');
-		const fallback = choice.defaultFor(row);
+		setIcon(line.createSpan({ cls: 'ccs-glyph', attr: { 'aria-hidden': 'true', title: label } }), icon);
 		const field = line.createEl('input', {
 			type: 'text',
 			cls: 'ccs-picker-folder-input',
-			attr: { placeholder: `Default: ${fallback}`, spellcheck: 'false', 'aria-label': `Folder for "${row.name}"` },
+			attr: { spellcheck: 'false', 'aria-label': `${label} for "${row.name}"` },
 		});
-		field.value = o.projectFolders?.[row.id] ?? '';
+		field.value = o[key]?.[row.id] ?? '';
 		const reset = line.createEl('button', { cls: 'clickable-icon ccs-picker-folder-reset', attr: { 'aria-label': 'Use the default folder', title: 'Use the default folder' } });
 		setIcon(reset, 'rotate-ccw');
 		const note = wrap.createDiv({ cls: 'ccs-picker-folder-note', attr: { 'aria-live': 'polite' } });
+		const placeholder = () => field.setAttr('placeholder', `${label}: ${fallback()}`);
 
 		const show = () => {
 			const typed = field.value.trim();
@@ -181,19 +189,21 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 			reset.toggleClass('ccs-picker-hidden', typed === '');
 			note.toggleClass('ccs-picker-error', bad);
 			note.setText(bad ? `Choose a folder inside the vault, not a hidden one such as ${ctx.app.vault.configDir}.`
-				: path && !ctx.app.vault.getFolderByPath(path) ? 'New folder: created on the next sync.' : '');
+				: path && !ctx.app.vault.getFolderByPath(path) ? `New ${key === 'projectRawFolders' ? 'JSON ' : ''}folder: created on the next sync.` : '');
 		};
 		const commit = (value: string) => {
 			const path = plainFolder(value);
 			if (value.trim() !== '' && path === null) return show(); // keep the last good folder
-			const next = { ...(o.projectFolders ?? {}) };
+			const next = { ...(o[key] ?? {}) };
 			if (path) next[row.id] = path;
 			else delete next[row.id];
-			o.projectFolders = next;
+			o[key] = next;
 			field.value = path ?? '';
 			show();
 			save();
 			drawCount();
+			onCommit();
+			foldersChanged(wrap);
 		};
 		field.addEventListener('input', show);
 		field.addEventListener('change', () => commit(field.value)); // leaving the field, or Enter
@@ -207,7 +217,18 @@ export function projectPicker(ctx: PanelContext, parent: HTMLElement, provider: 
 			field.focus();
 			suggest.close();
 		});
+		placeholder();
 		show();
+		return placeholder;
+	};
+
+	/** The transcript folder and the JSON folder under a selected row. */
+	const folderField = (item: HTMLElement, row: PickerRow, choice: FolderChoice): HTMLElement => {
+		const wrap = item.createDiv({ cls: 'ccs-picker-folder' });
+		let redrawRaw = () => {};
+		folderLine(wrap, row, 'projectFolders', 'folder', 'Transcripts', () => choice.defaultFor(row), () => redrawRaw());
+		// The JSON default follows the transcript folder when there is no JSON folder above.
+		redrawRaw = folderLine(wrap, row, 'projectRawFolders', 'braces', 'JSON', () => choice.rawDefaultFor(row) ?? 'next to the transcripts', () => {});
 		return wrap;
 	};
 

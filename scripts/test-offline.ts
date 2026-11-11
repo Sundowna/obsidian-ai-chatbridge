@@ -27,6 +27,7 @@ import { gptChatFiles } from '../src/chatgpt/files';
 import { cleanMarkers, renderGptTranscript } from '../src/chatgpt/transcript';
 import { describePage, fallbackCookie, findAccessToken } from '../src/chatgpt/token';
 import { cookiePairs, cookieText, googleCookies } from '../src/cookies';
+import { baseRoot, chatFolders, projectRawDefault, projectRoots, rawLink, rawMoves } from '../src/raw-folders';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -401,6 +402,54 @@ expect('chat view: odd answer gives no files', visibleFiles({ nope: 1 }).length 
 	expect('google: a bare value refused', googleCookies('p1longvaluewithoutaname') === null);
 	expect('google: malformed part refused', googleCookies(`${google}; =x`) === null && googleCookies(`${google};\nX: 1`) === null);
 	expect('cookies: pairs round trip', cookieText(cookiePairs('a=1;  b=2 ;')!) === 'a=1; b=2');
+}
+
+// --- JSON folders --------------------------------------------------------
+{
+	const item = (project: { uuid: string; name: string } | null) => ({ uuid: 'c1', name: 'Chat', created_at: '', updated_at: '', project });
+	const brain = item({ uuid: 'p-1', name: '2nd Brain' });
+	const loose = item(null);
+	const plain = { projectSubfolders: true, onlyProjects: false };
+	const same = chatFolders(brain, plain, 'AI/Chat', undefined);
+	expect('json folder: empty keeps raw next to transcripts', same.md === 'AI/Chat/2nd Brain' && same.raw === same.md);
+	const split = chatFolders(brain, plain, 'AI/Chat', ' Raw/Claude/ ');
+	expect('json folder: mirrors the project subfolder', split.md === 'AI/Chat/2nd Brain' && split.raw === 'Raw/Claude/2nd Brain', JSON.stringify(split));
+	expect('json folder: chats without a project mirror the Recent folder', chatFolders(loose, plain, 'AI/Chat', 'Raw').raw === 'Raw/Recent');
+	expect('json folder: no subfolders without project subfolders', chatFolders(brain, { ...plain, projectSubfolders: false }, 'AI/Chat', 'Raw').raw === 'Raw');
+	expect('json folder: hidden folder means next to transcripts', chatFolders(brain, plain, 'AI/Chat', '.obsidian/x').raw === 'AI/Chat/2nd Brain');
+
+	const custom = { projectSubfolders: true, onlyProjects: true, customProjectFolders: true, projectFolders: { 'p-1': 'Projects/Brain' }, projectRawFolders: { [NO_PROJECT]: 'Raw/Inbox' } };
+	const own = chatFolders(brain, custom, 'AI/Chat', undefined);
+	expect('json folder: own project folder, no JSON folder -> next to it', own.md === 'Projects/Brain' && own.raw === 'Projects/Brain');
+	expect('json folder: own project folder + JSON folder -> mirrored under the JSON folder', chatFolders(brain, custom, 'AI/Chat', 'Raw').raw === 'Raw/2nd Brain');
+	const ownRaw = chatFolders(loose, custom, 'AI/Chat', 'Raw');
+	expect('json folder: a project\'s own JSON folder wins', ownRaw.md === 'AI/Chat/Recent' && ownRaw.raw === 'Raw/Inbox');
+	expect('json folder: picker default follows the JSON folder', projectRawDefault('Projects/Brain', 'Raw', true, '2nd Brain') === 'Raw/2nd Brain' && projectRawDefault('Projects/Brain', '', true, '2nd Brain') === 'Projects/Brain');
+
+	expect('raw link: next to transcript is the bare name', rawLink('A/B', 'A/B/x.json') === 'x.json');
+	expect('raw link: elsewhere is the full path', rawLink('A/B', 'Raw/B/x.json') === 'Raw/B/x.json');
+
+	const roots = [baseRoot('AI/Chat', 'Raw'), ...projectRoots(custom, 'AI/Chat', 'Raw', (id) => (id === 'p-1' ? '2nd Brain' : undefined))];
+	const files = new Set(['AI/Chat/2nd Brain/a.json', 'AI/Chat/2nd Brain/a (older 1).json', 'Projects/Brain/b.json', 'AI/Chat/Recent/c.json', 'Raw/2nd Brain/d.json', 'AI/Chat/Recent/e.json', 'Raw/Recent/e.json']);
+	const moves = rawMoves([
+		{ md: 'AI/Chat/2nd Brain/a.md', raws: ['AI/Chat/2nd Brain/a.json', 'AI/Chat/2nd Brain/a (older 1).json'] },
+		{ md: 'Projects/Brain/b.md', raws: ['Projects/Brain/b.json'] },
+		{ md: 'AI/Chat/Recent/c.md', raws: ['AI/Chat/Recent/c.json'] },
+		{ md: 'AI/Chat/2nd Brain/d.md', raws: ['Raw/2nd Brain/d.json'] },
+		{ md: 'Elsewhere/x.md', raws: ['Elsewhere/x.json'] },
+		{ md: 'AI/Chat/Recent/gone.md', raws: ['AI/Chat/Recent/gone.json'] },
+	], roots, (p) => files.has(p));
+	const to = Object.fromEntries(moves.map((m) => [m.from, m.to]));
+	expect('move: base folder chats mirror into the JSON folder, older parts too', to['AI/Chat/2nd Brain/a.json'] === 'Raw/2nd Brain/a.json' && to['AI/Chat/2nd Brain/a (older 1).json'] === 'Raw/2nd Brain/a (older 1).json');
+	expect('move: own project folder follows its project root', to['Projects/Brain/b.json'] === 'Raw/2nd Brain/b.json', JSON.stringify(to));
+	expect('move: own JSON folder of "no project"', to['AI/Chat/Recent/c.json'] === 'Raw/Inbox/c.json');
+	expect('move: already in place, outside every root, or missing: left alone', moves.length === 4, JSON.stringify(moves));
+	const back = rawMoves([{ md: 'AI/Chat/Recent/c.md', raws: ['Raw/Recent/c.json'] }], [baseRoot('AI/Chat', undefined)], () => true);
+	expect('move: back next to transcripts, when the target is free', back.length === 0); // target "exists" in this stub
+	const back2 = rawMoves([{ md: 'AI/Chat/Recent/c.md', raws: ['Raw/Recent/c.json'] }], [baseRoot('AI/Chat', undefined)], (p) => p.startsWith('Raw/'));
+	expect('move: clearing the JSON folder moves files back', back2[0]?.to === 'AI/Chat/Recent/c.json');
+	const clash = rawMoves([{ md: 'A/x.md', raws: ['A/x.json'] }, { md: 'A/y/../x.md', raws: [] }, { md: 'B/x.md', raws: ['B/x.json'] }], [{ md: 'A', raw: 'R' }, { md: 'B', raw: 'R' }], (p) => p.startsWith('A/') || p.startsWith('B/'));
+	expect('move: two files never claim one place', clash.length === 1, JSON.stringify(clash));
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll passed');

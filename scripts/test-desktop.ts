@@ -253,6 +253,16 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	expect('sync 3: raw copy next to it', [...vaultFiles.keys()].some((p) => p.endsWith('(updated 2026-11-07 ' + r3.written[0]!.slice(-5, -1) + ').jsonl')));
 	expect('sync 3: old transcript untouched', vaultFiles.has(claudeMd));
 
+	// Raw session folder: the next update's .jsonl goes there, mirrored, linked by path.
+	settings.claude[0]!.desktop.rawFolder = 'Raw/Claude Code';
+	fs.put(cPath, claudeFile + '\n' + jl({ type: 'user', timestamp: '2026-11-07T10:00:00.000Z', message: { role: 'user', content: 'And another' } }), old + 2000);
+	const r3b = await runDesktopSync(plugin, undefined, fs, NOW);
+	const e3b = settings.claude[0]!.desktop.index[SID]!;
+	expect('raw folder: .jsonl mirrored into the raw session folder', r3b.changedCount === 1 && !!e3b.raw?.startsWith('Raw/Claude Code/Obsidian/') && vaultFiles.has(e3b.raw!), e3b.raw);
+	expect('raw folder: transcript stays in the code folder', e3b.md.startsWith(`${code}/Obsidian/`));
+	expect('raw folder: transcript links the raw copy by path', (vaultFiles.get(e3b.md) ?? '').includes(`raw: "[[${e3b.raw}]]"`));
+	delete settings.claude[0]!.desktop.rawFolder;
+
 	// Codex archives a thread: file moves, content same -> no new transcript.
 	const t = fs.files.get('C:/Users/W/.codex/sessions/2026/11/06/rollout-a.jsonl')!;
 	fs.files.delete('C:/Users/W/.codex/sessions/2026/11/06/rollout-a.jsonl');

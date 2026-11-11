@@ -1,6 +1,6 @@
 // Small pieces shared by the settings panels.
 
-import { Notice, Setting, type App, type TextComponent } from 'obsidian';
+import { Notice, setIcon, Setting, type App, type TextComponent } from 'obsidian';
 import type AIChatBridge from '../main';
 import type { Provider } from '../login';
 import type { AnyAccount } from '../accounts';
@@ -8,8 +8,11 @@ import { BROWSE_MESSAGES, browseForVaultFolder } from '../folder-dialog';
 import { FolderSuggest } from '../folder-suggest';
 import type { ProjectCatalog } from '../project-catalog';
 import { cleanFolder } from '../settings';
-import { defaultProjectFolder, NO_PROJECT } from '../select';
+import { defaultProjectFolder, NO_PROJECT, plainFolder } from '../select';
 import { projectPicker } from './project-picker';
+import { projectRawDefault, type RawMove } from '../raw-folders';
+import { moveRawFiles } from '../raw-move';
+import { ConfirmModal } from './modals';
 
 export interface PanelContext {
 	app: App;
@@ -22,6 +25,10 @@ export interface PanelContext {
 }
 
 export const count = (n: number, noun: string): string => `${n.toLocaleString()} ${noun}${n === 1 ? '' : 's'}`;
+
+/** Fired (bubbling) when a folder setting was committed, so the "move saved files" row recounts. */
+export const FOLDERS_CHANGED = 'ccs-folders-changed';
+export const foldersChanged = (from: HTMLElement): boolean => from.dispatchEvent(new CustomEvent(FOLDERS_CHANGED, { bubbles: true }));
 
 export function folderSetting(ctx: PanelContext, el: HTMLElement, name: string, desc: string, get: () => string, set: (p: string) => void): void {
 	const save = async (v: string) => {
@@ -37,7 +44,8 @@ export function folderSetting(ctx: PanelContext, el: HTMLElement, name: string, 
 		.addText((t) => {
 			text = t;
 			t.setPlaceholder('AI Chats/…').setValue(get()).onChange(save);
-			new FolderSuggest(ctx.app, t.inputEl, (path) => void save(path));
+			t.inputEl.addEventListener('change', () => foldersChanged(t.inputEl));
+			new FolderSuggest(ctx.app, t.inputEl, (path) => void save(path).then(() => foldersChanged(t.inputEl)));
 		})
 		.addButton((b) =>
 			b
@@ -52,8 +60,164 @@ export function folderSetting(ctx: PanelContext, el: HTMLElement, name: string, 
 					}
 					text?.setValue(r.path);
 					await save(r.path);
+					foldersChanged(el);
 				}),
 		);
+}
+
+export interface RawFolderOptions {
+	/** E.g. "JSON folder". */
+	name: string;
+	/** What lands there, for the description, e.g. "the raw .json of each chat". */
+	what: string;
+	/** The transcript folder above, for the description, e.g. "chat folder". */
+	partner: string;
+	get: () => string | undefined;
+	set: (path: string | undefined) => void;
+	/** Mirrors project or app subfolders (all but Gemini and AI Studio). */
+	mirrors?: boolean;
+}
+
+/**
+ * The JSON folder that goes with a transcript folder, drawn right under it. Empty = next to the
+ * transcripts (the greyed placeholder says so), so nothing changes until you choose one.
+ */
+export function rawFolderSetting(ctx: PanelContext, el: HTMLElement, o: RawFolderOptions): void {
+	let text: TextComponent | null = null;
+	let reset: HTMLElement | null = null;
+	const row = new Setting(el).setName(o.name);
+	row.settingEl.addClass('ccs-sub-setting', 'ccs-raw-folder');
+	const describe = (problem?: string) => {
+		row.descEl.empty();
+		if (problem) {
+			row.descEl.createSpan({ cls: 'ccs-raw-folder-error', text: problem });
+			return;
+		}
+		const where = o.get();
+		row.descEl.setText(where
+			? `Where ${o.what} goes${o.mirrors ? ', in the same subfolders as the transcripts' : ''}. Transcripts stay in the ${o.partner}.`
+			: `Where ${o.what} goes. Empty keeps it next to the transcripts; choose a folder to keep the ${o.partner} free of raw files.`);
+		if (where && !ctx.app.vault.getFolderByPath(where)) row.descEl.createDiv({ cls: 'ccs-raw-folder-new', text: 'New folder: created on the next sync.' });
+	};
+	const commit = async (value: string) => {
+		const typed = value.trim();
+		const path = cleanFolder(typed);
+		if (typed && !path) {
+			text?.inputEl.addClass('is-invalid');
+			text?.inputEl.setAttr('aria-invalid', 'true');
+			describe(`Choose a folder inside the vault, not the vault itself or a hidden one such as ${ctx.app.vault.configDir}.`);
+			return; // keep the last good folder
+		}
+		text?.inputEl.removeClass('is-invalid');
+		text?.inputEl.setAttr('aria-invalid', 'false');
+		o.set(path ?? undefined);
+		if (text && text.getValue() !== (path ?? '')) text.setValue(path ?? '');
+		reset?.toggleClass('ccs-invisible', !path);
+		describe();
+		await ctx.plugin.saveSettings();
+		foldersChanged(row.settingEl);
+	};
+	row.addText((t) => {
+		text = t;
+		t.setPlaceholder('Next to the transcripts').setValue(o.get() ?? '');
+		t.inputEl.setAttr('aria-label', o.name);
+		t.inputEl.setAttr('spellcheck', 'false');
+		// Saved when you leave the field or press Enter, so half-typed paths never become folders.
+		t.inputEl.addEventListener('change', () => void commit(t.getValue()));
+		t.inputEl.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') t.inputEl.blur();
+		});
+		t.inputEl.addEventListener('input', () => {
+			if (t.inputEl.hasClass('is-invalid') && (!t.getValue().trim() || cleanFolder(t.getValue()))) {
+				t.inputEl.removeClass('is-invalid');
+				describe();
+			}
+		});
+		new FolderSuggest(ctx.app, t.inputEl, (path) => void commit(path));
+	});
+	row.addExtraButton((b) => {
+		reset = b.extraSettingsEl;
+		b.setIcon('rotate-ccw')
+			.setTooltip('Keep the raw files next to the transcripts')
+			.onClick(() => void commit(''));
+		reset.toggleClass('ccs-invisible', !o.get());
+	});
+	row.addButton((b) =>
+		b
+			.setButtonText('Browse…')
+			.setTooltip('Pick a folder in the vault with the system folder dialog')
+			.onClick(async () => {
+				const r = browseForVaultFolder(ctx.app, o.get() ?? '', `Choose the ${o.name.toLowerCase()}`);
+				if (!r.ok) {
+					const msg = BROWSE_MESSAGES[r.reason];
+					if (msg) new Notice(msg, 8000);
+					return;
+				}
+				await commit(r.path);
+			}),
+	);
+	describe();
+	el.addEventListener(FOLDERS_CHANGED, () => {
+		if (!row.settingEl.isConnected || text?.inputEl.hasClass('is-invalid')) return;
+		describe();
+	});
+}
+
+/**
+ * Shown only while raw files saved earlier are not where the JSON folders above say: one
+ * button moves them there. Recounts whenever a folder setting in this panel is committed.
+ */
+export function rawMoveRow(ctx: PanelContext, el: HTMLElement, plan: () => RawMove[], noun = 'JSON file'): void {
+	const holder = el.createDiv({ cls: 'ccs-raw-move' });
+	let running = false;
+	const draw = () => {
+		holder.empty();
+		const moves = plan();
+		if (!moves.length) return;
+		const n = moves.length;
+		const row = new Setting(holder)
+			.setName(`${count(n, noun)} in the old place`)
+			.setDesc(`Saved before the current folder choice. Moving keeps the file names, and links and the sync history follow. Transcripts and downloaded files stay where they are.`);
+		row.settingEl.addClass('ccs-sub-setting', 'ccs-raw-move-row');
+		const icon = createSpan({ cls: 'ccs-glyph ccs-raw-move-icon', attr: { 'aria-hidden': 'true' } });
+		setIcon(icon, 'folder-input');
+		row.nameEl.prepend(icon);
+		row.addButton((b) =>
+			b.setButtonText(`Move ${count(n, 'file')}`).onClick(() => {
+				if (ctx.plugin.busy) {
+					new Notice('A sync is running. Move the files once it has finished.');
+					return;
+				}
+				const first = moves[0]!;
+				const example = `For example ${first.from.split('/').pop()} goes to ${first.to.split('/').slice(0, -1).join('/')}.`;
+				new ConfirmModal(
+					ctx.app,
+					`Move ${count(n, noun)}?`,
+					`${n === 1 ? 'It goes' : 'They go'} where the folder settings say today. ${example}`,
+					`Move ${count(n, 'file')}`,
+					async () => {
+						if (running) return;
+						running = true;
+						b.setDisabled(true).setButtonText('Moving…');
+						try {
+							const r = await moveRawFiles(ctx.app, ctx.plugin.settings, plan(), () => ctx.plugin.saveSettings());
+							new Notice(`Moved ${count(r.moved, 'file')}.${r.skipped.length ? ` ${count(r.skipped.length, 'file')} stayed: the new place was taken or the file was gone.` : ''}`);
+						} catch (e) {
+							new Notice(`Could not move every file: ${e instanceof Error ? e.message : String(e)}`, 10_000);
+						} finally {
+							running = false;
+							foldersChanged(holder); // redraws this row and the folder notes above
+						}
+					},
+					'cta',
+				).open();
+			}),
+		);
+	};
+	el.addEventListener(FOLDERS_CHANGED, () => {
+		if (!running) draw();
+	});
+	draw();
 }
 
 /** A collapsed section for settings most people never touch. */
@@ -77,6 +241,7 @@ export interface ProjectOptions {
 	projectCatalog?: ProjectCatalog;
 	customProjectFolders?: boolean;
 	projectFolders?: Record<string, string>;
+	projectRawFolders?: Record<string, string>;
 }
 
 /** How chats are filed. */
@@ -125,7 +290,7 @@ export function projectFilterOptions(
 	el: HTMLElement,
 	provider: Provider,
 	account: AnyAccount,
-	o: Pick<ProjectOptions, 'projectSubfolders' | 'recentFolderName' | 'onlyProjects' | 'projects' | 'projectCatalog' | 'customProjectFolders' | 'projectFolders'>,
+	o: Pick<ProjectOptions, 'projectSubfolders' | 'recentFolderName' | 'onlyProjects' | 'projects' | 'projectCatalog' | 'customProjectFolders' | 'projectFolders' | 'projectRawFolders'>,
 ): void {
 	const save = () => ctx.plugin.saveSettings();
 	new Setting(el)
@@ -146,7 +311,7 @@ export function projectFilterOptions(
 		: `the chat folder above${o.projectSubfolders ? ', in a subfolder per project' : ''}`;
 	const perProject = new Setting(el)
 		.setName('Choose a folder per project')
-		.setDesc(`Give any selected project a folder of its own in the list below. Projects you leave empty use ${fallback}.`)
+		.setDesc(`Give any selected project its own transcript folder and JSON folder in the list below. Projects you leave empty use ${fallback}.`)
 		.addToggle((t) =>
 			t.setValue(o.customProjectFolders === true).onChange(async (v) => {
 				o.customProjectFolders = v;
@@ -156,7 +321,18 @@ export function projectFilterOptions(
 		);
 	perProject.settingEl.addClass('ccs-sub-setting');
 
+	const rawSetting = () => ('chatFolder' in account.web ? account.web.chatRawFolder : 'rawFolder' in account.web ? account.web.rawFolder : undefined);
+	const projectName = (row: { id: string; name: string }) => (row.id === NO_PROJECT ? null : row.name);
+	const mdFor = (row: { id: string; name: string }) =>
+		plainFolder(o.projectFolders?.[row.id] ?? '') ?? defaultProjectFolder(base(), o.projectSubfolders, projectName(row), o.recentFolderName);
 	projectPicker(ctx, el, provider, account, o, o.customProjectFolders
-		? { defaultFor: (row) => defaultProjectFolder(base(), o.projectSubfolders, row.id === NO_PROJECT ? null : row.name, o.recentFolderName) }
+		? {
+			defaultFor: (row) => defaultProjectFolder(base(), o.projectSubfolders, projectName(row), o.recentFolderName),
+			rawDefaultFor: (row) => {
+				const md = mdFor(row);
+				const raw = projectRawDefault(md, rawSetting(), o.projectSubfolders, projectName(row), o.recentFolderName);
+				return raw === md ? null : raw;
+			},
+		}
 		: undefined);
 }

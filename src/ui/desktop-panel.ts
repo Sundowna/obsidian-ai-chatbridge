@@ -6,7 +6,8 @@ import { defaultRoots, nodeDesktopFs } from '../desktop/scan';
 import type { DesktopApp } from '../desktop/types';
 import type { Provider } from '../login';
 import type { ChatgptAccount, ClaudeAccount } from '../settings';
-import { advanced, count, folderSetting, type PanelContext } from './fields';
+import { advanced, count, folderSetting, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
+import { desktopRawMoves } from '../raw-move';
 
 /** How this account's sessions are told apart from another account's. */
 function matchText(provider: Provider, account: DesktopAccount, isFirst: boolean, several: boolean): string {
@@ -49,7 +50,12 @@ export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provi
 	}
 	if (!conf.enabled) return;
 
-	folderSetting(ctx, el, provider === 'claude' ? 'Code folder' : 'Codex folder', 'Where these sessions are saved.', () => conf.folder, (p) => (conf.folder = p));
+	const folderName = provider === 'claude' ? 'Code folder' : 'Codex folder';
+	folderSetting(ctx, el, folderName, 'Where these sessions are saved.', () => conf.folder, (p) => (conf.folder = p));
+	if (ctx.plugin.settings.desktop.keepRaw) {
+		rawFolderSetting(ctx, el, { name: 'Raw session folder', what: 'the copy of each session file (.jsonl)', partner: folderName.toLowerCase(), mirrors: true, get: () => conf.rawFolder, set: (p) => (conf.rawFolder = p) });
+		rawMoveRow(ctx, el, () => desktopRawMoves(ctx.app, account), 'raw session file');
+	}
 	new Setting(el)
 		.setName('Reads from')
 		.setDesc(`${roots.join(' and ')}.${matchText(provider, account, isFirst, list.length > 1)}`);

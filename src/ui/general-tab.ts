@@ -35,6 +35,15 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 	new Setting(el)
+		.setName('Sync all on startup')
+		.setDesc('Runs "Sync all" once, 10 seconds after the vault opens. Only accounts you are logged in to; it tells you when new chats are saved or something goes wrong.')
+		.addToggle((t) =>
+			t.setValue(s.syncOnStartup).onChange(async (v) => {
+				s.syncOnStartup = v;
+				await save();
+			}),
+		);
+	new Setting(el)
 		.setName('Automatic sync (minutes)')
 		.setDesc(`Runs "Sync all". 0 is off, minimum ${MIN_INTERVAL_MINUTES}. Pauses after an error until you sync by hand.`)
 		.addText((t) =>
@@ -70,7 +79,7 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 		);
 	new Setting(el)
 		.setName('Keep the raw session file')
-		.setDesc('Also copy the app’s .jsonl next to each transcript. These can be several MB and contain tool output in full.')
+		.setDesc('Also copy the app’s .jsonl, next to each transcript or into a raw session folder chosen in each account’s desktop settings. These can be several MB and contain tool output in full.')
 		.addToggle((t) =>
 			t.setValue(d.keepRaw).onChange(async (v) => {
 				d.keepRaw = v;

@@ -31,10 +31,16 @@ export interface ClaudeWebSettings {
 	customProjectFolders?: boolean;
 	/** Picker row ID (project ID, or ":no-project") -> vault folder. Missing = the default folder. */
 	projectFolders?: Record<string, string>;
+	/** Picker row ID -> folder for that project's raw .json files. Missing = the default (see raw-folders.ts). */
+	projectRawFolders?: Record<string, string>;
 	/** Folder for normal claude.ai chats (platform CLAUDE_AI). */
 	chatFolder: string;
 	/** Folder for Claude Code sessions (any other platform). */
 	codeFolder: string;
+	/** Folder for the raw .json of normal chats. Empty = next to the transcripts. */
+	chatRawFolder?: string;
+	/** Folder for the raw .json of Claude Code sessions. Empty = next to the transcripts. */
+	codeRawFolder?: string;
 	/** Put each chat in a subfolder named after its claude.ai project. */
 	projectSubfolders: boolean;
 	/** Subfolder for chats without a project (claude.ai's "Recents"). */
@@ -49,6 +55,8 @@ export interface ClaudeWebSettings {
 /** One ChatGPT login: its own folders, index and cooldown. */
 export interface GptSettings {
 	folder: string;
+	/** Folder for the raw .json files. Empty = next to the transcripts. */
+	rawFolder?: string;
 	/** Name of the secret holding a pasted session cookie, used when the login window has none. */
 	secretId: string;
 	projectSubfolders: boolean;
@@ -61,6 +69,8 @@ export interface GptSettings {
 	customProjectFolders?: boolean;
 	/** Picker row ID (project ID, or ":no-project") -> vault folder. Missing = the default folder. */
 	projectFolders?: Record<string, string>;
+	/** Picker row ID -> folder for that project's raw .json files. Missing = the default (see raw-folders.ts). */
+	projectRawFolders?: Record<string, string>;
 	index: Record<string, IndexEntry>;
 	fileIndex: Record<string, string>;
 	/** The workspace the login belongs to (not secret); matches Codex sessions to this account. */
@@ -78,6 +88,8 @@ export interface GptSettings {
 /** One Lumo login: its folders and what has been synced. No keys: those exist only during a sync. */
 export interface LumoSettings {
 	folder: string;
+	/** Folder for the raw .json files. Empty = next to the transcripts. */
+	rawFolder?: string;
 	projectSubfolders: boolean;
 	recentFolderName: string;
 	onlyProjects: boolean;
@@ -87,6 +99,8 @@ export interface LumoSettings {
 	customProjectFolders?: boolean;
 	/** Picker row ID (project ID, or ":no-project") -> vault folder. Missing = the default folder. */
 	projectFolders?: Record<string, string>;
+	/** Picker row ID -> folder for that project's raw .json files. Missing = the default (see raw-folders.ts). */
+	projectRawFolders?: Record<string, string>;
 	index: Record<string, IndexEntry>;
 	/** The Proton account behind this login (not secret), to notice the same login twice. */
 	userId?: string;
@@ -95,6 +109,8 @@ export interface LumoSettings {
 /** One Google login's Gemini chats (gemini.google.com). No tokens: those exist only during a sync. */
 export interface GeminiSettings {
 	folder: string;
+	/** Folder for the raw .json files. Empty = next to the transcripts. */
+	rawFolder?: string;
 	/** Name of the secret holding pasted Google cookies (Gemini and AI Studio), used when the login window has none. */
 	secretId: string;
 	index: Record<string, IndexEntry>;
@@ -106,6 +122,8 @@ export interface GeminiSettings {
 export interface StudioSettings {
 	enabled: boolean;
 	folder: string;
+	/** Folder for the raw .json files. Empty = next to the transcripts. */
+	rawFolder?: string;
 	index: Record<string, IndexEntry>;
 }
 
@@ -143,6 +161,8 @@ export interface Settings {
 	maxChatsPerRun: number;
 	delaySeconds: number;
 	intervalMinutes: number;
+	/** Runs "Sync all" once, shortly after Obsidian has started. */
+	syncOnStartup: boolean;
 	logPath: string;
 	/** Always at least one. The first account also receives desktop sessions no account claims. */
 	claude: ClaudeAccount[];
@@ -217,6 +237,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	maxChatsPerRun: 3,
 	delaySeconds: 1.5,
 	intervalMinutes: 0,
+	syncOnStartup: false,
 	logPath: 'AI Chats/AI ChatBridge log.md',
 	claude: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_CLAUDE_WEB, desktop: desktopApp('AI Chats/Claude Desktop/Code') }],
 	chatgpt: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GPT, desktop: desktopApp('AI Chats/ChatGPT Desktop/Codex') }],

@@ -5,9 +5,10 @@ import { withAccount } from './accounts';
 import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
-import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, projectSubfolder, targetFor } from './select';
+import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, targetFor } from './select';
 import { baseName, dailyNoteName, localStamp } from './naming';
 import { renderTranscript } from './transcript';
+import { chatFolders, dirOf, rawLink } from './raw-folders';
 import type { Chat } from './types';
 import { createNew, ensureFolder, freeFileName, freeStem } from './vaultio';
 import { appendLog } from './log';
@@ -149,7 +150,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	};
 
 	/** Transcript with links to every saved file of this chat. */
-	const transcriptFor = (chat: Chat, item: ListItem, stem: string, visible: FileTask[]): string => {
+	const transcriptFor = (chat: Chat, item: ListItem, json: string, mdFolder: string, visible: FileTask[]): string => {
 		const filePaths = new Map<string, string>();
 		const inline = new Set<string>();
 		for (const f of chatFiles(chat)) {
@@ -167,7 +168,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			linked.add(p);
 			extraFiles.push({ name: f.name, path: p });
 		}
-		return renderTranscript(chat, { projectName: item.project?.name, jsonFileName: `${stem}.json`, filePaths, extraFiles });
+		return renderTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(mdFolder, json), filePaths, extraFiles });
 	};
 
 	/** Chat-view files via ReadConversation, or null if claude.ai would not say. */
@@ -240,9 +241,14 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		//    one subfolder per project in scope inside each of them.
 		const folders = { chat: cleanFolder(s.chatFolder), code: cleanFolder(s.codeFolder) };
 		if (!folders.chat || !folders.code) throw new StopError('The Claude Chat or Claude Code folder setting is empty or invalid.');
+		const rawSetting = { chat: s.chatRawFolder, code: s.codeRawFolder };
+		/** Transcript and raw folders for a chat, as the settings say today. */
+		const foldersOf = (item: ListItem) => {
+			const target = targetFor(item);
+			return chatFolders(item, s, folders[target]!, rawSetting[target], recent);
+		};
 		// Chats with a project folder of their own need no subfolder in the base folders.
-		const custom = (item: ListItem) => customProjectFolder(item, s, recent);
-		const projectNames = s.projectSubfolders ? projectFolderNames(kept.filter((item) => custom(item) === null), recent) : [];
+		const projectNames = s.projectSubfolders ? projectFolderNames(kept.filter((item) => customProjectFolder(item, s, recent) === null), recent) : [];
 		for (const base of [folders.chat, folders.code]) {
 			await ensureFolder(app, base);
 			for (const name of projectNames) {
@@ -258,14 +264,14 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		for (const [i, { item, isUpdate }] of todo.entries()) {
 			progress(`${i + 1} of ${todo.length} chats: ${item.name}`, i, todo.length);
 			const target = targetFor(item);
-			const base = folders[target];
-			if (!base) throw new StopError(`The ${target === 'chat' ? 'Claude Chat' : 'Claude Code'} folder setting is empty or invalid.`);
-			const sub = s.projectSubfolders ? projectSubfolder(item, recent) : '';
-			const own = custom(item);
-			const folder = own ?? (sub ? `${base}/${sub}` : base);
-			if (own && !app.vault.getAbstractFileByPath(own) && !result.foldersCreated.includes(own)) result.foldersCreated.push(own);
+			if (!folders[target]) throw new StopError(`The ${target === 'chat' ? 'Claude Chat' : 'Claude Code'} folder setting is empty or invalid.`);
+			const { md: folder, raw: rawFolder } = foldersOf(item);
+			for (const f of new Set([folder, rawFolder])) {
+				if (!app.vault.getAbstractFileByPath(f) && !result.foldersCreated.includes(f)) result.foldersCreated.push(f);
+			}
 			if (target === 'code') result.otherPlatforms.add(item.platform ?? '?');
 			await ensureFolder(app, folder);
+			await ensureFolder(app, rawFolder);
 			await sleep(delayMs);
 			const raw = await api.get(api.chatPath(item.uuid));
 			const chat = checkChat(raw.json, item.uuid);
@@ -287,13 +293,13 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 
 			let stem = baseName(chat.created_at, chat.name || item.name);
 			if (isUpdate) stem = `${stem} (updated ${localStamp(chat.updated_at)})`;
-			stem = freeStem(app, folder, stem, item.uuid);
+			stem = freeStem(app, folder, stem, item.uuid, rawFolder);
 
-			const jsonPath = `${folder}/${stem}.json`;
+			const jsonPath = `${rawFolder}/${stem}.json`;
 			const mdPath = `${folder}/${stem}.md`;
 			await createNew(app, jsonPath, raw.bytes); // exact bytes from claude.ai
 			await saveFiles(fetched, folder, stem);
-			await createNew(app, mdPath, transcriptFor(chat, item, stem, visible));
+			await createNew(app, mdPath, transcriptFor(chat, item, jsonPath, folder, visible));
 
 			// Remember it right away, so a later stop doesn't lose progress.
 			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked };
@@ -304,7 +310,6 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		}
 
 		const done = new Set(todo.map((t) => t.item.uuid));
-		const dirOf = (p: string) => p.split('/').slice(0, -1).join('/');
 		const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/, '');
 
 		// 6. Restore: synced chats whose .json and/or .md were deleted from the vault.
@@ -333,20 +338,25 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 				rawBytes = raw.bytes;
 			}
 
-			// Where: next to the remaining file, or (both gone) where a new chat would go today.
+			// Where: with the remaining file's name. A missing file goes next to the other one,
+			// or – when raw files have a folder of their own – where the settings put it today.
+			// Both gone: where a new chat would go today.
+			const today = foldersOf(item);
+			const split = today.md !== today.raw;
 			let folder: string;
+			let rawFolder: string;
 			let stem: string;
 			if (jsonOk || mdOk) {
-				const keep = jsonOk ? entry.json : entry.md;
-				folder = dirOf(keep);
-				stem = stemOf(keep);
+				stem = stemOf(jsonOk ? entry.json : entry.md);
+				folder = mdOk ? dirOf(entry.md) : split ? today.md : dirOf(entry.json);
+				rawFolder = jsonOk ? dirOf(entry.json) : split ? today.raw : dirOf(entry.md);
 			} else {
-				const base = folders[targetFor(item)]!;
-				const sub = s.projectSubfolders ? projectSubfolder(item, recent) : '';
-				folder = custom(item) ?? (sub ? `${base}/${sub}` : base);
-				await ensureFolder(app, folder);
-				stem = freeStem(app, folder, baseName(chat.created_at, chat.name || item.name), item.uuid);
+				folder = today.md;
+				rawFolder = today.raw;
+				stem = freeStem(app, folder, baseName(chat.created_at, chat.name || item.name), item.uuid, rawFolder);
 			}
+			await ensureFolder(app, folder);
+			await ensureFolder(app, rawFolder);
 
 			let visible: FileTask[] = [];
 			let outputsChecked = entry.outputsChecked;
@@ -359,11 +369,11 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			}
 			const fetched = s.downloadFiles ? await fetchFiles(api, mergeFiles(chatFiles(chat), visible).filter(isMissing), delayMs, result, s.fileIndex) : [];
 
-			const jsonPath = `${folder}/${stem}.json`;
-			const mdPath = `${folder}/${stem}.md`;
+			const jsonPath = jsonOk ? entry.json : `${rawFolder}/${stem}.json`;
+			const mdPath = mdOk ? entry.md : `${folder}/${stem}.md`;
 			if (rawBytes && !exists(jsonPath)) await createNew(app, jsonPath, rawBytes);
 			await saveFiles(fetched, folder, stem);
-			if (!exists(mdPath)) await createNew(app, mdPath, transcriptFor(chat, item, stem, visible));
+			if (!exists(mdPath)) await createNew(app, mdPath, transcriptFor(chat, item, jsonPath, folder, visible));
 
 			s.index[item.uuid] = { ...entry, json: jsonPath, md: mdPath, outputsChecked };
 			await plugin.saveSettings();
@@ -383,7 +393,8 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 				} catch {
 					continue; // unreadable saved JSON: skip, never touch it
 				}
-				const folder = dirOf(entry.json);
+				// Files live next to the transcript (the raw .json may have a folder of its own).
+				const folder = dirOf(exists(entry.md) ? entry.md : entry.json);
 				const stem = stemOf(entry.json);
 				// Ask the chat view again if this version was never checked, or a saved file is gone.
 				let visible: FileTask[] = [];

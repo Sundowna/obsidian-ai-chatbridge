@@ -154,6 +154,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			maxChatsPerRun: saved.maxChatsPerRun ?? DEFAULT_SETTINGS.maxChatsPerRun,
 			delaySeconds: saved.delaySeconds ?? DEFAULT_SETTINGS.delaySeconds,
 			intervalMinutes: saved.intervalMinutes ?? DEFAULT_SETTINGS.intervalMinutes,
+			syncOnStartup: saved.syncOnStartup ?? DEFAULT_SETTINGS.syncOnStartup,
 			logPath: saved.logPath ?? DEFAULT_SETTINGS.logPath,
 			claude: hydratedClaude,
 			chatgpt: chatgpt.map(hydrateGpt),
