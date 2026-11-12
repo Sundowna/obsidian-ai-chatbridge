@@ -680,7 +680,9 @@ export default class AIChatBridge extends Plugin {
 			const active = 'active' in r && r.active ? `, ${r.active} still active` : '';
 			const more = (r.leftForLater ? `, ${r.leftForLater} left for next run` : '') + active;
 			const restored = r.restored.length ? `, ${r.restored.length} restored` : '';
-			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.`);
+			// Hermes profiles whose state.db is gone were skipped; say so, so a quiet result isn't a surprise.
+			const gone = 'missing' in r && r.missing.length ? ` Skipped, not found: ${r.missing.join(', ')}.` : '';
+			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.${gone}`);
 		}
 		return true;
 	}

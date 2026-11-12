@@ -10,7 +10,7 @@ import { join } from 'path';
 import { TFile } from 'obsidian';
 import { normalizeSettings } from '../src/migrate';
 import { buildSession, columns, messageText, messagesSql, sessionsSql, toMessageRow, toSessionRow } from '../src/hermes/parse';
-import { addFoundProfiles, dedupeLabels, hermesRoots, newProfile, profileId } from '../src/hermes/profiles';
+import { addFoundProfiles, dedupeLabels, findProfiles, hermesRoots, newProfile, profileGone, profileId, refreshProfiles, refreshSummary, removeProfile } from '../src/hermes/profiles';
 import { findPython, isPrivatePath, nodeSqliteBackend, pythonBackend, pythonCandidates, type SqliteBackend } from '../src/hermes/reader';
 import { prettyResult, renderHermesTranscript } from '../src/hermes/render';
 import { runHermesSync } from '../src/hermes/sync';
@@ -230,9 +230,21 @@ async function main() {
 	// Fails gracefully: no reader, missing database, Private profile.
 	const r5 = await runHermesSync(plugin, undefined, undefined, null, NOW);
 	expect('no SQLite reader -> clear stop message', !!r5.stopped && /No way to read SQLite/.test(r5.stopped));
-	settings.hermes.profiles = [Object.assign(newProfile('missing', `${home}/profiles/nope`), { enabled: true })];
+	// A profile whose state.db is gone is skipped; the other profiles still sync.
+	const nope = Object.assign(newProfile('missing', `${home}/profiles/nope`), { enabled: true });
+	settings.hermes.profiles = [nope, profile];
 	const r6 = await runHermesSync(plugin, undefined, undefined, node, NOW);
-	expect('missing state.db -> stop message, nothing written', !!r6.stopped && /does not exist/.test(r6.stopped) && r6.written.length === 0, r6.stopped);
+	expect('missing state.db -> skipped, the other profile still syncs', !r6.stopped && r6.missing.join() === 'missing' && r6.listed > 0 && r6.newCount === 0, JSON.stringify({ ...r6, written: r6.written.length }));
+	const r6b = await runHermesSync(plugin, undefined, nope.id, node, NOW);
+	expect('syncing only a missing profile -> skipped, not stopped', !r6b.stopped && r6b.missing.join() === 'missing' && r6b.listed === 0, JSON.stringify(r6b));
+	nope.enabled = false;
+	const r6c = await runHermesSync(plugin, undefined, undefined, node, NOW);
+	expect('missing profile turned off -> not reported', r6c.missing.length === 0 && !r6c.stopped);
+	// Remove: off the list, and not a single vault file touched.
+	const before = [...files.entries()].map(([p, d]) => `${p}:${d.length}`).join('|');
+	expect('removeProfile: off the list', removeProfile(settings.hermes.profiles, nope) && settings.hermes.profiles.length === 1 && settings.hermes.profiles[0] === profile);
+	expect('removeProfile: vault files untouched', [...files.entries()].map(([p, d]) => `${p}:${d.length}`).join('|') === before);
+	expect('removeProfile: twice -> false', !removeProfile(settings.hermes.profiles, nope));
 	settings.hermes.profiles = [Object.assign(newProfile('p', 'D:/x/Private/hermes'), { enabled: true })];
 	const r7 = await runHermesSync(plugin, undefined, undefined, node, NOW);
 	expect('Private profile refused', !!r7.stopped && /Private/.test(r7.stopped));
@@ -243,6 +255,35 @@ async function main() {
 	expect('addFoundProfiles: no duplicate paths or labels, added turned off', listed.length === 2 && listed[1]!.label === 'default (2)' && !listed[1]!.enabled);
 	expect('migration: duplicate labels fixed on load', normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: {} }], hermes: { profiles: [newProfile('x', 'D:/1'), newProfile('x', 'D:/2')] } }).settings.hermes.profiles[1]!.label === 'x (2)');
 	expect('profileId normalises', profileId('D:\\AI\\Hermes\\') === 'd:/ai/hermes');
+
+	// ---- Finding profiles again (Refresh) on a fake folder tree ----
+	const tree = ['R/state.db', 'R/profiles/a/state.db', 'R/profiles/.deleted-x/state.db', 'R/profiles/Private/state.db', 'R/profiles/empty/notes.txt', 'S/profiles/b/state.db'];
+	const under = (p: string) => tree.filter((x) => x.startsWith(`${p}/`));
+	const fakeFs = {
+		existsSync: (p: string) => tree.includes(p) || under(p).length > 0,
+		readdirSync: (p: string) => {
+			const names = [...new Set(under(p).map((x) => x.slice(p.length + 1).split('/')[0]!))];
+			if (!names.length) throw new Error('ENOENT');
+			return names.map((name) => ({ name, isDirectory: () => under(`${p}/${name}`).length > 0 }));
+		},
+	};
+	const foundNow = findProfiles(['R', 'S', 'R'], fakeFs);
+	expect('findProfiles: home, profiles/, second root; deleted/Private/no state.db skipped; no duplicates', foundNow.map((f) => `${f.label}=${f.path}`).join('|') === 'default=R|a=R/profiles/a|b=S/profiles/b', JSON.stringify(foundNow));
+	const saved = [newProfile('a', 'R/profiles/a'), newProfile('gone', 'R/profiles/gone'), newProfile('nodb', 'R/profiles/empty')];
+	saved[1]!.enabled = true;
+	expect('profileGone: folder vs database vs there', profileGone(saved[1]!, fakeFs) === 'folder' && profileGone(saved[2]!, fakeFs) === 'database' && profileGone(saved[0]!, fakeFs) === null);
+	expect('profileGone: no fs (mobile) -> never gone', profileGone(saved[1]!, null) === null);
+	const rf = refreshProfiles(saved, foundNow, fakeFs);
+	expect('refreshProfiles: 2 new (turned off), 2 gone kept in the list', rf.added.map((p) => p.label).join() === 'default,b' && rf.added.every((p) => !p.enabled) && rf.missing.map((p) => p.label).join() === 'gone,nodb' && rf.present === 1 && saved.length === 5, JSON.stringify(rf.missing.map((p) => p.label)));
+	expect('refreshProfiles: gone profile keeps its switch', saved[1]!.enabled);
+	expect('refreshSummary: new and gone', refreshSummary(rf) === '2 new profiles found, 2 no longer exist', refreshSummary(rf));
+	const rf2 = refreshProfiles(saved, foundNow, fakeFs);
+	expect('refreshProfiles again: nothing added twice', rf2.added.length === 0 && saved.length === 5 && refreshSummary(rf2) === '2 no longer exist', refreshSummary(rf2));
+	const one = refreshProfiles([newProfile('a', 'R/profiles/a')], [], fakeFs);
+	expect('refreshSummary: one gone / no changes / none', refreshSummary({ added: [], missing: [saved[1]!], present: 0 }) === '1 no longer exists'
+		&& refreshSummary(one) === 'No changes: the profile is still there'
+		&& refreshSummary(refreshProfiles([], [], fakeFs)) === 'No Hermes profiles found', refreshSummary(one));
+	expect('refreshSummary: all still there', refreshSummary({ added: [], missing: [], present: 3 }) === 'No changes: all 3 profiles are still there');
 
 	// Settings from an older version get Hermes defaults.
 	const old = normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: { chatFolder: '30 Sources/AI Chats/Claude/Chat' } }] }).settings;
