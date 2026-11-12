@@ -1,9 +1,8 @@
 // SQL for a Hermes snapshot and turning its rows into a session. Pure code, no Obsidian.
 // Hermes adds columns often (schema 31 in Nov 2026), so every optional column is checked first.
 
-import type { DesktopTurn } from '../desktop/types';
 import type { Row, Snapshot } from './reader';
-import type { HermesMessageRow, HermesSession, HermesSessionRow } from './types';
+import type { HermesMessageRow, HermesSession, HermesSessionRow, HermesToolStep, HermesTurn } from './types';
 
 /** Hermes stores list/dict content (multimodal parts) as this prefix plus JSON. */
 const JSON_PREFIX = '\u0000json:';
@@ -58,7 +57,7 @@ export const revisionOf = (s: HermesSessionRow): string => `${s.lastMessageId}:$
 export function messagesSql(cols: Set<string>, count: number): string {
 	const opt = (c: string) => (cols.has(c) ? c : `NULL AS ${c}`);
 	const visible = cols.has('active') ? (cols.has('compacted') ? ' AND (active = 1 OR compacted = 1)' : ' AND active = 1') : '';
-	return `SELECT id, session_id, role, content, ${opt('tool_calls')}, timestamp, ${opt('message_uid')}, ${opt('display_metadata')} FROM messages WHERE session_id IN (${Array(count).fill('?').join(',')})${visible} ORDER BY session_id, id`;
+	return `SELECT id, session_id, role, content, ${opt('tool_calls')}, ${opt('tool_call_id')}, ${opt('tool_name')}, timestamp, ${opt('message_uid')}, ${opt('display_metadata')} FROM messages WHERE session_id IN (${Array(count).fill('?').join(',')})${visible} ORDER BY session_id, id`;
 }
 
 export function toMessageRow(r: Row): HermesMessageRow {
@@ -77,6 +76,8 @@ export function toMessageRow(r: Row): HermesMessageRow {
 		role: String(r.role),
 		content: typeof r.content === 'string' ? r.content : null,
 		toolCalls: str(r.tool_calls) ?? null,
+		toolCallId: str(r.tool_call_id),
+		toolName: str(r.tool_name),
 		timestamp: num(r.timestamp) ?? 0,
 		uid: str(r.message_uid),
 		hidden,
@@ -109,14 +110,22 @@ export function messageText(content: string | null): string {
 	}
 }
 
-function toolCallCount(raw: string | null): number {
-	if (!raw) return 0;
+/** The calls in an assistant message's tool_calls JSON (OpenAI format: {id, function: {name, arguments}}). */
+export function toolCalls(raw: string | null): { id?: string; step: HermesToolStep }[] {
+	if (!raw) return [];
+	let list: unknown;
 	try {
-		const v = JSON.parse(raw) as unknown;
-		return Array.isArray(v) ? v.length : 1;
+		list = JSON.parse(raw);
 	} catch {
-		return 1;
+		return [{ step: { name: 'tool', args: raw } }];
 	}
+	return (Array.isArray(list) ? list : [list]).map((c) => {
+		const o = (c ?? {}) as { id?: unknown; call_id?: unknown; name?: unknown; arguments?: unknown; function?: { name?: unknown; arguments?: unknown } };
+		const name = str(o.function?.name) ?? str(o.name) ?? 'tool';
+		const rawArgs = o.function?.arguments ?? o.arguments;
+		const args = typeof rawArgs === 'string' ? rawArgs : rawArgs === undefined ? '' : JSON.stringify(rawArgs);
+		return { id: str(o.id) ?? str(o.call_id), step: { name, args } };
+	});
 }
 
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
@@ -128,21 +137,23 @@ const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
  */
 export function buildSession(row: HermesSessionRow, messages: HermesMessageRow[], profile: string): HermesSession | null {
 	const seen = new Set<string>();
-	const turns: DesktopTurn[] = [];
-	let last: DesktopTurn | undefined;
+	const turns: HermesTurn[] = [];
+	let last: HermesTurn | undefined;
+	/** Tool call ID -> its step, so a result row finds its call. */
+	const pending = new Map<string, HermesToolStep>();
 	let first: number | undefined;
 	let latest: number | undefined;
 	let fromYou = false;
-	const push = (role: 'user' | 'assistant', ts: number): DesktopTurn => {
+	const push = (role: 'user' | 'assistant', ts: number): HermesTurn => {
 		if (last && last.role === role) return last;
 		last = { role, time: iso(ts), parts: [] };
 		turns.push(last);
 		return last;
 	};
-	const addTools = (t: DesktopTurn, n: number) => {
+	const addSteps = (t: HermesTurn, steps: HermesToolStep[]) => {
 		const end = t.parts[t.parts.length - 1];
-		if (end && 'tools' in end) end.tools += n;
-		else t.parts.push({ tools: n });
+		if (end && 'steps' in end) end.steps.push(...steps);
+		else t.parts.push({ steps: [...steps] });
 	};
 	for (const m of messages) {
 		if (m.hidden) continue;
@@ -157,13 +168,20 @@ export function buildSession(row: HermesSessionRow, messages: HermesMessageRow[]
 			push('user', m.timestamp).parts.push({ text });
 		} else if (m.role === 'assistant') {
 			const text = messageText(m.content);
-			const tools = toolCallCount(m.toolCalls);
-			if (!text && !tools) continue;
+			const calls = toolCalls(m.toolCalls);
+			if (!text && !calls.length) continue;
 			const t = push('assistant', m.timestamp);
 			if (text) t.parts.push({ text });
-			if (tools) addTools(t, tools);
+			if (calls.length) {
+				for (const c of calls) if (c.id) pending.set(c.id, c.step);
+				addSteps(t, calls.map((c) => c.step));
+			}
 		} else if (m.role === 'tool') {
-			// The result of a tool call: already counted with the call.
+			// The result of a tool call: attach it to its call (or show it as a step of its own).
+			const result = messageText(m.content);
+			const step = m.toolCallId ? pending.get(m.toolCallId) : undefined;
+			if (step) step.result = result;
+			else if (last?.role === 'assistant') addSteps(last, [{ name: m.toolName ?? 'tool', args: '', result }]);
 			continue;
 		} else continue;
 		first ??= m.timestamp;
@@ -187,7 +205,7 @@ export function buildSession(row: HermesSessionRow, messages: HermesMessageRow[]
 	};
 }
 
-function firstLine(turns: DesktopTurn[]): string | undefined {
+function firstLine(turns: HermesTurn[]): string | undefined {
 	const t = turns.find((x) => x.role === 'user');
 	const p = t?.parts.find((x): x is { text: string } => 'text' in x);
 	const line = p?.text.split('\n').find((l) => l.trim())?.trim();

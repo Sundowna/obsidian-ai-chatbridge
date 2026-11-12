@@ -12,7 +12,7 @@ import { normalizeSettings } from '../src/migrate';
 import { buildSession, columns, messageText, messagesSql, sessionsSql, toMessageRow, toSessionRow } from '../src/hermes/parse';
 import { hermesRoots, newProfile, profileId } from '../src/hermes/profiles';
 import { findPython, isPrivatePath, nodeSqliteBackend, pythonBackend, pythonCandidates, type SqliteBackend } from '../src/hermes/reader';
-import { renderHermesTranscript } from '../src/hermes/render';
+import { prettyResult, renderHermesTranscript } from '../src/hermes/render';
 import { runHermesSync } from '../src/hermes/sync';
 import { followRename } from '../src/follow';
 
@@ -49,16 +49,23 @@ CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT
   display_metadata TEXT, message_uid TEXT);
 `);
 const addSession = writer.prepare('INSERT INTO sessions (id, source, model, model_config, parent_session_id, started_at, billing_provider, title, cwd) VALUES (?,?,?,?,?,?,?,?,?)');
-const addMsg = writer.prepare('INSERT INTO messages (session_id, role, content, tool_calls, timestamp, active, compacted, display_metadata, message_uid) VALUES (?,?,?,?,?,?,?,?,?)');
-const msg = (sid: string, role: string, content: string | null, ts: number, o: { tools?: string; active?: number; compacted?: number; meta?: string; uid?: string } = {}) =>
-	addMsg.run(sid, role, content, o.tools ?? null, ts, o.active ?? 1, o.compacted ?? 0, o.meta ?? null, o.uid ?? null);
+const addMsg = writer.prepare('INSERT INTO messages (session_id, role, content, tool_calls, timestamp, active, compacted, display_metadata, message_uid, tool_call_id, tool_name) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+const msg = (sid: string, role: string, content: string | null, ts: number, o: { tools?: string; active?: number; compacted?: number; meta?: string; uid?: string; callId?: string; toolName?: string } = {}) =>
+	addMsg.run(sid, role, content, o.tools ?? null, ts, o.active ?? 1, o.compacted ?? 0, o.meta ?? null, o.uid ?? null, o.callId ?? null, o.toolName ?? null);
 
 // 1: a normal CLI chat with a tool call.
 addSession.run('s1-garden', 'cli', 'anthropic/claude-sonnet-4.6', null, null, t(300), 'anthropic', 'Plan the garden', 'D:/Projects/garden');
 msg('s1-garden', 'system', 'You are Hermes.', t(300));
 msg('s1-garden', 'user', 'Which vegetables grow in shade?', t(299));
-msg('s1-garden', 'assistant', '', t(298), { tools: JSON.stringify([{ id: 'c1', function: { name: 'web_search' } }]) });
-msg('s1-garden', 'tool', '{"results": []}', t(298));
+msg('s1-garden', 'assistant', '', t(298), { tools: JSON.stringify([
+	{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: JSON.stringify({ query: 'shade vegetables' }) } },
+	{ id: 'c2', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'D:/Notes/Private/plan.md' }) } },
+	{ id: 'c3', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'D:/Projects/garden/big.txt' }) } },
+]) });
+msg('s1-garden', 'tool', '{"results": ["lettuce"]}', t(298), { callId: 'c1', toolName: 'web_search' });
+msg('s1-garden', 'tool', 'secret plan text', t(298), { callId: 'c2', toolName: 'read_file' });
+msg('s1-garden', 'tool', `~~~ fence inside
+${'x'.repeat(5000)}`, t(298), { callId: 'c3', toolName: 'read_file' });
 msg('s1-garden', 'assistant', 'Lettuce, spinach and chard do well.', t(297));
 // 2: a local Qwen chat: multimodal content, compaction duplicates, an undone row, a model-only row.
 addSession.run('s2-qwen', 'desktop', 'qwen3.5-9b', null, null, t(200), 'custom', null, null);
@@ -159,7 +166,9 @@ async function main() {
 	const { rows, msgs } = await readAll(node!);
 	const of = (id: string) => buildSession(rows.find((r) => r.id === id)!, msgs.filter((m) => m.sessionId === id), 'tester');
 	const s1 = of('s1-garden')!;
-	expect('s1: two turns, tool step counted', s1.turns.length === 2 && JSON.stringify(s1.turns[1]!.parts) === JSON.stringify([{ tools: 1 }, { text: 'Lettuce, spinach and chard do well.' }]), JSON.stringify(s1.turns));
+	const steps = s1.turns[1]!.parts[0] as { steps: { name: string; args: string; result?: string }[] };
+	expect('s1: two turns, three tool steps then the answer', s1.turns.length === 2 && steps.steps.length === 3 && JSON.stringify(s1.turns[1]!.parts[1]) === JSON.stringify({ text: 'Lettuce, spinach and chard do well.' }), JSON.stringify(s1.turns).slice(0, 300));
+	expect('s1: results matched to their calls', steps.steps[0]!.name === 'web_search' && steps.steps[0]!.result === '{"results": ["lettuce"]}' && steps.steps[1]!.result === 'secret plan text');
 	const s2 = of('s2-qwen')!;
 	const s2texts = s2.turns.flatMap((x) => x.parts.flatMap((p) => ('text' in p ? [p.text] : [])));
 	expect('s2: compaction duplicates shown once, model-only row hidden', JSON.stringify(s2texts) === JSON.stringify(['What is in this picture?\n\n*(image)*', 'A cat on a sofa.', 'What colour is the cat?', 'Grey.']), JSON.stringify(s2texts));
@@ -169,6 +178,15 @@ async function main() {
 	const fm = md.split('---')[1]!;
 	expect('transcript: required front matter', ['source: hermes', 'hermes_profile: "tester"', 'session_id: "s1-garden"', 'model: "anthropic/claude-sonnet-4.6"'].every((l) => fm.includes(l)), fm);
 	expect('transcript: dates are YYYY-MM-DD', /\ncreated: \d{4}-\d{2}-\d{2}\n/.test(fm) && /\nupdated: \d{4}-\d{2}-\d{2}\n/.test(fm));
+	expect('transcript: tool steps in a collapsed callout', md.includes('> [!example]- 3 tool steps') && md.includes('> **1. web_search**') && md.includes('"query": "shade vegetables"') && md.includes('>  "results": [') && md.includes('>   "lettuce"'));
+	expect('transcript: Private step keeps only its name', md.includes('> **2. read_file**\n> *(details not saved') && !md.includes('secret plan text') && !md.includes('Private/plan.md'));
+	expect('transcript: long result shortened, fence longer than ~~~ inside', md.includes('more characters)') && md.includes('> ~~~~\n> ~~~ fence inside') && !md.includes('x'.repeat(1300)));
+	const lines = md.split('\n');
+	const callout = lines.slice(lines.findIndex((l) => l.startsWith('> [!example]')), lines.findIndex((l) => l.startsWith('Lettuce')));
+	expect('transcript: every callout line starts with >', callout.filter((l) => l.trim()).every((l) => l.startsWith('>')), String(callout.length));
+	const wrapped = prettyResult('{"content": "a\\nb", "truncated": false}');
+	expect('prettyResult: unwraps {"content"} and keeps other fields', wrapped === 'a\nb\n\n{"truncated":false}', JSON.stringify(wrapped));
+	expect('prettyResult: plain text and other JSON', prettyResult(' hi ') === 'hi' && prettyResult('[1,2]') === '[\n 1,\n 2\n]');
 	expect('transcript: unread and headings', fm.includes('unread: true') && md.includes('\n## You · ') && md.includes('\n## Hermes · '));
 
 	// ---- Full sync on a fake vault ----

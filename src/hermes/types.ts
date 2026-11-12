@@ -2,8 +2,6 @@
 // database, <profile home>/state.db (WAL mode: state.db + -wal + -shm are one image).
 // Pure types, no Obsidian.
 
-import type { DesktopTurn } from '../desktop/types';
-
 /** One Hermes profile: a Hermes home folder with a state.db. */
 export interface HermesProfile {
 	/** Stable key for the index (the profile's folder path, lower case, forward slashes). */
@@ -62,10 +60,29 @@ export interface HermesMessageRow {
 	content: string | null;
 	toolCalls: string | null;
 	timestamp: number;
+	/** Tool result rows: which call this answers, and the tool's name. */
+	toolCallId?: string;
+	toolName?: string;
 	/** Durable per-message ID (schema 31+); the same message can sit in two compaction generations. */
 	uid?: string;
 	/** Hidden from the chat view (model-only rows). */
 	hidden: boolean;
+}
+
+/** One tool call and (once it came back) its result. */
+export interface HermesToolStep {
+	name: string;
+	/** Arguments as Hermes stored them (usually a JSON string). */
+	args: string;
+	result?: string;
+}
+
+export interface HermesTurn {
+	role: 'user' | 'assistant';
+	/** ISO time of the first message in this turn. */
+	time?: string;
+	/** Text pieces and runs of tool steps, in order. */
+	parts: ({ text: string } | { steps: HermesToolStep[] })[];
 }
 
 export interface HermesSession {
@@ -82,5 +99,5 @@ export interface HermesSession {
 	cwd?: string;
 	parentId?: string;
 	isSubagent: boolean;
-	turns: DesktopTurn[];
+	turns: HermesTurn[];
 }
