@@ -35,7 +35,7 @@ export default defineConfig(
 		rules: {
 			// Product names keep their own casing in UI text.
 			'obsidianmd/ui/sentence-case': ['warn', {
-				brands: ['AI ChatBridge', 'ChatGPT', 'ChatGPT Desktop', 'Claude Code', 'Claude Desktop', 'Codex', 'Lumo', 'Proton', 'AI Studio', 'Gemini', 'Google Drive', 'Google', 'Claude'],
+				brands: ['AI ChatBridge', 'ChatGPT', 'ChatGPT Desktop', 'Claude Code', 'Claude Desktop', 'Codex', 'Lumo', 'Proton', 'AI Studio', 'Gemini', 'Google Drive', 'Google', 'Claude', 'Hermes Agent', 'Hermes', 'Obsidian', 'Python', 'Private', 'HERMES_HOME'],
 				acronyms: ['AI', 'API', 'MB', 'JSON', 'UUID', 'ID'],
 				// Folder names and button labels quoted in descriptions.
 				ignoreWords: ['Artifacts', 'Attachments', 'Recent', 'Sync', 'Chats'],

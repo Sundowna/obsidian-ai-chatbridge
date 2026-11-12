@@ -18,6 +18,7 @@ import { registerLayoutIcons } from './chatgpt/layout-view';
 import { runLumoSync } from './lumo/sync';
 import { runGeminiSync } from './gemini/sync';
 import { runStudioSync } from './studio/sync';
+import { anyHermesEnabled, runHermesSync } from './hermes/sync';
 import { chatCountStatus, SyncProgress } from './progress';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
@@ -29,7 +30,8 @@ type Target =
 	| { kind: 'lumo'; account: LumoAccount }
 	| { kind: 'gemini'; account: GeminiAccount }
 	| { kind: 'studio'; account: GeminiAccount }
-	| { kind: 'desktop'; only?: DesktopOnly; label?: string };
+	| { kind: 'desktop'; only?: DesktopOnly; label?: string }
+	| { kind: 'hermes'; profileId?: string; label?: string };
 
 /** web = the provider's chat website; studio = Google AI Studio, which shares the Google login. */
 export type Surface = 'web' | 'desktop' | 'studio';
@@ -54,7 +56,7 @@ export default class AIChatBridge extends Plugin {
 	/** Stop was asked for: the running sync ends after its current chat. */
 	private stopRequested = false;
 	/** Which account (or desktop app) is syncing right now. */
-	private current: { provider?: Provider; id?: string } | null = null;
+	private current: { provider?: Provider; id?: string; hermes?: boolean } | null = null;
 	private progress: SyncProgress | null = null;
 	private readonly busyListeners = new Set<() => void>();
 	/** The last "Refresh index" result, shown in the settings. */
@@ -128,6 +130,12 @@ export default class AIChatBridge extends Plugin {
 			id: 'sync-desktop-app-chats',
 			name: 'Sync desktop app chats (Claude, Codex)',
 			callback: () => void this.syncDesktop('manual'),
+		});
+
+		this.addCommand({
+			id: 'sync-hermes-chats',
+			name: 'Sync Hermes Agent chats',
+			callback: () => void this.syncHermes('manual'),
 		});
 
 		this.addCommand({
@@ -380,6 +388,23 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
+	/** Hermes Agent profiles only: every profile turned on, or just one (its Sync button). */
+	async syncHermes(trigger: 'manual' | 'auto', profileId?: string) {
+		await this.guarded(trigger, async () => {
+			if (!anyHermesEnabled(this)) {
+				if (trigger === 'manual') new Notice('Hermes: no profile is turned on. Turn one on in the plugin settings (Hermes tab).');
+				return;
+			}
+			const profile = profileId ? this.settings.hermes.profiles.find((p) => p.id === profileId) : undefined;
+			await this.runOne({ kind: 'hermes', profileId, label: profile ? `Hermes ${profile.label}` : undefined }, trigger);
+		});
+	}
+
+	/** The Hermes profile (by ID) or all of Hermes is syncing right now. */
+	isSyncingHermes(profileId?: string): boolean {
+		return this.syncing && this.current?.hermes === true && (!profileId || this.current.id === profileId || this.current.id === undefined);
+	}
+
 	/** One surface of one account (the Sync buttons in the settings). */
 	async syncAccount(provider: Provider, account: AnyAccount, surface: Surface) {
 		await this.guarded('manual', () => this.runSurface(provider, account, surface));
@@ -468,7 +493,8 @@ export default class AIChatBridge extends Plugin {
 			const gemini: GeminiAccount[] = [];
 			for (const a of this.settings.gemini) if (await this.canSyncWeb('gemini', a)) gemini.push(a);
 			const desktop = anyDesktopEnabled(this);
-			if (!claude.length && !gpt.length && !lumo.length && !gemini.length && !desktop) {
+			const hermes = anyHermesEnabled(this);
+			if (!claude.length && !gpt.length && !lumo.length && !gemini.length && !desktop && !hermes) {
 				if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
 				return;
 			}
@@ -483,7 +509,8 @@ export default class AIChatBridge extends Plugin {
 			}
 			for (const account of lumo) if (!(await this.runOne({ kind: 'lumo', account }, trigger)) && this.autoPaused) return;
 			for (const account of gemini) if (!(await this.runGoogle(account, trigger)) && this.autoPaused) return;
-			if (desktop) await this.runOne({ kind: 'desktop' }, trigger);
+			if (desktop && !(await this.runOne({ kind: 'desktop' }, trigger)) && this.autoPaused) return;
+			if (hermes) await this.runOne({ kind: 'hermes' }, trigger);
 		});
 	}
 
@@ -588,6 +615,7 @@ export default class AIChatBridge extends Plugin {
 		if (target.kind === 'lumo') return withAccount('Lumo', this.settings.lumo, target.account);
 		if (target.kind === 'gemini') return withAccount('Gemini', this.settings.gemini, target.account);
 		if (target.kind === 'studio') return withAccount('AI Studio', this.settings.gemini, target.account);
+		if (target.kind === 'hermes') return target.label ?? 'Hermes';
 		return target.label ?? 'Desktop apps';
 	}
 
@@ -601,7 +629,9 @@ export default class AIChatBridge extends Plugin {
 			target.kind === 'chatgpt' ? () => chatCountStatus(target.account.web.chatProgress, label) : undefined,
 			() => this.requestStop());
 		this.progress = progress;
-		this.current = target.kind === 'desktop'
+		this.current = target.kind === 'hermes'
+			? { hermes: true, id: target.profileId }
+			: target.kind === 'desktop'
 			? { provider: target.only?.provider, id: target.only?.id }
 			: { provider: target.kind === 'studio' ? 'gemini' : target.kind, id: target.account.id };
 		this.busyChanged();
@@ -617,6 +647,7 @@ export default class AIChatBridge extends Plugin {
 				: target.kind === 'lumo' ? await runLumoSync(this, target.account, update)
 				: target.kind === 'gemini' ? await runGeminiSync(this, target.account, update)
 				: target.kind === 'studio' ? await runStudioSync(this, target.account, update)
+				: target.kind === 'hermes' ? await runHermesSync(this, update, target.profileId)
 				: await runDesktopSync(this, update, undefined, undefined, target.only);
 		} finally {
 			progress.finish();

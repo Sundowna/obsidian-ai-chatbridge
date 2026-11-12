@@ -45,6 +45,17 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 	for (const { web } of s.lumo) followIndex(Object.values(web.index), {});
 	for (const { web, studio } of s.gemini) followIndex([...Object.values(web.index), ...Object.values(studio.index)], {});
 
+	// Hermes sessions: one transcript each.
+	for (const profile of s.hermes?.profiles ?? []) {
+		for (const entry of Object.values(profile.index)) {
+			const next = fix(entry.md);
+			if (next !== entry.md) {
+				entry.md = next;
+				changed++;
+			}
+		}
+	}
+
 	// Desktop app sessions: transcript and raw copy.
 	for (const { desktop } of [...s.claude, ...s.chatgpt]) {
 		for (const entry of Object.values(desktop.index)) {

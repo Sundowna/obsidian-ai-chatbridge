@@ -5,8 +5,9 @@
 import { layoutFolders, layoutRoot } from './desktop/layout';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import { onlySelected } from './project-catalog';
+import type { HermesSettings } from './hermes/types';
 import {
-	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_LUMO, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
+	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_HERMES, DEFAULT_LUMO, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
 	type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type ClaudeWebSettings, type GptSettings, type LumoAccount, type Settings,
 } from './settings';
 
@@ -137,6 +138,17 @@ function firstGemini(claudeChatFolder: string): GeminiAccount[] {
 	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_GEMINI, index: {}, folder: to.geminiChat }, studio: { ...DEFAULT_STUDIO, index: {}, folder: to.studio } }];
 }
 
+/** Hermes settings; a new vault puts them next to the other providers ("<root>/Hermes"). */
+function hydrateHermes(h: Partial<HermesSettings> | undefined, claudeChatFolder: string): HermesSettings {
+	const root = layoutRoot(claudeChatFolder);
+	return {
+		...DEFAULT_HERMES,
+		...h,
+		folder: h?.folder ?? (root ? `${root}/Hermes` : 'Hermes'),
+		profiles: (h?.profiles ?? []).map((p) => ({ ...p, index: { ...(p.index ?? {}) }, ignored: { ...(p.ignored ?? {}) } })),
+	};
+}
+
 /** `migrated` = flat settings were converted (the caller keeps a copy of the old file). */
 export function normalizeSettings(loaded: unknown): { settings: Settings; migrated: boolean } {
 	const raw = (loaded ?? {}) as Saved & Legacy;
@@ -160,6 +172,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			lumo: saved.lumo?.length ? saved.lumo.map(hydrateLumo) : firstLumo(hydratedClaude[0]!.web.chatFolder),
 			gemini: saved.gemini?.length ? saved.gemini.map(hydrateGemini) : firstGemini(hydratedClaude[0]!.web.chatFolder),
 			desktop: { ...DEFAULT_DESKTOP, ...saved.desktop },
+			hermes: hydrateHermes(saved.hermes, hydratedClaude[0]!.web.chatFolder),
 		},
 	};
 }

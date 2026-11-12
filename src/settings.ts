@@ -11,6 +11,7 @@ import type { Inventories } from './chatgpt/inventory';
 import type { ChatCounts } from './progress';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import type { ProjectCatalog } from './project-catalog';
+import type { HermesSettings } from './hermes/types';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -179,6 +180,8 @@ export interface Settings {
 	gemini: GeminiAccount[];
 	/** How desktop sessions are saved, for every account. */
 	desktop: DesktopSettings;
+	/** Hermes Agent chats, read from each profile's state.db (desktop only). */
+	hermes: HermesSettings;
 }
 
 /** Where a new vault's chats go: the layout below "AI Chats" (see desktop/layout.ts). */
@@ -233,6 +236,12 @@ export const DEFAULT_STUDIO: StudioSettings = {
 
 export const desktopApp = (folder: string): DesktopAppSettings => ({ enabled: true, folder, extraFolders: [], index: {} });
 
+export const DEFAULT_HERMES: HermesSettings = {
+	folder: 'AI Chats/Hermes',
+	profiles: [],
+	pythonPath: '',
+};
+
 export const DEFAULT_DESKTOP: DesktopSettings = {
 	projectSubfolders: true,
 	keepRaw: false,
@@ -257,6 +266,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	lumo: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_LUMO }],
 	gemini: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GEMINI, studio: DEFAULT_STUDIO }],
 	desktop: DEFAULT_DESKTOP,
+	hermes: DEFAULT_HERMES,
 };
 
 export const MIN_DELAY_SECONDS = 1;
