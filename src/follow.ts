@@ -68,6 +68,14 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 					changed++;
 				}
 			}
+			// Its saved attachments and artifacts.
+			for (const [k, previous] of Object.entries(entry.files ?? {})) {
+				const next = fix(previous);
+				if (next !== previous) {
+					entry.files![k] = next;
+					changed++;
+				}
+			}
 		}
 	}
 	return changed;

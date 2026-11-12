@@ -1,5 +1,6 @@
 // One sync run: list -> filter -> fetch new/changed -> write files -> log.
 
+import { guardMissing } from './missing-guard';
 import type AIChatBridge from './main';
 import { withAccount } from './accounts';
 import type { ClaudeAccount } from './settings';
@@ -236,6 +237,10 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const maxChats = plugin.settings.maxChatsPerRun;
 		const todo = maxChats > 0 ? todoAll.slice(0, maxChats) : todoAll;
 		result.leftForLater = todoAll.length - todo.length;
+
+		// Before anything is written: many saved chats missing means a wrong sync history, not deletions.
+		const savedChats = Object.values(s.index);
+		guardMissing('claude.ai chats', savedChats.length, savedChats.filter((e) => !exists(e.md) || !exists(e.json)).length);
 
 		// 4. Make sure the folders exist: both base folders, and (if mirroring)
 		//    one subfolder per project in scope inside each of them.

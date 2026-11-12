@@ -198,15 +198,20 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	onunload() {
+		if (this.saveTimer !== null) {
+			window.clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+			void this.saveSettings(); // don't lose a pending index update (queued before the flag below)
+		}
+		// From here on this copy never saves: after a reload the new copy owns the settings, and a
+		// sync still finishing here would write its older index and folders over them.
 		this.unloaded = true;
+		// A running sync stops before its next chat (it may still be fetching one).
+		this.stopRequested = true;
 		this.clearGptResumeTimer();
 		this.statusEl?.setText('');
 		closeLoginWindows();
 		if (this.timer !== null) window.clearInterval(this.timer);
-		if (this.saveTimer !== null) {
-			window.clearTimeout(this.saveTimer);
-			void this.saveSettings(); // don't lose a pending index update
-		}
 	}
 
 	private clearGptResumeTimer(): void {
@@ -516,7 +521,7 @@ export default class AIChatBridge extends Plugin {
 
 	/** One sync at a time; after an error the automatic sync waits until you sync by hand. */
 	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>) {
-		if (trigger === 'auto' && this.autoPaused) return;
+		if (this.unloaded || (trigger === 'auto' && this.autoPaused)) return;
 		if (this.running) {
 			if (trigger === 'manual') new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is already running.');
 			return;
@@ -703,6 +708,7 @@ export default class AIChatBridge extends Plugin {
 	private settingsWrite: Promise<void> = Promise.resolve();
 
 	async saveSettings() {
+		if (this.unloaded) return; // see onunload
 		const write = this.settingsWrite.then(() => this.saveData(this.settings));
 		this.settingsWrite = write.catch(() => undefined);
 		await write;

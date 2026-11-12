@@ -21,6 +21,7 @@ import { FileSystemAdapter, TFile, TFolder } from 'obsidian';
 import { newestFirst } from '../src/select';
 import { tagAccount, untagAccount } from '../src/naming';
 import { refreshEntries, type IndexedPaths } from '../src/reindex';
+import { massMissing } from '../src/missing-guard';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -348,6 +349,7 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	await layoutTest(true);
 	await filesTest();
 	await codexFilesTest();
+	await guardTest();
 	if (process.env.DESKTOP_LIVE) await live();
 	console.log(failures ? `\n${failures} FAILED` : '\nAll desktop tests passed.');
 	process.exit(failures ? 1 : 0);
@@ -688,6 +690,38 @@ async function codexFilesTest() {
 	const md = [...files.keys()].find((x) => x.endsWith('Extend the script.md'))!;
 	const t = text(md);
 	expect('codex files: links in your message and Files section', /📎 \[\[[^\]]*notes\.ahk\|notes\.ahk\]\]\nExtend the script/.test(t) && /!\[\[[^\]]*Image 1\.png\]\]/.test(t) && /### Artifacts[\s\S]*Plan\.md[\s\S]*Notes\.md/.test(t), t.slice(t.indexOf('## You')));
+}
+
+/** Safety stops: many saved chats missing, and moves that must carry saved files along. */
+async function guardTest() {
+	expect('guard: a few missing chats are restored as before', !massMissing(100, 9) && !massMissing(20, 4));
+	expect('guard: many missing at once stop the sync', massMissing(100, 21) && massMissing(951, 926) && !massMissing(100, 20));
+
+	// A desktop sync whose history points at the wrong folder restores nothing.
+	const NOW = Date.parse('2026-11-12T12:00:00Z');
+	const fs = new FakeFs();
+	const vaultFiles2 = new Map<string, string>();
+	const v = {
+		getAbstractFileByPath: (p: string) => (vaultFiles2.has(p) ? Object.assign(new TFile(), { path: p }) : null),
+		createFolder: async () => undefined,
+		create: async (p: string, d: string) => void vaultFiles2.set(p, d),
+		process: async () => undefined,
+	};
+	const s = normalizeSettings({ maxChatsPerRun: 0, chatFolder: 'AI/Claude Chat', logPath: 'log.md', desktop: { quietMinutes: 0 } }).settings;
+	for (let i = 0; i < 12; i++) {
+		const id = `sess-${i}`;
+		fs.put(`C:/Users/W/.claude/projects/p/${id}.jsonl`, jl({ type: 'user', sessionId: id, timestamp: '2026-11-06T10:00:00Z', message: { role: 'user', content: `Prompt ${i}` } }), NOW - 3600_000);
+		s.claude[0]!.desktop.index[id] = { updated: '2026-11-06T10:00:00Z', size: 1, mtime: 1, source: `C:/Users/W/.claude/projects/p/${id}.jsonl`, md: `Old/${id}.md`, synced: 'x' };
+	}
+	const p = { app: { vault: v, fileManager: { processFrontMatter: async () => undefined } }, settings: s, saveSettings: async () => undefined } as never;
+	const r = await runDesktopSync(p, undefined, fs, NOW);
+	expect('guard: desktop sync stops, nothing restored', !!r.stopped?.includes('Refresh index') && r.restored.length === 0 && ![...vaultFiles2.keys()].some((k) => k.endsWith('.md') && k !== 'log.md'), JSON.stringify(r));
+
+	// Moving a folder in Obsidian carries a session's saved files along.
+	const s2 = normalizeSettings({ claude: [{}], chatgpt: [{}] }).settings;
+	s2.claude[0]!.desktop.index.x = { updated: 'u', size: 1, mtime: 1, source: 's', md: 'Old/a.md', synced: 'x', files: { k: 'Old/Artifacts/a/Report.md' } };
+	followRename(s2, 'Old', 'New');
+	expect('follow: saved session files move with their folder', s2.claude[0]!.desktop.index.x!.files!.k === 'New/Artifacts/a/Report.md');
 }
 
 /** Real session files -> in-memory vault: shows where each session would be saved. Nothing on disk changes. */

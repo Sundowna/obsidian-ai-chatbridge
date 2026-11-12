@@ -3,6 +3,7 @@
 // Like the other providers, files are only ever CREATED: a changed session gets a new
 // "(updated …)" transcript next to the old one.
 
+import { guardMissing } from '../missing-guard';
 import { FileSystemAdapter, TFile } from 'obsidian';
 import type AIChatBridge from '../main';
 import { appendLog } from '../log';
@@ -131,6 +132,11 @@ export async function runDesktopSync(
 
 	try {
 		if (!fs) throw new Error('Desktop app chats can only be read on a computer.');
+		// Many saved transcripts missing means a wrong sync history, not deletions: restore nothing.
+		for (const which of APPS) {
+			const saved = accountsFor(s, which).filter((a) => a.desktop.enabled).flatMap((a) => Object.values(a.desktop.index));
+			guardMissing(`${APP_LABEL[which]} sessions`, saved.length, saved.filter((e) => !exists(e.md)).length);
+		}
 		const todo: Todo[] = [];
 		let codexTitleMap: Map<string, string> | null = null;
 		let codexProjects: CodexProjects | null = null;
