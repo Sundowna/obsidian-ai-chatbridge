@@ -7,6 +7,7 @@
 // or "ai-title" records. Many other record types (attachments, request logs, file
 // history) are bookkeeping and are left out of the transcript.
 
+import { IMAGE_MARKER, SessionFileCollector } from './session-files';
 import { jsonLines, obj, str, titleFrom, TurnBuilder } from './turns';
 import type { DesktopSession } from './types';
 
@@ -17,7 +18,8 @@ const SKIP_PROMPT = /^<(task-notification|local-command-stdout|local-command-std
 
 /** Your prompt as you wrote it: app-added blocks removed, slash commands and pasted text unwrapped. */
 export function cleanClaudePrompt(text: string): string {
-	let t = text.replace(STRIP_BLOCKS, '').trim();
+	// "[Image: source: <temp path>]": the app's note for a pasted image, which is shown itself.
+	let t = text.replace(STRIP_BLOCKS, '').replace(/^\[Image: source: [^\]\n]*\]\s*$/gm, '').trim();
 	if (!t || SKIP_PROMPT.test(t)) return '';
 	const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(t);
 	if (cmd) {
@@ -34,6 +36,7 @@ export function cleanClaudePrompt(text: string): string {
 export function parseClaudeSession(text: string, fileId: string, appTitles: Map<string, string> = new Map()): DesktopSession | null {
 	const records = jsonLines(text);
 	const b = new TurnBuilder();
+	const files = new SessionFileCollector();
 	let id: string | undefined;
 	let customTitle: string | undefined;
 	let aiTitle: string | undefined;
@@ -45,7 +48,7 @@ export function parseClaudeSession(text: string, fileId: string, appTitles: Map<
 	let updated: string | undefined;
 	let sidechain: boolean | undefined;
 
-	for (const r of records) {
+	for (const [n, r] of records.entries()) {
 		const type = str(r.type);
 		const time = str(r.timestamp);
 		if (time) {
@@ -65,20 +68,23 @@ export function parseClaudeSession(text: string, fileId: string, appTitles: Map<
 		const content = msg?.content;
 
 		if (type === 'user') {
+			if (Array.isArray(content)) for (const c of content) if (obj(c)?.type === 'tool_result') files.toolResult(obj(c)!);
 			if (r.isMeta === true || r.isCompactSummary === true) continue;
+			const recordId = str(r.uuid) ?? String(n);
 			const pieces: string[] = [];
 			if (typeof content === 'string') pieces.push(cleanClaudePrompt(content));
 			else if (Array.isArray(content)) {
 				for (const c of content) {
 					const block = obj(c);
 					if (block?.type === 'text') pieces.push(cleanClaudePrompt(str(block.text) ?? ''));
-					else if (block?.type === 'image') pieces.push('*[image]*');
+					else if (block?.type === 'image') pieces.push(files.image(recordId, block) ?? '*[image]*');
+					else if (block?.type === 'document') files.document(recordId, block);
 					// tool_result: the tool's answer, part of the assistant's work
 				}
 			}
 			const prompt = pieces.filter(Boolean).join('\n\n');
 			if (prompt) {
-				firstPrompt ??= prompt;
+				firstPrompt ??= prompt.replace(IMAGE_MARKER, '').trim() || undefined;
 				b.user(prompt, time);
 			}
 			continue;
@@ -89,7 +95,10 @@ export function parseClaudeSession(text: string, fileId: string, appTitles: Map<
 		for (const c of content) {
 			const block = obj(c);
 			if (block?.type === 'text') b.assistant(str(block.text) ?? '', time);
-			else if (block?.type === 'tool_use' || block?.type === 'server_tool_use') b.tool(time);
+			else if (block?.type === 'tool_use' || block?.type === 'server_tool_use') {
+				b.tool(time);
+				files.toolUse(block, str(r.cwd) ?? cwd);
+			}
 			// thinking / redacted_thinking: private reasoning, kept out of the transcript
 		}
 	}
@@ -106,5 +115,6 @@ export function parseClaudeSession(text: string, fileId: string, appTitles: Map<
 		model: model === '<synthetic>' ? undefined : model,
 		isSubagent: sidechain === true,
 		turns,
+		...files.result(),
 	};
 }

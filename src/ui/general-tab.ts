@@ -120,6 +120,15 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 				await save();
 			}),
 		);
+	new Setting(el)
+		.setName('Save session files')
+		.setDesc('Claude Code and Codex: images and files you attached go to Attachments/, documents and images the assistant wrote or sent you to Artifacts/, next to the transcript. Published artifacts and docs are linked. Sessions synced earlier get their files on the next sync; their transcripts stay as they are.')
+		.addToggle((t) =>
+			t.setValue(d.saveFiles).onChange(async (v) => {
+				d.saveFiles = v;
+				await save();
+			}),
+		);
 
 	new Setting(el).setName('Index').setHeading();
 	const last = plugin.lastReindex;

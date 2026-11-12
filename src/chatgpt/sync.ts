@@ -1,6 +1,7 @@
 // Preserve each conversation capture before downloading its assets. The saved
 // index and capture journal let the next run continue after a stop.
 
+import { guardMissing } from '../missing-guard';
 import { TFile, TFolder } from 'obsidian';
 import type AIChatBridge from '../main';
 import { loginRef, withAccount } from '../accounts';
@@ -436,6 +437,10 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			entry.viewHash = hash;
 			await plugin.saveSettings();
 		};
+
+		// Before anything is written: many saved chats missing means a wrong sync history, not deletions.
+		const savedChats = Object.values(g.index);
+		guardMissing('ChatGPT chats', savedChats.length, savedChats.filter((e) => !exists(e.md) || !exists(e.json)).length);
 
 		const done = new Set<string>();
 		for (const [i, item] of batch.entries()) {

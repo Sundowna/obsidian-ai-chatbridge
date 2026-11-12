@@ -172,12 +172,17 @@ export async function moveToAppLayout(app: App, s: Settings, save: () => Promise
 		const src = app.vault.getAbstractFileByPath(normalizePath(m.from));
 		// Nested: the old folder is inside the new one (or the other way round) – only switch the setting.
 		const nested = m.to.startsWith(`${m.from}/`) || m.from.startsWith(`${m.to}/`);
-		if (src instanceof TFolder && !nested) {
-			await moveInto(app, s, src, normalizePath(m.to), r);
-			r.from.push(m.from);
+		try {
+			if (src instanceof TFolder && !nested) {
+				r.from.push(m.from);
+				await moveInto(app, s, src, normalizePath(m.to), r);
+			}
+		} finally {
+			// Even if the move stopped halfway: what moved is in the index already, and new chats
+			// must go to the new folder, not back into the old one.
+			m.set(s, m.to);
+			await save();
 		}
-		m.set(s, m.to);
-		await save();
 	}
 	// Old app folders ("Claude Desktop") left empty by the moves.
 	for (const from of r.from) {

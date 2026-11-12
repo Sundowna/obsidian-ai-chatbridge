@@ -3,7 +3,8 @@
 // Like the other providers, files are only ever CREATED: a changed session gets a new
 // "(updated …)" transcript next to the old one.
 
-import { TFile } from 'obsidian';
+import { guardMissing } from '../missing-guard';
+import { FileSystemAdapter, TFile } from 'obsidian';
 import type AIChatBridge from '../main';
 import { appendLog } from '../log';
 import { baseName, dailyNoteName, localStamp, safeTitle, tagAccount } from '../naming';
@@ -12,6 +13,7 @@ import { cleanFolder } from '../settings';
 import { createNew, ensureFolder } from '../vaultio';
 import { masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
 import { parseClaudeSession } from './claude-code';
+import { saveSessionFiles, type FileSaveContext } from './session-save';
 import { codexTitles, parseCodexSession } from './codex';
 import { findLatestJson } from './leveldb';
 import { renderDesktopTranscript, sessionFolderName } from './render';
@@ -34,6 +36,10 @@ export interface DesktopSyncResult {
 	empty: number;
 	written: string[];
 	restored: string[];
+	/** Pasted images and files Claude made, copied into the vault. */
+	filesSaved: number;
+	/** Sessions synced before files were saved, whose files were added now. */
+	filesBackfilled: number;
 	stopped?: string;
 }
 
@@ -103,9 +109,15 @@ export async function runDesktopSync(
 	const app = plugin.app;
 	const s = plugin.settings;
 	const d = s.desktop;
-	const result: DesktopSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [] };
+	const result: DesktopSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], filesSaved: 0, filesBackfilled: 0 };
 	const exists = (p: string | undefined): boolean => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
 	const quietMs = Math.max(0, d.quietMinutes) * 60_000;
+	const adapter = app.vault.adapter;
+	const fileCtx: FileSaveContext | null = fs ? { app, fs, vaultBase: adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined } : null;
+	/** Sessions synced before their files were saved (or since changed), whose files are due. */
+	const filesDue = (e: DesktopIndexEntry | undefined): boolean => d.saveFiles && !!e && e.filesChecked !== e.updated;
+	/** Saved files of an entry that are still in the vault. */
+	const savedFiles = (e: DesktopIndexEntry | undefined) => new Map(Object.entries(e?.files ?? {}).filter(([, p]) => exists(p)));
 
 	const pathTaken = (p: string) => app.vault.getAbstractFileByPath(p) !== null;
 	/** A stem free for both the .md and the raw .jsonl. */
@@ -120,6 +132,11 @@ export async function runDesktopSync(
 
 	try {
 		if (!fs) throw new Error('Desktop app chats can only be read on a computer.');
+		// Many saved transcripts missing means a wrong sync history, not deletions: restore nothing.
+		for (const which of APPS) {
+			const saved = accountsFor(s, which).filter((a) => a.desktop.enabled).flatMap((a) => Object.values(a.desktop.index));
+			guardMissing(`${APP_LABEL[which]} sessions`, saved.length, saved.filter((e) => !exists(e.md)).length);
+		}
 		const todo: Todo[] = [];
 		let codexTitleMap: Map<string, string> | null = null;
 		let codexProjects: CodexProjects | null = null;
@@ -197,7 +214,7 @@ export async function runDesktopSync(
 					continue;
 				}
 				const known = bySource.get(key);
-				if (known && known.size === file.size && known.mtime === file.mtime && exists(known.md)) {
+				if (known && known.size === file.size && known.mtime === file.mtime && exists(known.md) && !filesDue(known)) {
 					result.unchanged++;
 					continue;
 				}
@@ -236,12 +253,22 @@ export async function runDesktopSync(
 					Object.assign(entry, { size: file.size, mtime: file.mtime, source: file.path });
 					if (exists(entry.md)) {
 						result.unchanged++;
+						if (filesDue(entry) && fileCtx) {
+							// Synced before files were saved: add them next to the transcript, which stays as it is.
+							const folder = entry.md.split('/').slice(0, -1).join('/');
+							const stem = entry.md.split('/').pop()!.replace(/\.md$/, '');
+							const saved = await saveSessionFiles(fileCtx, session, folder, stem, entry.files);
+							entry.files = { ...entry.files, ...saved.files };
+							entry.filesChecked = entry.updated;
+							result.filesSaved += saved.saved;
+							if (saved.saved) result.filesBackfilled++;
+						}
 						continue;
 					}
 					// Transcript deleted from the vault: write it again under the same name, so links stay valid.
 					const folder = entry.md.split('/').slice(0, -1).join('/');
 					await ensureFolder(app, folder);
-					await createNew(app, entry.md, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: entry.raw && exists(entry.raw) ? rawLink(folder, entry.raw) : undefined }), owner.label));
+					await createNew(app, entry.md, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: entry.raw && exists(entry.raw) ? rawLink(folder, entry.raw) : undefined, files: savedFiles(entry) }), owner.label));
 					result.restored.push(entry.md.split('/').pop()!.replace(/\.md$/, ''));
 					continue;
 				}
@@ -272,8 +299,18 @@ export async function runDesktopSync(
 			const mdPath = `${folder}/${stem}.md`;
 			const rawPath = d.keepRaw ? `${rawFolder}/${stem}.jsonl` : undefined;
 			if (rawPath) await createNew(app, rawPath, text);
-			await createNew(app, mdPath, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? rawLink(folder, rawPath) : undefined }), owner.label));
-			conf.index[session.id] = { updated: session.updated, size: file.size, mtime: file.mtime, source: file.path, md: mdPath, raw: rawPath, synced: new Date().toISOString() };
+			const before = conf.index[session.id];
+			let files: Record<string, string> | undefined;
+			if (d.saveFiles && fileCtx) {
+				const saved = await saveSessionFiles(fileCtx, session, folder, stem, before?.files);
+				files = saved.files;
+				result.filesSaved += saved.saved;
+			}
+			await createNew(app, mdPath, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? rawLink(folder, rawPath) : undefined, files: new Map(Object.entries(files ?? {})) }), owner.label));
+			conf.index[session.id] = {
+				updated: session.updated, size: file.size, mtime: file.mtime, source: file.path, md: mdPath, raw: rawPath, synced: new Date().toISOString(),
+				...(files ? { files: { ...before?.files, ...files }, filesChecked: session.updated } : {}),
+			};
 			await plugin.saveSettings();
 			result.written.push(stem);
 			if (isUpdate) result.changedCount++;
@@ -289,12 +326,13 @@ export async function runDesktopSync(
 
 async function writeLog(plugin: AIChatBridge, r: DesktopSyncResult): Promise<void> {
 	// Quiet runs (nothing written, nothing wrong) leave no log line.
-	if (!r.written.length && !r.restored.length && !r.stopped) return;
+	if (!r.written.length && !r.restored.length && !r.filesSaved && !r.stopped) return;
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 	const parts = [`Desktop apps: ${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
 	if (r.active) parts.push(`${r.active} still active (next run)`);
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
+	if (r.filesSaved) parts.push(`${r.filesSaved} file${r.filesSaved === 1 ? '' : 's'} saved${r.filesBackfilled ? ` (${r.filesBackfilled} older session${r.filesBackfilled === 1 ? '' : 's'})` : ''}`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion: ${r.restored.map((w) => `[[${w}]]`).join(', ')}`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – ${parts.join(', ')}`;
 	if (r.written.length) {

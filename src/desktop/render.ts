@@ -1,6 +1,7 @@
 // Markdown transcript and folder name for a desktop session. Pure code, no Obsidian.
 
 import { localDateTime, safeTitle } from '../naming';
+import { IMAGE_MARKER } from './session-files';
 import { APP_LABEL, ASSISTANT_NAME, type DesktopSession } from './types';
 
 /** YAML-safe string (JSON strings are valid YAML double-quoted strings). */
@@ -26,6 +27,31 @@ export interface DesktopRenderMeta {
 	source: string;
 	/** Vault name of the raw copy, if kept. */
 	rawFileName?: string;
+	/** Saved files: file key -> vault path. */
+	files?: Map<string, string>;
+}
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const inline = (key: string) => key.startsWith('image:') || key.startsWith('attach:');
+const fileLink = (path: string, name: string) => (IMAGE_EXT.test(path) ? `![[${path}]]` : `📎 [[${path}|${name}]]`);
+
+/** Files and published artifacts not shown inside a message, listed at the end. */
+function filesSection(s: DesktopSession, files: Map<string, string>): string[] {
+	const out: string[] = [];
+	const list = (kind: 'attachment' | 'artifact', heading: string) => {
+		// Pasted images and attached files are shown in your message already.
+		const lines = (s.files ?? []).filter((f) => f.kind === kind && !inline(f.key)).flatMap((f) => {
+			const p = files.get(f.key);
+			return p ? [fileLink(p, f.name)] : [];
+		});
+		if (lines.length) out.push(`### ${heading}`, '', ...lines.map((l) => `- ${l}`), '');
+	};
+	list('attachment', 'Attachments');
+	list('artifact', 'Artifacts');
+	if (s.links?.length) {
+		out.push('### On claude.ai', '', ...s.links.map((l) => `- [${l.title.replace(/[[\]]/g, '')}](${l.url})${l.kind === 'doc' ? ' (Claude Doc)' : ''}`), '');
+	}
+	return out.length ? ['## Files', '', ...out] : [];
 }
 
 export function renderDesktopTranscript(s: DesktopSession, meta: DesktopRenderMeta): string {
@@ -42,10 +68,17 @@ export function renderDesktopTranscript(s: DesktopSession, meta: DesktopRenderMe
 	const body: string[] = [];
 	const name = ASSISTANT_NAME[s.app];
 	for (const t of s.turns) {
-		const parts = t.parts.map((p) => ('text' in p ? p.text : toolLine(p.tools)));
+		const files = meta.files ?? new Map<string, string>();
+		const parts = t.parts.map((p) => ('text' in p ? p.text.replace(IMAGE_MARKER, (_m, key: string) => {
+			const path = files.get(key);
+			const f = s.files?.find((x) => x.key === key);
+			if (path) return fileLink(path, f?.name ?? 'file');
+			return key.startsWith('image:') ? '*[image]*' : `📎 ${f?.name ?? 'file'}`;
+		}) : toolLine(p.tools)));
 		if (!parts.length) continue;
 		const when = t.time ? ` · ${localDateTime(t.time)}` : '';
 		body.push(`## ${t.role === 'user' ? 'You' : name}${when}`, '', parts.join('\n\n'), '');
 	}
+	body.push(...filesSection(s, meta.files ?? new Map<string, string>()));
 	return fm.join('\n') + body.join('\n');
 }
