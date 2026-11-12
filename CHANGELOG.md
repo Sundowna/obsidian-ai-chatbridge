@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.28.0 - 2026-11-12
+
+### New
+- **Refresh the Hermes profile list** - **Refresh** in the Hermes tab's Profiles heading looks for profiles again (`HERMES_HOME`, the Hermes `profiles/` folder) and checks the ones you added by path. It says what changed, e.g. "2 new profiles found, 1 no longer exists". New profiles are added turned off and tagged **New**
+- **No longer found** - Hermes profiles whose `state.db` is gone are listed at the bottom, with the reason ("Folder not found" or "No state.db in this folder") and how many sessions they saved. Each keeps its switch: left on, it syncs again as soon as it is back. **Remove** takes it off the list; its notes stay in the vault, and you are asked first if it saved any. Nothing is removed by itself
+
+### Changed
+- The Overview's Hermes card counts only profiles that can be found, e.g. "2 of 5 agents on, 1 not found"
+
+### Fixes
+- **A missing Hermes profile no longer stops the sync** - a profile that was turned on but whose `state.db` was deleted stopped the whole Hermes sync with "…/state.db does not exist". It is now skipped and the other profiles still sync. A manual sync's message names the profiles it skipped
+
 ## 0.27.0 - 2026-11-12
 
 ### New

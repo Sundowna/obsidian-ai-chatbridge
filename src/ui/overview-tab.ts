@@ -3,6 +3,7 @@
 import { setIcon } from 'obsidian';
 import { accountsOf, loginRef, PROVIDER_LABEL, type AnyAccount } from '../accounts';
 import { isLoggedIn, type Provider } from '../login';
+import { profileGone } from '../hermes/profiles';
 import { bindSyncButton, count, type PanelContext } from './fields';
 import { hermesIcon, providerIcon } from './icons';
 import { addAccountButton } from './provider-tab';
@@ -49,7 +50,10 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 /** Hermes Agent: how many agents (profiles) are on, and what they saved. Selecting the title opens its tab. */
 function hermesCard(ctx: PanelContext, parent: HTMLElement): void {
 	const h = ctx.plugin.settings.hermes;
-	const on = h.profiles.filter((p) => p.enabled);
+	// Profiles whose state.db is gone are skipped by the sync, so they don't count as agents that are on.
+	const gone = h.profiles.filter((p) => profileGone(p));
+	const found = h.profiles.filter((p) => !gone.includes(p));
+	const on = found.filter((p) => p.enabled);
 	const saved = h.profiles.reduce((n, p) => n + Object.keys(p.index).length, 0);
 	const card = parent.createDiv({ cls: 'ccs-card' });
 	const head = card.createDiv({ cls: 'ccs-card-head' });
@@ -58,7 +62,8 @@ function hermesCard(ctx: PanelContext, parent: HTMLElement): void {
 
 	const agents = surfaceLine(card, 'bot', 'Agents');
 	agents.dot.toggleClass('is-on', on.length > 0);
-	agents.text.setText(h.profiles.length ? `${on.length} of ${count(h.profiles.length, 'agent')} on` : 'None found yet');
+	const missing = gone.length ? `, ${gone.length} not found` : '';
+	agents.text.setText(found.length ? `${on.length} of ${count(found.length, 'agent')} on${missing}` : gone.length ? `${count(gone.length, 'agent')} not found` : 'None found yet');
 	const chats = surfaceLine(card, 'messages-square', 'Chats');
 	chats.dot.toggleClass('is-on', saved > 0);
 	chats.text.setText(count(saved, 'chat'));

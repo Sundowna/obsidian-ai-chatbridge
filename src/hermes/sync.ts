@@ -11,6 +11,7 @@ import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
 import { buildSession, columns, messagesSql, revisionOf, sessionsSql, toMessageRow, toSessionRow } from './parse';
+import { profileGone } from './profiles';
 import { isPrivatePath, nodeRequire, pickBackend, type Snapshot, type SqliteBackend } from './reader';
 import { renderHermesTranscript } from './render';
 import type { HermesMessageRow, HermesProfile, HermesSession, HermesSessionRow } from './types';
@@ -28,6 +29,8 @@ export interface HermesSyncResult {
 	restored: string[];
 	/** Which SQLite reader was used. */
 	backend?: string;
+	/** Profiles turned on whose state.db is gone: skipped, the others still sync. */
+	missing: string[];
 	stopped?: string;
 }
 
@@ -68,7 +71,7 @@ export async function runHermesSync(
 	const app = plugin.app;
 	const s = plugin.settings;
 	const h = s.hermes;
-	const result: HermesSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [] };
+	const result: HermesSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], missing: [] };
 	const exists = (p: string | undefined): boolean => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
 	const quietMs = Math.max(0, s.desktop.quietMinutes) * 60_000;
 	let budget = s.maxChatsPerRun > 0 ? s.maxChatsPerRun : Infinity;
@@ -77,14 +80,20 @@ export async function runHermesSync(
 		if (!nodeRequire()) throw new Error('Hermes chats can only be read on a computer.');
 		const base = cleanFolder(h.folder);
 		if (!base) throw new Error('The Hermes folder setting is empty or invalid.');
-		const profiles = h.profiles.filter((p) => p.enabled && (!only || p.id === only));
+		// A profile whose state.db is gone (deleted, renamed, or a drive not plugged in) is skipped,
+		// so one stale entry never stops the others. It stays in the list until you remove it.
+		const wanted = h.profiles.filter((p) => p.enabled && (!only || p.id === only));
+		// Private before missing: a Private profile is refused even when its folder is gone.
+		const secret = wanted.find((p) => isPrivatePath(p.path));
+		if (secret) throw new Error(`Profile "${secret.label}" is inside a Private folder and is never read.`);
+		const profiles = wanted.filter((p) => !profileGone(p));
+		result.missing = wanted.filter((p) => !profiles.includes(p)).map((p) => p.label);
 		if (!profiles.length) return result;
 		const reader = backend === undefined ? await pickBackend(h.pythonPath, profiles.map((p) => p.path)) : backend;
 		if (!reader) throw new Error('No way to read SQLite here: Obsidian has no built-in SQLite and no working Python was found. Set one under Hermes → Advanced → Python.');
 		result.backend = reader.name;
 
 		for (const profile of profiles) {
-			if (isPrivatePath(profile.path)) throw new Error(`Profile "${profile.label}" is inside a Private folder and is never read.`);
 			progress(`Hermes ${profile.label}: reading sessions…`);
 			const db = await reader.snapshot(`${profile.path}/state.db`);
 			try {
@@ -191,6 +200,7 @@ async function syncProfile(
 }
 
 async function writeLog(plugin: AIChatBridge, r: HermesSyncResult): Promise<void> {
+	// A skipped profile alone is not worth a log line on every auto-sync; the Hermes tab lists it.
 	if (!r.written.length && !r.restored.length && !r.stopped) return;
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -204,6 +214,7 @@ async function writeLog(plugin: AIChatBridge, r: HermesSyncResult): Promise<void
 		line += `: ${shown}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;
 	}
 	if (r.backend) line += ` (via ${r.backend})`;
+	if (r.missing.length) line += ` – skipped, not found: ${r.missing.join(', ')}`;
 	if (r.stopped) line += ` – **stopped:** ${r.stopped}`;
 	try {
 		await appendLog(plugin.app, plugin.settings.logPath, line, now);

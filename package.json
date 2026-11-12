@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-ai-chatbridge",
-	"version": "0.27.0",
+	"version": "0.28.0",
 	"description": "Obsidian plugin: sync claude.ai, ChatGPT, Proton Lumo, Gemini, AI Studio and Hermes Agent chats into the vault as raw JSON plus a Markdown transcript",
 	"private": true,
 	"main": "main.js",

@@ -903,3 +903,50 @@
 	align-items: center;
 	gap: 8px;
 }
+
+/* Hermes: the Refresh button carries an icon that spins while it looks for profiles. */
+.ccs-settings .ccs-hermes-refresh {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ccs-settings .ccs-hermes-refresh .ccs-glyph svg {
+	width: 14px;
+	height: 14px;
+}
+
+.ccs-settings .ccs-hermes-refresh.is-busy .ccs-glyph {
+	animation: ccs-spin 0.9s linear infinite;
+}
+
+@keyframes ccs-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ccs-settings .ccs-hermes-refresh.is-busy .ccs-glyph {
+		animation: none;
+	}
+}
+
+.ccs-settings .ccs-hermes-refresh-status:empty {
+	display: none;
+}
+
+/* A "New" tag after a profile's name, as in the project picker. */
+.ccs-settings .ccs-hermes-profiles-head ~ .setting-item .ccs-picker-tag {
+	margin-left: 8px;
+	vertical-align: 1px;
+}
+
+/* Profiles that can't be found: dimmed, so the ones that sync stand out. */
+.ccs-settings .ccs-hermes-missing .setting-item-name {
+	color: var(--text-muted);
+}
+
+.ccs-settings .ccs-hermes-missing-why {
+	color: var(--text-warning);
+}
