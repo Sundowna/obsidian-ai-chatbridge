@@ -5,7 +5,7 @@
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with, endorsed by, or supported by Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is ever changed or deleted on the provider's side. The plugin reads the same web endpoints your browser uses, which can change without notice.
 
-**New in 0.26:** [Hermes Agent](#hermes-agent) chats, with every tool step you can open. See the [changelog](CHANGELOG.md) for everything else.
+**New in 0.28:** **Refresh** for the [Hermes Agent](#hermes-agent) profile list, and profiles that are gone no longer stop the sync. See the [changelog](CHANGELOG.md) for everything else.
 
 ## Contents
 
@@ -153,8 +153,10 @@ Some chats only live on your computer: Claude Code sessions from the Claude desk
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research keeps every chat in a SQLite database, one per profile: `state.db` in your Hermes home folder, and `profiles/<name>/state.db` for each named profile. Chats can come from any model - Claude, GPT, a local Qwen - and each note records which one.
 
 1. Open the **Hermes** tab. Your profiles are found by themselves (`HERMES_HOME`, else the default Hermes folder) and listed **turned off**
-2. Turn on the profiles you want. Missing one? **Add by path** and point it at the folder that holds `state.db`
+2. Turn on the profiles you want. Missing one? **Add by path** and point it at the folder that holds `state.db`, or select **Refresh** after adding a profile in Hermes
 3. Select **Sync** next to a profile, **Sync now** for all of them, or run **Sync Hermes Agent chats**. **Sync all** includes them too
+
+Deleted a profile in Hermes? It moves to **No longer found** at the bottom of the list and the sync skips it. Its notes stay in the vault. Leave it on if it may come back, or select **Remove**.
 
 Each chat lands in `AI Chats/Hermes/<profile>/` with `source: hermes`, `hermes_profile`, `model` and `session_id` in its properties, dates as `YYYY-MM-DD`. Tool calls appear as a collapsed callout you can open:
 
