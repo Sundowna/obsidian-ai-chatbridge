@@ -1,7 +1,7 @@
 // Markdown transcript and folder name for a desktop session. Pure code, no Obsidian.
 
 import { localDateTime, safeTitle } from '../naming';
-import { IMAGE_MARKER } from './claude-files';
+import { IMAGE_MARKER } from './session-files';
 import { APP_LABEL, ASSISTANT_NAME, type DesktopSession } from './types';
 
 /** YAML-safe string (JSON strings are valid YAML double-quoted strings). */
@@ -32,14 +32,15 @@ export interface DesktopRenderMeta {
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const inline = (key: string) => key.startsWith('image:') || key.startsWith('attach:');
 const fileLink = (path: string, name: string) => (IMAGE_EXT.test(path) ? `![[${path}]]` : `📎 [[${path}|${name}]]`);
 
 /** Files and published artifacts not shown inside a message, listed at the end. */
 function filesSection(s: DesktopSession, files: Map<string, string>): string[] {
 	const out: string[] = [];
 	const list = (kind: 'attachment' | 'artifact', heading: string) => {
-		// Pasted images are shown in your message already.
-		const lines = (s.files ?? []).filter((f) => f.kind === kind && !f.key.startsWith('image:')).flatMap((f) => {
+		// Pasted images and attached files are shown in your message already.
+		const lines = (s.files ?? []).filter((f) => f.kind === kind && !inline(f.key)).flatMap((f) => {
 			const p = files.get(f.key);
 			return p ? [fileLink(p, f.name)] : [];
 		});
@@ -70,7 +71,9 @@ export function renderDesktopTranscript(s: DesktopSession, meta: DesktopRenderMe
 		const files = meta.files ?? new Map<string, string>();
 		const parts = t.parts.map((p) => ('text' in p ? p.text.replace(IMAGE_MARKER, (_m, key: string) => {
 			const path = files.get(key);
-			return path ? `![[${path}]]` : '*[image]*';
+			const f = s.files?.find((x) => x.key === key);
+			if (path) return fileLink(path, f?.name ?? 'file');
+			return key.startsWith('image:') ? '*[image]*' : `📎 ${f?.name ?? 'file'}`;
 		}) : toolLine(p.tools)));
 		if (!parts.length) continue;
 		const when = t.time ? ` · ${localDateTime(t.time)}` : '';

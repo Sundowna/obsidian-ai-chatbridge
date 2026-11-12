@@ -1,7 +1,7 @@
 // Chats that only exist on this computer: sessions saved by the Claude desktop app
 // (Claude Code, Cowork) and the ChatGPT/Codex desktop app. Pure types, no Obsidian.
 
-import type { SessionFile, SessionLink } from './claude-files';
+import type { SessionFile, SessionLink } from './session-files';
 
 export type DesktopApp = 'claude' | 'codex';
 
@@ -44,7 +44,7 @@ export interface DesktopSession {
 	/** Which login made this session: claude.ai organization or ChatGPT workspace ID, if known. */
 	ownerId?: string;
 	turns: DesktopTurn[];
-	/** Claude: images you pasted, files Claude wrote or sent you. */
+	/** Images and files you attached, files the assistant wrote or sent you. */
 	files?: SessionFile[];
 	/** Claude: artifacts and Claude Docs it published on claude.ai. */
 	links?: SessionLink[];
@@ -62,7 +62,7 @@ export interface DesktopIndexEntry {
 	/** Copy of the source .jsonl, when "Keep the raw session file" is on. */
 	raw?: string;
 	synced: string;
-	/** Saved files of this session: file key (see claude-files.ts) -> vault path. */
+	/** Saved files of this session: file key (see session-files.ts) -> vault path. */
 	files?: Record<string, string>;
 	/** Session version ("updated") whose files were last saved, so older syncs get them once. */
 	filesChecked?: string;
@@ -92,6 +92,6 @@ export interface DesktopSettings {
 	quietMinutes: number;
 	/** Include helper runs (subagents, guardian reviews). */
 	includeSubagents: boolean;
-	/** Claude: also save pasted images and the files Claude made (Attachments/ and Artifacts/ next to the transcript). */
+	/** Claude Code and Codex: also save attached images and files, and the files the assistant made (Attachments/ and Artifacts/ next to the transcript). */
 	saveFiles: boolean;
 }

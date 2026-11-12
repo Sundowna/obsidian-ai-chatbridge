@@ -12,7 +12,7 @@ import { cleanFolder } from '../settings';
 import { createNew, ensureFolder } from '../vaultio';
 import { masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
 import { parseClaudeSession } from './claude-code';
-import { saveClaudeFiles, type FileSaveContext } from './claude-save';
+import { saveSessionFiles, type FileSaveContext } from './session-save';
 import { codexTitles, parseCodexSession } from './codex';
 import { findLatestJson } from './leveldb';
 import { renderDesktopTranscript, sessionFolderName } from './render';
@@ -113,8 +113,8 @@ export async function runDesktopSync(
 	const quietMs = Math.max(0, d.quietMinutes) * 60_000;
 	const adapter = app.vault.adapter;
 	const fileCtx: FileSaveContext | null = fs ? { app, fs, vaultBase: adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined } : null;
-	/** Claude sessions synced before their files were saved (or since changed), whose files are due. */
-	const filesDue = (which: DesktopApp, e: DesktopIndexEntry | undefined): boolean => d.saveFiles && which === 'claude' && !!e && e.filesChecked !== e.updated;
+	/** Sessions synced before their files were saved (or since changed), whose files are due. */
+	const filesDue = (e: DesktopIndexEntry | undefined): boolean => d.saveFiles && !!e && e.filesChecked !== e.updated;
 	/** Saved files of an entry that are still in the vault. */
 	const savedFiles = (e: DesktopIndexEntry | undefined) => new Map(Object.entries(e?.files ?? {}).filter(([, p]) => exists(p)));
 
@@ -208,7 +208,7 @@ export async function runDesktopSync(
 					continue;
 				}
 				const known = bySource.get(key);
-				if (known && known.size === file.size && known.mtime === file.mtime && exists(known.md) && !filesDue(which, known)) {
+				if (known && known.size === file.size && known.mtime === file.mtime && exists(known.md) && !filesDue(known)) {
 					result.unchanged++;
 					continue;
 				}
@@ -247,11 +247,11 @@ export async function runDesktopSync(
 					Object.assign(entry, { size: file.size, mtime: file.mtime, source: file.path });
 					if (exists(entry.md)) {
 						result.unchanged++;
-						if (filesDue(which, entry) && fileCtx) {
+						if (filesDue(entry) && fileCtx) {
 							// Synced before files were saved: add them next to the transcript, which stays as it is.
 							const folder = entry.md.split('/').slice(0, -1).join('/');
 							const stem = entry.md.split('/').pop()!.replace(/\.md$/, '');
-							const saved = await saveClaudeFiles(fileCtx, session, folder, stem, entry.files);
+							const saved = await saveSessionFiles(fileCtx, session, folder, stem, entry.files);
 							entry.files = { ...entry.files, ...saved.files };
 							entry.filesChecked = entry.updated;
 							result.filesSaved += saved.saved;
@@ -295,8 +295,8 @@ export async function runDesktopSync(
 			if (rawPath) await createNew(app, rawPath, text);
 			const before = conf.index[session.id];
 			let files: Record<string, string> | undefined;
-			if (d.saveFiles && session.app === 'claude' && fileCtx) {
-				const saved = await saveClaudeFiles(fileCtx, session, folder, stem, before?.files);
+			if (d.saveFiles && fileCtx) {
+				const saved = await saveSessionFiles(fileCtx, session, folder, stem, before?.files);
 				files = saved.files;
 				result.filesSaved += saved.saved;
 			}

@@ -1,11 +1,11 @@
-// Saves a Claude Code session's files into the vault, next to its transcript:
-// <folder>/Attachments/<stem>/ (what you pasted) and <folder>/Artifacts/<stem>/ (what Claude made),
+// Saves a desktop session's files (Claude Code, Codex) into the vault, next to its transcript:
+// <folder>/Attachments/<stem>/ (what you pasted) and <folder>/Artifacts/<stem>/ (what Claude or Codex made),
 // the same layout as the claude.ai chats. Files outside the vault are only read, never changed.
 
 import { App, TFile } from 'obsidian';
 import { KIND_FOLDER, numbered, safeFileName } from '../files';
 import { createNew, ensureFolder, freeFileName } from '../vaultio';
-import type { SessionFile } from './claude-files';
+import type { SessionFile } from './session-files';
 import { claudeHome, sameOrUnder, type DesktopFs } from './scan';
 import type { DesktopSession } from './types';
 
@@ -61,7 +61,7 @@ async function bytesOf(ctx: FileSaveContext, f: SessionFile): Promise<ArrayBuffe
 	return null;
 }
 
-export async function saveClaudeFiles(
+export async function saveSessionFiles(
 	ctx: FileSaveContext,
 	session: DesktopSession,
 	folder: string,

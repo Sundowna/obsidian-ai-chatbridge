@@ -7,7 +7,7 @@
 // or "ai-title" records. Many other record types (attachments, request logs, file
 // history) are bookkeeping and are left out of the transcript.
 
-import { IMAGE_MARKER, SessionFileCollector } from './claude-files';
+import { IMAGE_MARKER, SessionFileCollector } from './session-files';
 import { jsonLines, obj, str, titleFrom, TurnBuilder } from './turns';
 import type { DesktopSession } from './types';
 

@@ -121,8 +121,8 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 	new Setting(el)
-		.setName('Save Claude Code files')
-		.setDesc('Pasted images go to Attachments/, documents and images Claude wrote or sent you to Artifacts/, next to the transcript. Published artifacts and docs are linked. Sessions synced earlier get their files on the next sync; their transcripts stay as they are.')
+		.setName('Save session files')
+		.setDesc('Claude Code and Codex: images and files you attached go to Attachments/, documents and images the assistant wrote or sent you to Artifacts/, next to the transcript. Published artifacts and docs are linked. Sessions synced earlier get their files on the next sync; their transcripts stay as they are.')
 		.addToggle((t) =>
 			t.setValue(d.saveFiles).onChange(async (v) => {
 				d.saveFiles = v;

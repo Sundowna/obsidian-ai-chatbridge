@@ -1,4 +1,5 @@
-// Files that belong to a Claude Code session (desktop app Code tab). Pure code, no Obsidian.
+// Files that belong to a desktop session: Claude Code (Claude desktop app's Code tab) and
+// Codex (ChatGPT desktop app). Pure code, no Obsidian.
 //
 // Shapes seen 2026-11-12 in ~/.claude/projects/<folder>/<session>.jsonl:
 //   You:    "user" records with { type: "image", source: { type: "base64", media_type, data } }
@@ -8,6 +9,14 @@
 //           "SendUserFile" { files[] }, "Artifact" { file_path?, files?, root?, url?, title? }
 //           whose tool_result says "... Artifact at https://claude.ai/artifact/<id> ...",
 //           and Claude Docs (an MCP "batch" call with a "container") whose result links the doc.
+// Codex, seen 2026-11-12 in ~/.codex/sessions/**/rollout-*.jsonl (item_completed records):
+//   You:    UserMessage text starting "# Files mentioned by the user:" with "## <name>: <path>"
+//           per attached file ("Image attachment: true" for images), then "## My request:";
+//           each image also as a { type: "local_image", path } block (often a temp file that is
+//           gone later), and inline as { type: "input_image", image_url: "data:…;base64,…" } in
+//           the "response_item" copy of the same message.
+//   Codex:  FileChange { changes: { <path>: { type: "add", content } | { type: "update", unified_diff }
+//           | { type: "delete" } } }.
 // The file content is read from disk at sync time (its latest version). A file that is gone
 // from disk falls back to what the session itself wrote, if it holds the whole file.
 
@@ -17,7 +26,7 @@ export type SessionFileKind = 'artifact' | 'attachment';
 
 export interface SessionFile {
 	kind: SessionFileKind;
-	/** Stable ID across syncs: "image:<record>:<n>" or the lower-case source path. */
+	/** Stable ID across syncs: "image:…" (pasted image), "attach:…" (attached file) or the lower-case source path. */
 	key: string;
 	/** File name to save it under. */
 	name: string;
@@ -84,8 +93,48 @@ export class SessionFileCollector {
 		this.files.set(key, { kind: 'attachment', key, name, base64: data, explicit: true });
 	}
 
+	/** Codex: an image you attached (its file, else the copy the thread holds); returns its marker. */
+	localImage(path: string, dataUrl?: string): string {
+		const source = slashes(path.trim());
+		const key = `image:${source.toLowerCase()}`;
+		if (!this.files.has(key)) {
+			const n = ++this.imageCount;
+			const m = dataUrl ? /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl) : null;
+			const ext = /\.([A-Za-z0-9]{2,5})$/.exec(source)?.[1] ?? MEDIA_EXT[m?.[1] ?? ''] ?? 'png';
+			this.files.set(key, { kind: 'attachment', key, name: `Image ${n}.${ext}`, source, base64: m?.[2], explicit: true });
+		}
+		return imageMarker(key);
+	}
+
+	/** Codex: a file you attached to a message; returns its marker. */
+	attached(path: string): string {
+		const source = slashes(path.trim());
+		const key = `attach:${source.toLowerCase()}`;
+		if (!this.files.has(key)) this.files.set(key, { kind: 'attachment', key, name: baseNameOf(source), source, explicit: true });
+		return imageMarker(key);
+	}
+
+	/** Codex: files it added, changed or deleted in one step. */
+	fileChanges(changes: Record<string, unknown>): void {
+		for (const [p, c] of Object.entries(changes)) {
+			const ch = obj(c);
+			const type = str(ch?.type);
+			const path = slashes(p);
+			if (type === 'delete') {
+				// Made and removed again in this thread: a working file, not a result.
+				const known = this.files.get(path.toLowerCase());
+				if (known?.kind === 'artifact' && !known.explicit) this.files.delete(known.key);
+				continue;
+			}
+			const f = this.artifact(path, false);
+			// Only a new file's content is whole; after a change, only the file on disk is trusted.
+			if (f) f.text = type === 'add' ? str(ch?.content) : undefined;
+		}
+	}
+
 	private artifact(path: string, explicit: boolean): SessionFile | undefined {
 		if (!path) return undefined;
+		path = slashes(path);
 		const key = path.toLowerCase();
 		const known = this.files.get(key);
 		if (known) {
