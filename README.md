@@ -77,6 +77,8 @@ AI Chats/
 │   └── Code-Local/
 │       └── Tower/                     ← this computer's name
 │           └── my-repo/               ← sidebar group or working folder
+│               ├── Artifacts/…        ← files Claude Code wrote or sent you
+│               └── Attachments/…      ← images and files you attached
 ├── ChatGPT/
 │   ├── Chat/
 │   └── Codex-Local/
@@ -141,6 +143,7 @@ A session that's already saved stays with the account that saved it.
 Some chats only live on your computer: Claude Code sessions from the Claude desktop app and CLI (`~/.claude/projects`) and Codex threads from the ChatGPT/Codex desktop app and CLI (`~/.codex/sessions`). AI ChatBridge saves those too, one note per session.
 
 - Titles and folders match the apps' sidebars. Claude Code sessions go in one folder per sidebar group (otherwise per working folder), with forks and side sessions nested under the session they came from. Codex threads go in one folder per project, or `Recent`
+- Their files come along: images and files you attached go to `Attachments/`, and documents Claude or Codex wrote or sent you (Markdown, HTML, PDF, Office files, images) go to `Artifacts/`, next to the note. Each file is copied in its latest version. Source code and the assistants' own scratch files are left out, and notes already in your vault are linked, not copied. Artifacts and Claude Docs published on claude.ai are listed as links. Turn this off with General → **Save session files**
 - Sessions still running wait until they have been quiet for a while (15 minutes by default)
 - Session files somewhere else? Add the folder under **Extra session folders**
 - Claude Cowork sessions are kept in the cloud, not on your computer, so they can't be read locally

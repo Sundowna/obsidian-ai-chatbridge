@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.27.0 - 2026-11-12
 
 ### New
+- **Claude Code and Codex files** - local sessions now bring their files along, like the website chats. Images and files you attached go to `Attachments/`, and documents Claude or Codex wrote or sent you (Markdown, HTML, PDF, Office files, images) go to `Artifacts/`, next to the note. Each file is copied in its latest version, or rebuilt from the session if it is gone. Pasted images show up in your message. Source code, `~/.claude` files and temp scratch files are left out unless the assistant sent them to you, and notes already in the vault are linked, not copied. Artifacts and Claude Docs published on claude.ai are listed as links. Sessions synced before get their files on the next sync, and their notes stay as they are. Turn this off with General → **Save session files**
 - **Stop all** on the Overview, right next to **Sync all**. It's greyed out until something syncs, then stops it after the current chat. While a sync runs, **Sync all** shows **Syncing…**
 - **Hermes on the Overview** - a Hermes Agent section with its logo shows how many agents (profiles) are on, e.g. "1 of 6 agents on", and how many chats they saved, with its own **Sync** button. With no agent on, the button says **Set up** and opens the Hermes tab; **Manage agents** opens it too
 - The Hermes tab uses Hermes Agent's own logo
@@ -11,6 +12,11 @@
 - The Overview's summary counts Hermes chats too ("… and 5 Hermes chats saved so far")
 
 ### Fixes
+- **A sync from before a reload can't undo your changes anymore** - after the plugin was reloaded (e.g. after an update), a sync that was still running in the old copy kept the old settings. Right after **Move into the new layout**, it could download every ChatGPT chat again as "(recovered)" into the old folders and write the old folder paths back. An old copy now never saves, and its sync stops before the next chat
+- **Safety stop for many missing chats** - when many saved chats are missing at once (at least 10, and more than a fifth), the claude.ai, ChatGPT and desktop syncs stop before writing anything and ask you to use **Refresh index**, instead of restoring or downloading them all again. One or two deleted notes are still restored as before
+- **Move into the new layout** always switches the folder settings to the new folders, even if the move stops halfway
+- Codex: the "Files mentioned by the user" block is no longer shown as text in your message; the attached files are linked instead
+- Claude Code: a session that starts with an image no longer gets a title like "IMG-…"
 - Two Hermes profiles found with the same name (e.g. two "default" homes) got the same vault folder. The second is now named "default (2)", also for profiles found before
 
 ## 0.26.0 - 2026-11-12
