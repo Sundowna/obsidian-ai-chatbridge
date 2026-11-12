@@ -247,6 +247,7 @@ export const DEFAULT_DESKTOP: DesktopSettings = {
 	keepRaw: false,
 	quietMinutes: 15,
 	includeSubagents: false,
+	saveFiles: true,
 };
 
 /** The account a vault had before there could be several. Its login window keeps working. */
