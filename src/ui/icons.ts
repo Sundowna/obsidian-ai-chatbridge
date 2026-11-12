@@ -2,6 +2,7 @@
 // that follows the theme, except Claude's own orange, Gemini's blue and Lumo's cat, which has its own colors.
 
 import type { Provider } from '../login';
+import { HERMES_LOGO_PATH } from './hermes-logo';
 
 const PATHS: Record<Exclude<Provider, 'lumo'>, string> = {
 	// Gemini's four-pointed spark.
@@ -34,4 +35,12 @@ export function providerIcon(parent: HTMLElement, provider: Provider): void {
 	const svg = box.createSvg('svg', { attr: { viewBox: provider === 'lumo' ? '0 0 64 64' : '0 0 24 24', 'aria-hidden': 'true' } });
 	if (provider === 'lumo') for (const attr of LUMO_SHAPES) svg.createSvg('path', { attr });
 	else svg.createSvg('path', { attr: { d: PATHS[provider], fill: 'currentColor' } });
+}
+
+/** Hermes Agent's mark: its app icon, black on a white rounded square. */
+export function hermesIcon(parent: HTMLElement): void {
+	const box = parent.createSpan({ cls: ['ccs-icon', 'ccs-icon-hermes'] });
+	const svg = box.createSvg('svg', { attr: { viewBox: '0 0 24 24', 'aria-hidden': 'true' } });
+	svg.createSvg('rect', { attr: { width: '24', height: '24', rx: '5.5', fill: '#fff' } });
+	svg.createSvg('path', { attr: { d: HERMES_LOGO_PATH, fill: '#000' } });
 }

@@ -20,6 +20,8 @@ export interface PanelContext {
 	/** Draws the settings again, staying where you are. */
 	refresh: () => void;
 	openAccount: (provider: Provider, account: AnyAccount) => void;
+	/** Switches to the Hermes tab. */
+	openHermes: () => void;
 	/** Collapsible sections that are open, so a redraw leaves them open. */
 	openSections: Set<string>;
 }
