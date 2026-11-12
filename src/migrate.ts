@@ -6,6 +6,7 @@ import { layoutFolders, layoutRoot } from './desktop/layout';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import { onlySelected } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
+import { dedupeLabels } from './hermes/profiles';
 import {
 	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_HERMES, DEFAULT_LUMO, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
 	type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type ClaudeWebSettings, type GptSettings, type LumoAccount, type Settings,
@@ -141,11 +142,14 @@ function firstGemini(claudeChatFolder: string): GeminiAccount[] {
 /** Hermes settings; a new vault puts them next to the other providers ("<root>/Hermes"). */
 function hydrateHermes(h: Partial<HermesSettings> | undefined, claudeChatFolder: string): HermesSettings {
 	const root = layoutRoot(claudeChatFolder);
+	const profiles = (h?.profiles ?? []).map((p) => ({ ...p, index: { ...(p.index ?? {}) }, ignored: { ...(p.ignored ?? {}) } }));
+	// Older builds could give two profiles the same label, which is also their folder.
+	dedupeLabels(profiles);
 	return {
 		...DEFAULT_HERMES,
 		...h,
 		folder: h?.folder ?? (root ? `${root}/Hermes` : 'Hermes'),
-		profiles: (h?.profiles ?? []).map((p) => ({ ...p, index: { ...(p.index ?? {}) }, ignored: { ...(p.ignored ?? {}) } })),
+		profiles,
 	};
 }
 

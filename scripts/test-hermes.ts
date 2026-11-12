@@ -10,7 +10,7 @@ import { join } from 'path';
 import { TFile } from 'obsidian';
 import { normalizeSettings } from '../src/migrate';
 import { buildSession, columns, messageText, messagesSql, sessionsSql, toMessageRow, toSessionRow } from '../src/hermes/parse';
-import { hermesRoots, newProfile, profileId } from '../src/hermes/profiles';
+import { addFoundProfiles, dedupeLabels, hermesRoots, newProfile, profileId } from '../src/hermes/profiles';
 import { findPython, isPrivatePath, nodeSqliteBackend, pythonBackend, pythonCandidates, type SqliteBackend } from '../src/hermes/reader';
 import { prettyResult, renderHermesTranscript } from '../src/hermes/render';
 import { runHermesSync } from '../src/hermes/sync';
@@ -236,6 +236,12 @@ async function main() {
 	settings.hermes.profiles = [Object.assign(newProfile('p', 'D:/x/Private/hermes'), { enabled: true })];
 	const r7 = await runHermesSync(plugin, undefined, undefined, node, NOW);
 	expect('Private profile refused', !!r7.stopped && /Private/.test(r7.stopped));
+	const twins = [newProfile('default', 'D:/A/hermes'), newProfile('default', 'C:/B/hermes')];
+	expect('dedupeLabels: second "default" becomes "default (2)"', dedupeLabels(twins) === 1 && twins[1]!.label === 'default (2)' && twins[0]!.label === 'default');
+	const listed = [newProfile('default', 'D:/A/hermes')];
+	addFoundProfiles(listed, [{ label: 'default', path: 'C:/B/hermes' }, { label: 'default', path: 'D:/A/hermes' }]);
+	expect('addFoundProfiles: no duplicate paths or labels, added turned off', listed.length === 2 && listed[1]!.label === 'default (2)' && !listed[1]!.enabled);
+	expect('migration: duplicate labels fixed on load', normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: {} }], hermes: { profiles: [newProfile('x', 'D:/1'), newProfile('x', 'D:/2')] } }).settings.hermes.profiles[1]!.label === 'x (2)');
 	expect('profileId normalises', profileId('D:\\AI\\Hermes\\') === 'd:/ai/hermes');
 
 	// Settings from an older version get Hermes defaults.

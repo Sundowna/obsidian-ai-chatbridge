@@ -33,7 +33,7 @@
 - **Pick what you want** - only selected projects, and a folder of your choice per project (e.g. your "Thesis" project straight into `10 Projects/Thesis`)
 - **Several accounts per provider** - e.g. two Claude Pro accounts; they share one folder per provider and `account:` in each note tells them apart
 - **Runs on its own** - automatic sync every 30 minutes or more, optional sync on startup, and it waits out "too many requests" (HTTP 429) pauses by itself
-- **Stop anytime** - from the ribbon, the status bar or the settings; everything saved so far stays
+- **Stop anytime** - **Stop all** on the Overview, the ribbon, the status bar or any account's **Stop**; everything saved so far stays
 - **Readable answers** - ChatGPT's visual answers (cards, charts, source chips) and voice chats come through as text and pictures, not "see raw JSON"
 
 ## What gets synced
@@ -55,7 +55,7 @@
 2. Open **Settings → AI ChatBridge**
 3. Pick a tab - **Claude**, **ChatGPT**, **Lumo** or **Gemini** - and select **Log in**. Sign in as you would in your browser; the window closes by itself once you're in
 4. Keep the default folders under `AI Chats/`, or choose your own
-5. Select **Sync now**, or **Sync all** on the **Overview** tab
+5. Select **Sync now**, or **Sync all** on the **Overview** tab - it shows every account and your Hermes agents at a glance
 
 > [!TIP]
 > **Max chats per run** starts at 3, so the first sync is a quick test. Set it to `0` (General tab) to sync everything.
@@ -189,7 +189,7 @@ Long arguments and results are shortened (600 and 1,200 characters), so notes st
 | **Sync desktop app chats (Claude, Codex)** | Local Claude Code and Codex sessions |
 | **Sync Hermes Agent chats** | The Hermes profiles that are on |
 | **Reconcile all ChatGPT chats** | Check all ChatGPT chats again, not just recent changes |
-| **Stop the running sync** | Stops after the current chat - so do the ribbon icon, the status bar text and **Stop** in the settings |
+| **Stop the running sync** | Stops after the current chat - so do **Stop all** on the Overview, the ribbon icon, the status bar text and **Stop** in the settings |
 | **Cancel pending chat sync retry** | Stop a waiting retry after a 429 pause |
 | **Refresh index: find synced notes moved outside the app** | Finds notes you moved in the file manager (or while the plugin was off) by their chat ID, so the next sync doesn't save them twice |
 | **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |

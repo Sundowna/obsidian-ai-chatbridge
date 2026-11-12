@@ -891,3 +891,15 @@
 .ccs-layout-move .setting-item-info {
 	flex: 1 1 auto;
 }
+
+.ccs-hero-actions {
+	display: flex;
+	gap: 8px;
+	flex: none;
+}
+
+.ccs-name-with-icon {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### New
+- **Stop all** on the Overview, right next to **Sync all**. It's greyed out until something syncs, then stops it after the current chat. While a sync runs, **Sync all** shows **Syncing…**
+- **Hermes on the Overview** - a Hermes Agent section with its logo shows how many agents (profiles) are on, e.g. "1 of 6 agents on", and how many chats they saved, with its own **Sync** button. With no agent on, the button says **Set up** and opens the Hermes tab; **Manage agents** opens it too
+- The Hermes tab uses Hermes Agent's own logo
+
+### Changed
+- The Overview's summary counts Hermes chats too ("… and 5 Hermes chats saved so far")
+
+### Fixes
+- Two Hermes profiles found with the same name (e.g. two "default" homes) got the same vault folder. The second is now named "default (2)", also for profiles found before
+
 ## 0.26.0 - 2026-11-12
 
 ### New

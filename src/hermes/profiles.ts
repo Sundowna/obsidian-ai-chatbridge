@@ -54,13 +54,36 @@ export function discoverProfiles(): Found[] {
 	return out.filter((f) => !seen.has(profileId(f.path)) && !!seen.add(profileId(f.path)));
 }
 
+/**
+ * A label no other profile has yet: "default", then "default (2)" … The label is also the
+ * vault subfolder, so two profiles with the same label would share one folder.
+ */
+export function uniqueLabel(list: HermesProfile[], label: string, except?: HermesProfile): string {
+	const taken = (l: string) => list.some((p) => p !== except && p.label.toLowerCase() === l.toLowerCase());
+	if (!taken(label)) return label;
+	for (let i = 2; ; i++) if (!taken(`${label} (${i})`)) return `${label} (${i})`;
+}
+
+/** Labels made unique, keeping the first of each; returns how many changed. */
+export function dedupeLabels(list: HermesProfile[]): number {
+	let changed = 0;
+	list.forEach((p, i) => {
+		const label = uniqueLabel(list.slice(0, i), p.label);
+		if (label !== p.label) {
+			p.label = label;
+			changed++;
+		}
+	});
+	return changed;
+}
+
 /** Adds found profiles that are not in the list yet, turned off. Returns how many were added. */
 export function addFoundProfiles(list: HermesProfile[], found: Found[]): number {
 	let added = 0;
 	for (const f of found) {
 		const id = profileId(f.path);
 		if (list.some((p) => p.id === id)) continue;
-		list.push(newProfile(f.label, f.path));
+		list.push(newProfile(uniqueLabel(list, f.label), f.path));
 		added++;
 	}
 	return added;

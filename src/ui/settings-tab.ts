@@ -7,7 +7,7 @@ import type AIChatBridge from '../main';
 import type { PanelContext } from './fields';
 import { generalTab } from './general-tab';
 import { hermesTab } from './hermes-tab';
-import { providerIcon } from './icons';
+import { hermesIcon, providerIcon } from './icons';
 import { overviewTab } from './overview-tab';
 import { forgetProjectLists } from './project-picker';
 import { providerTab, type ProviderState } from './provider-tab';
@@ -45,7 +45,8 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const b = bar.createEl('button', { cls: 'ccs-tab', attr: { role: 'tab', 'aria-selected': String(active) } });
 		b.toggleClass('is-active', active);
 		if (id === 'claude' || id === 'chatgpt' || id === 'lumo' || id === 'gemini') providerIcon(b, id);
-		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : id === 'hermes' ? 'bot' : 'sliders-horizontal');
+		else if (id === 'hermes') hermesIcon(b);
+		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : 'sliders-horizontal');
 		b.createSpan({ text: label });
 		b.addEventListener('click', () => this.go(id));
 	}
@@ -73,6 +74,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 				this.providers[provider].accountId = account.id;
 				this.go(provider);
 			},
+			openHermes: () => this.go('hermes'),
 			openSections: this.openSections,
 		};
 		const body = containerEl.createDiv({ cls: 'ccs-body' });

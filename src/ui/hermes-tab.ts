@@ -1,8 +1,9 @@
 // The Hermes tab: where the chats go, and one row per Hermes profile with its own switch.
 
 import { Notice, Setting } from 'obsidian';
-import { addFoundProfiles, discoverProfiles, newProfile, profileId } from '../hermes/profiles';
+import { addFoundProfiles, discoverProfiles, newProfile, profileId, uniqueLabel } from '../hermes/profiles';
 import { isPrivatePath, nodeRequire } from '../hermes/reader';
+import { hermesIcon } from './icons';
 import { advanced, bindSyncButton, count, folderSetting, type PanelContext } from './fields';
 import { NameModal } from './modals';
 
@@ -16,9 +17,12 @@ export function hermesTab(ctx: PanelContext, el: HTMLElement): void {
 	}
 
 	const top = new Setting(el)
-		.setName('Hermes Agent')
+		.setName('')
 		.setDesc(`Chats from Hermes Agent (Nous Research), read from each profile's state.db. Read-only: Hermes' files are never changed. ${count(h.profiles.reduce((n, p) => n + Object.keys(p.index).length, 0), 'session')} saved.`);
 	top.settingEl.addClass('ccs-primary-row');
+	top.nameEl.addClass('ccs-name-with-icon');
+	hermesIcon(top.nameEl);
+	top.nameEl.createSpan({ text: 'Hermes Agent' });
 	if (h.profiles.some((p) => p.enabled)) {
 		top.addButton((b) =>
 			bindSyncButton(ctx, b.setButtonText('Sync now').setCta().buttonEl, () => ctx.plugin.isSyncingHermes(), () => void ctx.plugin.syncHermes('manual').then(ctx.refresh)),
@@ -86,7 +90,7 @@ export function hermesTab(ctx: PanelContext, el: HTMLElement): void {
 					submit: async (p) => {
 						const path = p.trim().replace(/[\\/]state\.db$/i, '');
 						const name = path.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() || 'Hermes';
-						h.profiles.push(newProfile(name, path));
+						h.profiles.push(newProfile(uniqueLabel(h.profiles, name), path));
 						await save();
 						ctx.refresh();
 					},

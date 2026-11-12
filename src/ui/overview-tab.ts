@@ -4,7 +4,7 @@ import { setIcon } from 'obsidian';
 import { accountsOf, loginRef, PROVIDER_LABEL, type AnyAccount } from '../accounts';
 import { isLoggedIn, type Provider } from '../login';
 import { bindSyncButton, count, type PanelContext } from './fields';
-import { providerIcon } from './icons';
+import { hermesIcon, providerIcon } from './icons';
 import { addAccountButton } from './provider-tab';
 
 function surfaceLine(parent: HTMLElement, icon: string, name: string): { dot: HTMLElement; text: HTMLElement } {
@@ -46,6 +46,63 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 	bindSyncButton(ctx, sync, () => ctx.plugin.isSyncing(provider, account.id), () => void ctx.plugin.syncWholeAccount(provider, account).then(ctx.refresh));
 }
 
+/** Hermes Agent: how many agents (profiles) are on, and what they saved. Selecting the title opens its tab. */
+function hermesCard(ctx: PanelContext, parent: HTMLElement): void {
+	const h = ctx.plugin.settings.hermes;
+	const on = h.profiles.filter((p) => p.enabled);
+	const saved = h.profiles.reduce((n, p) => n + Object.keys(p.index).length, 0);
+	const card = parent.createDiv({ cls: 'ccs-card' });
+	const head = card.createDiv({ cls: 'ccs-card-head' });
+	head.createEl('button', { cls: 'ccs-card-title', text: 'This computer', attr: { 'aria-label': 'Open the Hermes settings' } })
+		.addEventListener('click', () => ctx.openHermes());
+
+	const agents = surfaceLine(card, 'bot', 'Agents');
+	agents.dot.toggleClass('is-on', on.length > 0);
+	agents.text.setText(h.profiles.length ? `${on.length} of ${count(h.profiles.length, 'agent')} on` : 'None found yet');
+	const chats = surfaceLine(card, 'messages-square', 'Chats');
+	chats.dot.toggleClass('is-on', saved > 0);
+	chats.text.setText(count(saved, 'chat'));
+
+	if (!on.length) {
+		// Nothing to sync yet: the button leads to where agents are turned on.
+		head.createEl('button', { text: 'Set up', cls: 'ccs-card-sync' }).addEventListener('click', () => ctx.openHermes());
+		return;
+	}
+	const sync = head.createEl('button', { text: 'Sync', cls: 'ccs-card-sync' });
+	bindSyncButton(ctx, sync, () => ctx.plugin.isSyncingHermes(), () => void ctx.plugin.syncHermes('manual').then(ctx.refresh));
+}
+
+/** "Sync all" and "Stop all" side by side: Stop is greyed out until something runs. */
+function heroButtons(ctx: PanelContext, parent: HTMLElement): void {
+	const { plugin } = ctx;
+	const box = parent.createDiv({ cls: 'ccs-hero-actions' });
+	const stop = box.createEl('button', { text: 'Stop all' });
+	const sync = box.createEl('button', { text: 'Sync all', cls: 'mod-cta' });
+	const draw = () => {
+		const running = plugin.syncing;
+		stop.disabled = !running || plugin.stopping;
+		stop.setText(plugin.stopping ? 'Stopping…' : 'Stop all');
+		stop.toggleClass('mod-warning', running && !plugin.stopping);
+		stop.setAttr('title', running ? 'Stops after the current chat. Everything saved so far stays.' : 'Nothing is syncing');
+		sync.disabled = plugin.busy;
+		sync.setText(running ? 'Syncing…' : 'Sync all');
+		if (plugin.busy) sync.setAttr('title', 'A sync is running');
+		else sync.removeAttribute('title');
+	};
+	const off = plugin.onBusyChange(() => {
+		if (!box.isConnected) {
+			off();
+			return;
+		}
+		draw();
+	});
+	stop.addEventListener('click', () => plugin.requestStop());
+	sync.addEventListener('click', () => {
+		if (!plugin.busy) void plugin.syncAll('manual').then(ctx.refresh);
+	});
+	draw();
+}
+
 export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 	const s = ctx.plugin.settings;
 	const hero = el.createDiv({ cls: 'ccs-hero' });
@@ -53,11 +110,13 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 	const chats = [...s.claude, ...s.chatgpt, ...s.lumo, ...s.gemini].reduce((n, a) => n + Object.keys(a.web.index).length, 0)
 		+ s.gemini.reduce((n, a) => n + Object.keys(a.studio.index).length, 0);
 	const sessions = [...s.claude, ...s.chatgpt].reduce((n, a) => n + Object.keys(a.desktop.index).length, 0);
-	words.createDiv({ cls: 'ccs-hero-title', text: 'Sync all accounts' });
-	words.createDiv({ cls: 'ccs-hero-desc', text: `${count(chats, 'chat')} and ${count(sessions, 'desktop session')} saved so far.` });
-	const button = hero.createEl('button', { text: 'Sync all', cls: 'mod-cta' });
-	// Stops whatever is running, whichever account it is.
-	bindSyncButton(ctx, button, () => true, () => void ctx.plugin.syncAll('manual').then(ctx.refresh));
+	const hermes = s.hermes.profiles.reduce((n, p) => n + Object.keys(p.index).length, 0);
+	const saved = [count(chats, 'chat'), count(sessions, 'desktop session')];
+	if (hermes) saved.push(count(hermes, 'Hermes chat'));
+	const list = saved.length > 2 ? `${saved.slice(0, -1).join(', ')} and ${saved[saved.length - 1]!}` : saved.join(' and ');
+	words.createDiv({ cls: 'ccs-hero-title', text: 'Sync everything' });
+	words.createDiv({ cls: 'ccs-hero-desc', text: `${list} saved so far.` });
+	heroButtons(ctx, hero);
 
 	for (const provider of ['claude', 'chatgpt', 'lumo', 'gemini'] as const) {
 		const head = el.createDiv({ cls: 'ccs-provider-head' });
@@ -67,4 +126,13 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 		const cards = el.createDiv({ cls: 'ccs-cards' });
 		for (const account of accountsOf(s, provider)) accountCard(ctx, cards, provider, account);
 	}
+
+	const head = el.createDiv({ cls: 'ccs-provider-head' });
+	hermesIcon(head);
+	head.createDiv({ cls: 'ccs-provider-name', text: 'Hermes Agent' });
+	const manage = head.createEl('button', { cls: 'ccs-add-account', attr: { 'aria-label': 'Open the Hermes settings' } });
+	setIcon(manage.createSpan({ cls: 'ccs-glyph' }), 'settings-2');
+	manage.createSpan({ text: 'Manage agents' });
+	manage.addEventListener('click', () => ctx.openHermes());
+	hermesCard(ctx, el.createDiv({ cls: 'ccs-cards' }));
 }
