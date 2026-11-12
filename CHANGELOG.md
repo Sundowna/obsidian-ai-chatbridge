@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.26.0 - 2026-11-12
+
+### New
+- **Hermes Agent chats** - a new **Hermes** tab syncs chats from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research), whichever model you ran - Claude, GPT, a local Qwen… Each Hermes profile gets its own switch and **Sync** button, and its own subfolder under `AI Chats/Hermes/`. Profiles are found by themselves (`HERMES_HOME`, `profiles/`) and start turned off; you can also add one by path. Command: **Sync Hermes Agent chats**, and **Sync all** includes the profiles that are on
+- **Read-only, always** - Hermes keeps its chats in a SQLite database (`state.db`). The plugin never writes to it: each sync opens it read-only, copies a consistent snapshot with SQLite's backup function (recent messages still in `state.db-wal` included) to a temporary file, reads that copy and deletes it. It uses Obsidian's built-in SQLite, or a Python on your computer if Obsidian has none
+- **Tool steps you can open** - every run of tool calls becomes a collapsed callout listing each step: the tool, its arguments and a shortened result
+- Each transcript has `source: hermes`, `hermes_profile`, `model`, `session_id` and dates as `YYYY-MM-DD` in its properties. Only new or changed sessions are saved; a changed one gets an `(updated …)` copy like every other chat. Helper (subagent) sessions, sessions still running, and anything run in or mentioning a folder named `Private` are left out
+
+### Changed
+- README reorganised: quick start first, one table of sources, clearer privacy section
+
 ## 0.25.0 - 2026-11-11
 
 ### New

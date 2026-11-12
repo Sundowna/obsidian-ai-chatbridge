@@ -6,12 +6,13 @@ import type { Provider } from '../login';
 import type AIChatBridge from '../main';
 import type { PanelContext } from './fields';
 import { generalTab } from './general-tab';
+import { hermesTab } from './hermes-tab';
 import { providerIcon } from './icons';
 import { overviewTab } from './overview-tab';
 import { forgetProjectLists } from './project-picker';
 import { providerTab, type ProviderState } from './provider-tab';
 
-type Tab = 'overview' | Provider | 'general';
+type Tab = 'overview' | Provider | 'hermes' | 'general';
 
 export class AIChatBridgeSettingTab extends PluginSettingTab {
 	/** Where you are; kept while the settings window is open. */
@@ -44,7 +45,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const b = bar.createEl('button', { cls: 'ccs-tab', attr: { role: 'tab', 'aria-selected': String(active) } });
 		b.toggleClass('is-active', active);
 		if (id === 'claude' || id === 'chatgpt' || id === 'lumo' || id === 'gemini') providerIcon(b, id);
-		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : 'sliders-horizontal');
+		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : id === 'hermes' ? 'bot' : 'sliders-horizontal');
 		b.createSpan({ text: label });
 		b.addEventListener('click', () => this.go(id));
 	}
@@ -61,6 +62,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		this.tabButton(bar, 'chatgpt', 'ChatGPT');
 		this.tabButton(bar, 'lumo', 'Lumo');
 		this.tabButton(bar, 'gemini', 'Gemini');
+		this.tabButton(bar, 'hermes', 'Hermes');
 		this.tabButton(bar, 'general', 'General');
 
 		const ctx: PanelContext = {
@@ -76,6 +78,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		const body = containerEl.createDiv({ cls: 'ccs-body' });
 		if (this.tab === 'overview') overviewTab(ctx, body);
 		else if (this.tab === 'general') generalTab(ctx, body);
+		else if (this.tab === 'hermes') hermesTab(ctx, body);
 		else providerTab(ctx, body, this.tab, this.providers[this.tab]);
 		containerEl.scrollTop = scroll;
 	}
