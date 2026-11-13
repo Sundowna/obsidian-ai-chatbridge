@@ -52,6 +52,22 @@ export interface ClaudeWebSettings {
 	index: Record<string, IndexEntry>;
 	/** file_uuid -> vault path, so each file is downloaded once. */
 	fileIndex: Record<string, string>;
+	/** Also save the Claude Code sessions run in the cloud (claude.ai/code) into the Code Cloud folder. */
+	cloudSessions: boolean;
+	/** Claude Code cloud session ID ("cse_…") -> what was saved. */
+	cloudIndex?: Record<string, CloudIndexEntry>;
+}
+
+/** What we remember per Claude Code cloud session (no chat text). */
+export interface CloudIndexEntry {
+	/** The session's last_event_at when it was saved. */
+	updated: string;
+	/** Empty for a session with no message from you (nothing written, not asked again until it changes). */
+	md: string;
+	json: string;
+	synced: string;
+	/** Saved files: file key -> vault path. */
+	files?: Record<string, string>;
 }
 
 /** One ChatGPT login: its own folders, index and cooldown. */
@@ -199,6 +215,7 @@ export const DEFAULT_CLAUDE_WEB: ClaudeWebSettings = {
 	downloadFiles: true,
 	index: {},
 	fileIndex: {},
+	cloudSessions: true,
 };
 
 export const DEFAULT_GPT: GptSettings = {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.29.0 - 2026-11-13
+
+### New
+- **Claude Code cloud sessions** - sessions that ran in Anthropic's cloud (claude.ai/code, also started from the phone app) are now saved with the claude.ai sync, into the **Code Cloud folder**, one subfolder per GitHub repository. The note says `app: "Claude Code (cloud)"`, names the repository and links back to the session on claude.ai; the raw `.json` holds every event. A session that is still running is saved once it is done, and a session that goes on later gets an "(updated …)" note next to the old one. Pasted images and files Claude wrote in full go to `Attachments/` and `Artifacts/`. Sessions you steered from claude.ai but that ran on your computer (Remote Control) are left to **Code Local**, so nothing is saved twice. Turn it off per account with **Claude Code cloud sessions** in the Claude tab
+
 ## 0.28.0 - 2026-11-12
 
 ### New

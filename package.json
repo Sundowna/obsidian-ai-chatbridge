@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-ai-chatbridge",
-	"version": "0.28.0",
+	"version": "0.29.0",
 	"description": "Obsidian plugin: sync claude.ai, ChatGPT, Proton Lumo, Gemini, AI Studio and Hermes Agent chats into the vault as raw JSON plus a Markdown transcript",
 	"private": true,
 	"main": "main.js",
@@ -16,6 +16,7 @@
 		"test:desktop": "esbuild scripts/test-desktop.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-desktop.cjs && node scripts/.test-desktop.cjs",
 		"test:gemini": "esbuild scripts/test-gemini.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-gemini.cjs && node scripts/.test-gemini.cjs",
 		"test:hermes": "esbuild scripts/test-hermes.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-hermes.cjs && node scripts/.test-hermes.cjs",
+		"test:cloud": "esbuild scripts/test-cloud.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-cloud.cjs && node scripts/.test-cloud.cjs",
 		"test:lumo": "esbuild scripts/test-lumo.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-lumo.cjs && node scripts/.test-lumo.cjs"
 	},
 	"keywords": [

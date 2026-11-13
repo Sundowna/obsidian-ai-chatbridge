@@ -90,6 +90,13 @@ export function allEntries(s: Settings): IndexedPaths[] {
 			});
 		}
 	}
+	// Claude Code cloud sessions ("session:" in the front matter is their ID). Empty ones wrote nothing.
+	for (const a of s.claude) {
+		for (const [id, e] of Object.entries(a.web.cloudIndex ?? {})) {
+			if (!e.md) continue;
+			out.push({ id, md: e.md, raws: [e.json], setMd: (p) => (e.md = p), setRaw: (_i, p) => (e.json = p) });
+		}
+	}
 	for (const a of [...s.claude, ...s.chatgpt]) {
 		for (const [id, e] of Object.entries(a.desktop.index)) {
 			out.push({

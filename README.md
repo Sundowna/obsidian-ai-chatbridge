@@ -73,7 +73,7 @@ AI Chats/
 │   │   └── Thesis/                    ← a claude.ai project
 │   │       ├── Artifacts/…            ← files Claude made
 │   │       └── Attachments/…          ← files you uploaded
-│   ├── Code-Cloud/                    ← Claude Code sessions listed on claude.ai
+│   ├── Code-Cloud/<repo>/             ← Claude Code sessions from claude.ai/code (cloud)
 │   └── Code-Local/
 │       └── Tower/                     ← this computer's name
 │           └── my-repo/               ← sidebar group or working folder
