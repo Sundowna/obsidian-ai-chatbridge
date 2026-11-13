@@ -18,6 +18,7 @@
 - [Desktop app sessions](#desktop-app-sessions)
 - [Hermes Agent](#hermes-agent)
 - [Commands](#commands)
+- [Part of the Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite)
 - [Privacy and network use](#privacy-and-network-use)
 - [Installation](#installation)
 - [FAQ](#faq)
@@ -199,6 +200,18 @@ Long arguments and results are shortened (600 and 1,200 characters), so notes st
 | **Refresh index: find synced notes moved outside the app** | Finds notes you moved in the file manager (or while the plugin was off) by their chat ID, so the next sync doesn't save them twice |
 | **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |
 | **Diagnose: save claude.ai answers for the open chat** | Saves the raw answers of the open chat, for bug reports |
+
+## Part of the Sundowna Second Brain Suite
+
+This is one of three pieces of the **Sundowna Second Brain Suite (SSBS)**. Together they turn Obsidian into a second brain that feels like home: your knowledge in plain Markdown that you own, with tools that work like the ones you already use.
+
+| Piece | Kind | What it does |
+|---|---|---|
+| **AI ChatBridge** (you are here) | Plugin | Brings your chats from Claude, ChatGPT, Gemini and others into the vault as Markdown |
+| [**OneNote Style**](https://github.com/Sundowna/obsidian-onenote-style) | Plugin | The ribbon you already know: Office-style tabs, groups and buttons for any command, plus note tags and subpages. Its **AI** group runs AI ChatBridge's sync commands with one click |
+| [**OneNote Style theme**](https://github.com/Sundowna/obsidian-onenote-theme) | Theme | OneNote's look: white pages, Calibri, OneNote's heading styles, light and dark |
+
+Each works on its own. Together they are low friction from the first minute.
 
 ## Privacy and network use
 
