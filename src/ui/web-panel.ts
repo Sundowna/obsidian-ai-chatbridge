@@ -63,13 +63,22 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'Chat folder', 'Where claude.ai chats are saved.', () => s.chatFolder, (p) => (s.chatFolder = p));
 	rawFolderSetting(ctx, el, { name: 'Chat JSON folder', what: 'the raw .json of each chat', partner: 'chat folder', mirrors: true, get: () => s.chatRawFolder, set: (p) => (s.chatRawFolder = p) });
-	folderSetting(ctx, el, 'Code Cloud folder', 'Where Claude Code cloud sessions listed on claude.ai are saved.', () => s.codeFolder, (p) => (s.codeFolder = p));
+	folderSetting(ctx, el, 'Code Cloud folder', 'Where Claude Code sessions from claude.ai are saved: those run in the cloud (claude.ai/code), and Claude Code chats in the claude.ai chat list.', () => s.codeFolder, (p) => (s.codeFolder = p));
 	rawFolderSetting(ctx, el, { name: 'Code Cloud JSON folder', what: 'the raw .json of each session', partner: 'Code Cloud folder', mirrors: true, get: () => s.codeRawFolder, set: (p) => (s.codeRawFolder = p) });
 	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'claude', account, masterRaw(ctx.plugin.settings)));
 	filingOptions(ctx, el, 'claude.ai', s);
 
 	new Setting(el).setName('Content').setHeading();
 	contentOptions(ctx, el, 'claude', account, s);
+	new Setting(el)
+		.setName('Claude Code cloud sessions')
+		.setDesc('Also save the Claude Code sessions that ran in the cloud (claude.ai/code), in the Code Cloud folder, one subfolder per repository. A session still running is saved once it is done. Sessions you steered from claude.ai but that ran on a computer are saved by Code Local instead.')
+		.addToggle((t) =>
+			t.setValue(s.cloudSessions).onChange(async (v) => {
+				s.cloudSessions = v;
+				await save();
+			}),
+		);
 
 	const more = advanced(ctx, el, `claude-web-${account.id}`);
 	new Setting(more)

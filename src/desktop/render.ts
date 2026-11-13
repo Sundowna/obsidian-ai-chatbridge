@@ -29,6 +29,10 @@ export interface DesktopRenderMeta {
 	rawFileName?: string;
 	/** Saved files: file key -> vault path. */
 	files?: Map<string, string>;
+	/** Overrides the "app:" value (cloud sessions are not from the desktop app). */
+	appLabel?: string;
+	/** More front matter, after "model:" (e.g. repo). */
+	extra?: [string, string][];
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
@@ -55,10 +59,11 @@ function filesSection(s: DesktopSession, files: Map<string, string>): string[] {
 }
 
 export function renderDesktopTranscript(s: DesktopSession, meta: DesktopRenderMeta): string {
-	const fm = ['---', `app: ${y(APP_LABEL[s.app])}`, `session: ${s.id}`, `title: ${y(s.title)}`, `created: ${s.created}`, `updated: ${s.updated}`];
+	const fm = ['---', `app: ${y(meta.appLabel ?? APP_LABEL[s.app])}`, `session: ${s.id}`, `title: ${y(s.title)}`, `created: ${s.created}`, `updated: ${s.updated}`];
 	if (s.section) fm.push(`section: ${y(s.section)}`);
 	if (s.cwd) fm.push(`cwd: ${y(s.cwd)}`);
 	if (s.model) fm.push(`model: ${y(s.model)}`);
+	for (const [k, v] of meta.extra ?? []) fm.push(`${k}: ${y(v)}`);
 	if (s.forkedFrom) fm.push(`forked_from: ${s.forkedFrom}`);
 	if (s.isSubagent) fm.push('subagent: true');
 	fm.push(`source: ${y(meta.source.replace(/\\/g, '/'))}`);

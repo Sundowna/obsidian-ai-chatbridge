@@ -56,6 +56,28 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 		}
 	}
 
+	// Claude Code cloud sessions: transcript, raw file and saved files.
+	for (const { web } of s.claude) {
+		for (const entry of Object.values(web.cloudIndex ?? {})) {
+			for (const key of ['md', 'json'] as const) {
+				const previous = entry[key];
+				if (!previous) continue;
+				const next = fix(previous);
+				if (next !== previous) {
+					entry[key] = next;
+					changed++;
+				}
+			}
+			for (const [k, previous] of Object.entries(entry.files ?? {})) {
+				const next = fix(previous);
+				if (next !== previous) {
+					entry.files![k] = next;
+					changed++;
+				}
+			}
+		}
+	}
+
 	// Desktop app sessions: transcript and raw copy.
 	for (const { desktop } of [...s.claude, ...s.chatgpt]) {
 		for (const entry of Object.values(desktop.index)) {

@@ -1,6 +1,7 @@
 // The ONLY place that talks to the network.
 // Rules: https://claude.ai only, no retries, stop on anything odd.
-// GET for the REST addresses; POST only to the READ methods of claude.ai's
+// GET for the REST addresses (claude.ai/api/organizations/<org>/… and the Claude Code
+// session list claude.ai/v1/code/sessions…); POST only to the READ methods of claude.ai's
 // ConversationService (allowlist below) – never to anything that changes data.
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
@@ -40,6 +41,12 @@ export interface RawJson {
 	json: unknown;
 }
 
+/** Claude Code session IDs on claude.ai ("cse_…"). */
+const CODE_SESSION_ID = /^cse_[A-Za-z0-9]+$/;
+const CODE_SESSIONS = '/v1/code/sessions';
+/** Every status the claude.ai Code page asks for, so archived and failed sessions are listed too. */
+const CODE_STATUSES = ['active', 'paused', 'failed', 'archived'];
+
 export class ClaudeApi {
 	constructor(
 		private readonly orgId: string,
@@ -55,6 +62,18 @@ export class ClaudeApi {
 	chatPath(uuid: string): string {
 		if (!isUuid(uuid)) throw new StopError('Refusing to fetch: chat ID has an odd format.');
 		return `/api/organizations/${this.orgId}/chat_conversations/${uuid}?tree=True&rendering_mode=messages`;
+	}
+
+	/** One page of the Claude Code sessions listed on claude.ai/code, newest first. */
+	codeSessionsPath(cursor?: string): string {
+		const q = CODE_STATUSES.map((st) => `statuses=${st}`).join('&');
+		return `${CODE_SESSIONS}?${q}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+	}
+
+	/** One page of a Claude Code session's events, newest first. */
+	codeEventsPath(sessionId: string, cursor?: string): string {
+		if (!CODE_SESSION_ID.test(sessionId)) throw new StopError('Refusing to fetch: Claude Code session ID has an odd format.');
+		return `${CODE_SESSIONS}/${sessionId}/events?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
 	}
 
 	filePath(fileUuid: string): string {
@@ -159,18 +178,24 @@ export class ClaudeApi {
 	private async request(path: string, accept: string, notFoundOk: boolean | 'any'): Promise<RequestUrlResponse | null> {
 		const url = new URL(path, ORIGIN);
 		// Safety guard: never anything but claude.ai/api/organizations/<your org>/...
-		if (url.origin !== ORIGIN || !url.pathname.startsWith(`/api/organizations/${this.orgId}/`)) {
-			throw new StopError('Blocked a request that was not for claude.ai/api/organizations/<your org>/.');
+		// or the Claude Code session list (claude.ai/v1/code/sessions…), and only GET.
+		const code = url.pathname === CODE_SESSIONS || url.pathname.startsWith(`${CODE_SESSIONS}/`);
+		if (url.origin !== ORIGIN || !(code || url.pathname.startsWith(`/api/organizations/${this.orgId}/`))) {
+			throw new StopError('Blocked a request that was not for claude.ai/api/organizations/<your org>/ or claude.ai/v1/code/sessions.');
 		}
 		const key = this.getKey();
 		if (!key) throw new StopError('Not logged in to claude.ai. Use \'Log in to claude.ai\' in the plugin settings.');
+		// The Claude Code addresses want the API version and the organization as headers.
+		const headers: Record<string, string> = code
+			? { Cookie: `sessionKey=${key}; lastActiveOrg=${this.orgId}`, Accept: accept, 'anthropic-version': '2023-06-01', 'x-organization-uuid': this.orgId }
+			: { Cookie: `sessionKey=${key}`, Accept: accept };
 
 		let res;
 		try {
 			res = await requestUrl({
 				url: url.toString(),
 				method: 'GET',
-				headers: { Cookie: `sessionKey=${key}`, Accept: accept },
+				headers,
 				throw: false,
 			});
 		} catch (e) {

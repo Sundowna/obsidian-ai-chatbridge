@@ -19,6 +19,8 @@ import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
 import type { ProgressFn } from './progress';
 import type { ListItem } from './types';
+import { CloudShapeError } from './cloud/claude-cloud';
+import { emptyCloudResult, syncClaudeCloud, type CloudSyncResult } from './cloud/sync';
 
 const MAX_PAGES = 200; // 6000 chats; a guard against an endless paging loop
 
@@ -45,6 +47,8 @@ export interface SyncResult {
 	stopped?: string;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
+	/** Claude Code cloud sessions (claude.ai/code); also counted in the totals above. */
+	cloud?: CloudSyncResult;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -423,15 +427,38 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 				}
 			}
 		}
+
+		// 8. Claude Code sessions run in the cloud (claude.ai/code), into the Code Cloud folder.
+		if (s.cloudSessions) {
+			const cloud = (result.cloud = emptyCloudResult());
+			try {
+				await syncClaudeCloud({ app, settings: plugin.settings, account, api, delayMs, progress, save: () => plugin.saveSettings(), sleep }, cloud);
+			} finally {
+				addCloud(result, cloud);
+			}
+		}
 	} catch (e) {
 		const key = getKey();
 		if (e instanceof StopError) result.stopped = e.message;
+		else if (e instanceof CloudShapeError) result.stopped = `Unexpected Claude Code session data (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;
 		else if (e instanceof ShapeError) result.stopped = `Unexpected JSON shape (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;
 		else result.stopped = redact(e instanceof Error ? e.message : String(e), key);
 	}
 
 	await writeLog(plugin, account, result);
 	return result;
+}
+
+/** Cloud sessions count in the run's totals (notices, log); the log names them too. */
+function addCloud(r: SyncResult, c: CloudSyncResult): void {
+	r.listed += c.listed;
+	r.unchanged += c.unchanged;
+	r.newCount += c.newCount;
+	r.changedCount += c.changedCount;
+	r.leftForLater += c.leftForLater;
+	r.written.push(...c.written);
+	r.restored.push(...c.restored);
+	r.filesSaved += c.filesSaved;
 }
 
 async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncResult): Promise<void> {
@@ -449,6 +476,8 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 	if (r.filesSkipped.length) parts.push(`files not saved: ${r.filesSkipped.join(', ')}`);
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
 	if (r.otherPlatforms.size) parts.push(`to Code Cloud folder: platform ${[...r.otherPlatforms].join(', ')}`);
+	if (r.cloud && (r.cloud.written.length || r.cloud.restored.length)) parts.push(`incl. ${r.cloud.written.length + r.cloud.restored.length} Claude Code cloud sessions`);
+	if (r.cloud?.running) parts.push(`${r.cloud.running} Claude Code cloud sessions still running (saved when done)`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – ${who}${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');
