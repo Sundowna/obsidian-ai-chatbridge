@@ -950,3 +950,40 @@
 .ccs-settings .ccs-hermes-missing-why {
 	color: var(--text-warning);
 }
+
+/* "Last sync" lines: how the last run of an account (or Sync all) went. */
+.ccs-last-run {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 2px 0;
+	margin-top: 4px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.ccs-last-run .ccs-glyph {
+	flex: none;
+	color: var(--text-faint);
+}
+
+.ccs-last-run-text {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.ccs-last-run.is-ok .ccs-dot {
+	background: var(--color-green);
+}
+
+.ccs-last-run.is-warn .ccs-dot {
+	background: var(--color-orange);
+}
+
+.ccs-last-run.is-bad .ccs-dot {
+	background: var(--color-red);
+}
+
+.ccs-last-run.is-bad .ccs-last-run-text {
+	color: var(--text-error);
+}

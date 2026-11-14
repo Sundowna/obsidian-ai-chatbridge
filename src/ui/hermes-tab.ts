@@ -9,6 +9,7 @@ import {
 } from '../hermes/profiles';
 import { isPrivatePath, nodeRequire } from '../hermes/reader';
 import { hermesIcon } from './icons';
+import { HERMES, lastRunLine } from '../last-run';
 import { advanced, bindSyncButton, count, folderSetting, type PanelContext } from './fields';
 import { ConfirmModal, NameModal } from './modals';
 
@@ -37,6 +38,7 @@ export function hermesTab(ctx: PanelContext, el: HTMLElement): void {
 	hermesIcon(top.nameEl);
 	top.nameEl.createSpan({ text: 'Hermes Agent' });
 	if (h.profiles.some((p) => p.enabled)) {
+		lastRunLine(top.infoEl, ctx.plugin.settings.lastRuns[HERMES]);
 		top.addButton((b) =>
 			bindSyncButton(ctx, b.setButtonText('Sync now').setCta().buttonEl, () => ctx.plugin.isSyncingHermes(), () => void ctx.plugin.syncHermes('manual').then(ctx.refresh)),
 		);

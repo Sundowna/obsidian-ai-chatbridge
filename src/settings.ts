@@ -12,6 +12,7 @@ import type { ChatCounts } from './progress';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import type { ProjectCatalog } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
+import type { LastAll, LastRun } from './last-run';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -198,6 +199,10 @@ export interface Settings {
 	desktop: DesktopSettings;
 	/** Hermes Agent chats, read from each profile's state.db (desktop only). */
 	hermes: HermesSettings;
+	/** What the last sync of each account surface did (see last-run.ts). */
+	lastRuns: Record<string, LastRun>;
+	/** The last "Sync all". */
+	lastAll?: LastAll;
 }
 
 /** Where a new vault's chats go: the layout below "AI Chats" (see desktop/layout.ts). */
@@ -285,6 +290,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	gemini: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GEMINI, studio: DEFAULT_STUDIO }],
 	desktop: DEFAULT_DESKTOP,
 	hermes: DEFAULT_HERMES,
+	lastRuns: {},
 };
 
 export const MIN_DELAY_SECONDS = 1;

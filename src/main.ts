@@ -20,6 +20,7 @@ import { runGeminiSync } from './gemini/sync';
 import { runStudioSync } from './studio/sync';
 import { anyHermesEnabled, runHermesSync } from './hermes/sync';
 import { chatCountStatus, SyncProgress } from './progress';
+import { DESKTOP_ALL, HERMES, runKey, type LastRun, type RunOutcome } from './last-run';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
 
@@ -489,34 +490,47 @@ export default class AIChatBridge extends Plugin {
 	/** Every account you are logged in to, one after the other, then the desktop apps. */
 	async syncAll(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
-			const claude: ClaudeAccount[] = [];
-			for (const a of this.settings.claude) if (await this.canSyncWeb('claude', a)) claude.push(a);
-			const gpt: ChatgptAccount[] = [];
-			for (const a of this.settings.chatgpt) if (await this.canSyncWeb('chatgpt', a)) gpt.push(a);
-			const lumo: LumoAccount[] = [];
-			for (const a of this.settings.lumo) if (await this.canSyncWeb('lumo', a)) lumo.push(a);
-			const gemini: GeminiAccount[] = [];
-			for (const a of this.settings.gemini) if (await this.canSyncWeb('gemini', a)) gemini.push(a);
-			const desktop = anyDesktopEnabled(this);
-			const hermes = anyHermesEnabled(this);
-			if (!claude.length && !gpt.length && !lumo.length && !gemini.length && !desktop && !hermes) {
-				if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
-				return;
+			const start = Date.now();
+			try {
+				await this.syncAllParts(trigger);
+			} finally {
+				// Only a run that got as far as syncing something is remembered as "Sync all".
+				if (Object.values(this.settings.lastRuns).some((r) => r.at >= start)) {
+					this.settings.lastAll = { start, at: Date.now(), trigger, stopped: this.stopRequested };
+					await this.saveSettings();
+				}
 			}
-			let claudeOk = true;
-			for (const account of claude) if (!(await this.runOne({ kind: 'claude', account }, trigger))) claudeOk = false;
-			if (!claudeOk) return; // a stop pauses the rest too
-			for (const account of gpt) {
-				const waiting = account.web.resumeAfter429 || (account.web.cooldownUntil ?? 0) > Date.now();
-				// A ChatGPT cooldown only waits; other accounts and the desktop apps still run.
-				if (trigger !== 'manual' && waiting) continue;
-				if (!(await this.runOne({ kind: 'chatgpt', account }, trigger)) && this.autoPaused) return;
-			}
-			for (const account of lumo) if (!(await this.runOne({ kind: 'lumo', account }, trigger)) && this.autoPaused) return;
-			for (const account of gemini) if (!(await this.runGoogle(account, trigger)) && this.autoPaused) return;
-			if (desktop && !(await this.runOne({ kind: 'desktop' }, trigger)) && this.autoPaused) return;
-			if (hermes) await this.runOne({ kind: 'hermes' }, trigger);
 		});
+	}
+
+	private async syncAllParts(trigger: 'manual' | 'auto') {
+		const claude: ClaudeAccount[] = [];
+		for (const a of this.settings.claude) if (await this.canSyncWeb('claude', a)) claude.push(a);
+		const gpt: ChatgptAccount[] = [];
+		for (const a of this.settings.chatgpt) if (await this.canSyncWeb('chatgpt', a)) gpt.push(a);
+		const lumo: LumoAccount[] = [];
+		for (const a of this.settings.lumo) if (await this.canSyncWeb('lumo', a)) lumo.push(a);
+		const gemini: GeminiAccount[] = [];
+		for (const a of this.settings.gemini) if (await this.canSyncWeb('gemini', a)) gemini.push(a);
+		const desktop = anyDesktopEnabled(this);
+		const hermes = anyHermesEnabled(this);
+		if (!claude.length && !gpt.length && !lumo.length && !gemini.length && !desktop && !hermes) {
+			if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
+			return;
+		}
+		let claudeOk = true;
+		for (const account of claude) if (!(await this.runOne({ kind: 'claude', account }, trigger))) claudeOk = false;
+		if (!claudeOk) return; // a stop pauses the rest too
+		for (const account of gpt) {
+			const waiting = account.web.resumeAfter429 || (account.web.cooldownUntil ?? 0) > Date.now();
+			// A ChatGPT cooldown only waits; other accounts and the desktop apps still run.
+			if (trigger !== 'manual' && waiting) continue;
+			if (!(await this.runOne({ kind: 'chatgpt', account }, trigger)) && this.autoPaused) return;
+		}
+		for (const account of lumo) if (!(await this.runOne({ kind: 'lumo', account }, trigger)) && this.autoPaused) return;
+		for (const account of gemini) if (!(await this.runGoogle(account, trigger)) && this.autoPaused) return;
+		if (desktop && !(await this.runOne({ kind: 'desktop' }, trigger)) && this.autoPaused) return;
+		if (hermes) await this.runOne({ kind: 'hermes' }, trigger);
 	}
 
 	/** One sync at a time; after an error the automatic sync waits until you sync by hand. */
@@ -654,10 +668,20 @@ export default class AIChatBridge extends Plugin {
 				: target.kind === 'studio' ? await runStudioSync(this, target.account, update)
 				: target.kind === 'hermes' ? await runHermesSync(this, update, target.profileId)
 				: await runDesktopSync(this, update, undefined, undefined, target.only);
+		} catch (e) {
+			await this.recordRun(target, label, trigger, 'error', undefined, e instanceof Error ? e.message : String(e));
+			throw e;
 		} finally {
 			progress.finish();
 			this.progress = null;
 		}
+		await this.recordRun(target, label, trigger,
+			this.stopRequested ? 'stopped'
+				: 'nothingSelected' in r && r.nothingSelected ? 'nothing-selected'
+				: r.stopped ? ('resumeAt' in r && typeof r.resumeAt === 'number' ? 'waiting' : 'error')
+				: 'ok',
+			r,
+			this.stopRequested ? undefined : r.stopped ?? ('missing' in r && r.missing.length ? `Skipped, not found: ${r.missing.join(', ')}.` : undefined));
 		if (this.stopRequested) {
 			const saved = r.newCount + r.changedCount;
 			new Notice(`${label}: stopped. ${saved ? `${saved} saved before stopping` : 'Nothing new was saved'}; the next sync carries on from there.`, 8000);
@@ -685,6 +709,35 @@ export default class AIChatBridge extends Plugin {
 			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.${gone}`);
 		}
 		return true;
+	}
+
+	/** Where a run's result is filed, so the settings can show it (see last-run.ts). */
+	private runKeyOf(target: Target): string {
+		if (target.kind === 'hermes') return HERMES;
+		if (target.kind === 'desktop') return target.only ? runKey('desktop', target.only.provider, target.only.id) : DESKTOP_ALL;
+		if (target.kind === 'studio') return runKey('studio', 'gemini', target.account.id);
+		return runKey('web', target.kind, target.account.id);
+	}
+
+	private async recordRun(target: Target, label: string, trigger: SyncTrigger, outcome: RunOutcome, r?: { newCount: number; changedCount: number; unchanged: number; restored: unknown[]; leftForLater?: number }, note?: string): Promise<void> {
+		const run: LastRun = {
+			at: Date.now(),
+			trigger,
+			outcome,
+			label,
+			newCount: r?.newCount ?? 0,
+			changedCount: r?.changedCount ?? 0,
+			unchanged: r?.unchanged ?? 0,
+			restored: r?.restored.length ?? 0,
+			leftForLater: r?.leftForLater ?? 0,
+		};
+		if (note) run.note = note.length > 300 ? `${note.slice(0, 300)}…` : note;
+		this.settings.lastRuns[this.runKeyOf(target)] = run;
+		try {
+			await this.saveSettings();
+		} catch (e) {
+			console.error('AI ChatBridge: could not save the last run', e instanceof Error ? e.message : e);
+		}
 	}
 
 	async loadSettings() {

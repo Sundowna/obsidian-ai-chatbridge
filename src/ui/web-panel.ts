@@ -9,6 +9,7 @@ import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount } from '
 import { advanced, bindSyncButton, contentOptions, count, filingOptions, folderSetting, projectFilterOptions, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { googleRawMoves, webRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
+import { lastRunLine, runKey } from '../last-run';
 
 /** Login state with only the buttons that make sense for it. */
 function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string, surface: 'web' | 'studio' = 'web'): void {
@@ -18,6 +19,7 @@ function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, accoun
 	const ref = loginRef(provider, account);
 	const row = new Setting(el).setName('Login').setDesc('Checking…');
 	row.settingEl.addClass('ccs-primary-row');
+	lastRunLine(row.infoEl, plugin.settings.lastRuns[runKey(surface, provider, account.id)]);
 	const sync = (cta: boolean) =>
 		row.addButton((b) => {
 			b.setButtonText('Sync now');

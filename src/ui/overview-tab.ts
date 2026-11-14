@@ -7,6 +7,7 @@ import { profileGone } from '../hermes/profiles';
 import { bindSyncButton, count, type PanelContext } from './fields';
 import { hermesIcon, providerIcon } from './icons';
 import { addAccountButton } from './provider-tab';
+import { allText, desktopRun, HERMES, lastRunLine, runKey, type LastRun } from '../last-run';
 
 function surfaceLine(parent: HTMLElement, icon: string, name: string): { dot: HTMLElement; text: HTMLElement } {
 	const line = parent.createDiv({ cls: 'ccs-surface-line' });
@@ -38,6 +39,8 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 		desktop.text.setText(app.enabled ? count(Object.keys(app.index).length, 'session') : 'Off');
 	}
 
+	accountLastRun(ctx, card, provider, account);
+
 	const sync = head.createEl('button', { text: 'Sync', cls: 'ccs-card-sync' });
 	void isLoggedIn(loginRef(provider, account)).then((ok) => {
 		web.dot.toggleClass('is-on', ok);
@@ -45,6 +48,25 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 	});
 	// One run for the whole account, so Stop ends all of it.
 	bindSyncButton(ctx, sync, () => ctx.plugin.isSyncing(provider, account.id), () => void ctx.plugin.syncWholeAccount(provider, account).then(ctx.refresh));
+}
+
+/** The account's latest run over all its surfaces; a failed one wins, so a problem is never hidden. */
+function accountLastRun(ctx: PanelContext, card: HTMLElement, provider: Provider, account: AnyAccount): void {
+	const runs = ctx.plugin.settings.lastRuns;
+	const all: LastRun[] = [];
+	const web = runs[runKey('web', provider, account.id)];
+	if (web) all.push(web);
+	if ('desktop' in account && account.desktop.enabled) {
+		const d = desktopRun(runs, provider, account.id);
+		if (d) all.push(d);
+	}
+	if ('studio' in account && account.studio.enabled) {
+		const st = runs[runKey('studio', provider, account.id)];
+		if (st) all.push(st);
+	}
+	const failed = all.filter((r) => r.outcome === 'error').sort((a, b) => b.at - a.at)[0];
+	const latest = [...all].sort((a, b) => b.at - a.at)[0];
+	lastRunLine(card, failed ?? latest);
 }
 
 /** Hermes Agent: how many agents (profiles) are on, and what they saved. Selecting the title opens its tab. */
@@ -67,6 +89,7 @@ function hermesCard(ctx: PanelContext, parent: HTMLElement): void {
 	const chats = surfaceLine(card, 'messages-square', 'Chats');
 	chats.dot.toggleClass('is-on', saved > 0);
 	chats.text.setText(count(saved, 'chat'));
+	lastRunLine(card, ctx.plugin.settings.lastRuns[HERMES]);
 
 	if (!on.length) {
 		// Nothing to sync yet: the button leads to where agents are turned on.
@@ -121,6 +144,13 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 	const list = saved.length > 2 ? `${saved.slice(0, -1).join(', ')} and ${saved[saved.length - 1]!}` : saved.join(' and ');
 	words.createDiv({ cls: 'ccs-hero-title', text: 'Sync everything' });
 	words.createDiv({ cls: 'ccs-hero-desc', text: `${list} saved so far.` });
+	if (s.lastAll) {
+		const { text, tone } = allText(s.lastAll, s.lastRuns);
+		const line = words.createDiv({ cls: `ccs-last-run is-${tone}` });
+		setIcon(line.createSpan({ cls: 'ccs-glyph' }), 'history');
+		line.createSpan({ cls: 'ccs-dot' });
+		line.createSpan({ cls: 'ccs-last-run-text', text });
+	}
 	heroButtons(ctx, hero);
 
 	for (const provider of ['claude', 'chatgpt', 'lumo', 'gemini'] as const) {

@@ -102,5 +102,6 @@ export function removeAccount(s: Settings, provider: Provider, account: AnyAccou
 	else if (provider === 'lumo') s.lumo = s.lumo.filter((a) => a !== account);
 	else if (provider === 'gemini') s.gemini = s.gemini.filter((a) => a !== account);
 	else s.chatgpt = s.chatgpt.filter((a) => a !== account);
+	for (const key of Object.keys(s.lastRuns)) if (key.endsWith(`:${provider}:${account.id}`)) delete s.lastRuns[key];
 	return true;
 }
