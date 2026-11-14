@@ -7,7 +7,7 @@
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with, endorsed by, or supported by Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is ever changed or deleted on the provider's side. The plugin reads the same web endpoints your browser uses, which can change without notice.
 
-**New in 0.28:** **Refresh** for the [Hermes Agent](#hermes-agent) profile list, and profiles that are gone no longer stop the sync. See the [changelog](CHANGELOG.md) for everything else.
+**New in 0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
 
 ## Contents
 
@@ -17,11 +17,14 @@
 - [How it looks in your vault](#how-it-looks-in-your-vault)
 - [Choosing what to sync](#choosing-what-to-sync)
 - [Multiple accounts](#multiple-accounts)
+- [See how the last sync went](#see-how-the-last-sync-went)
 - [Desktop app sessions](#desktop-app-sessions)
+- [Claude Code cloud sessions](#claude-code-cloud-sessions)
 - [Hermes Agent](#hermes-agent)
 - [Commands](#commands)
 - [Part of the Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite)
 - [Privacy and network use](#privacy-and-network-use)
+- [Requirements](#requirements)
 - [Installation](#installation)
 - [FAQ](#faq)
 - [Development](#development)
@@ -37,13 +40,15 @@
 - **Several accounts per provider** - e.g. two Claude Pro accounts; they share one folder per provider and `account:` in each note tells them apart
 - **Runs on its own** - automatic sync every 30 minutes or more, optional sync on startup, and it waits out "too many requests" (HTTP 429) pauses by itself
 - **Stop anytime** - **Stop all** on the Overview, the ribbon, the status bar or any account's **Stop**; everything saved so far stays
+- **See how it went** - every account shows its last sync: when, what was saved, and why it stopped if it did
 - **Readable answers** - ChatGPT's visual answers (cards, charts, source chips) and voice chats come through as text and pictures, not "see raw JSON"
 
 ## What gets synced
 
 | From | What | Files |
 | --- | --- | --- |
-| **Claude** (claude.ai) | Chats per project, plus Claude Code sessions listed on claude.ai | Artifacts and uploads |
+| **Claude** (claude.ai) | Chats per project | Artifacts and uploads |
+| **Claude Code cloud** (claude.ai/code) | Sessions that ran in Anthropic's cloud, one folder per GitHub repository | Pasted images and files Claude wrote |
 | **ChatGPT** | Chats per project, archived chats optional; custom GPT chats go to `Recent` | Generated files and uploads |
 | **Gemini** | Chats | Pictures as links |
 | **Google AI Studio** | Chats and prompts | - |
@@ -58,7 +63,7 @@
 2. Open **Settings → AI ChatBridge**
 3. Pick a tab - **Claude**, **ChatGPT**, **Lumo** or **Gemini** - and select **Log in**. Sign in as you would in your browser; the window closes by itself once you're in
 4. Keep the default folders under `AI Chats/`, or choose your own
-5. Select **Sync now**, or **Sync all** on the **Overview** tab - it shows every account and your Hermes agents at a glance
+5. Select **Sync now**, or **Sync all** on the **Overview** tab - it shows every account and your Hermes agents at a glance, and how each one's last sync went
 
 > [!TIP]
 > **Max chats per run** starts at 3, so the first sync is a quick test. Set it to `0` (General tab) to sync everything.
@@ -141,6 +146,15 @@ Two accounts can share one desktop app without anything being saved twice. A ses
 
 A session that's already saved stays with the account that saved it.
 
+## See how the last sync went
+
+You don't have to catch the notice to know what a sync did. Each account remembers its last run:
+
+- **Overview** - every account card and the Hermes card have a **Last sync** line, e.g. "today 14:02: 3 new, 1 changed, 240 unchanged". Under the totals at the top, one line sums up the last **Sync all** and names any account that had a problem
+- **Each tab** - the sync row of **Web**, **Desktop app**, **AI Studio** and **Hermes** shows that part's last run
+- **The dot** - green: it went fine. Orange: you stopped it, it is waiting out a ChatGPT cooldown, no projects were selected, or Hermes profiles were not found. Red: it failed, with the reason
+- Automatic syncs are marked "(automatic)". Only counts and the stop reason are kept (in `data.json`), never chat text
+
 ## Desktop app sessions
 
 Some chats only live on your computer: Claude Code sessions from the Claude desktop app and CLI (`~/.claude/projects`) and Codex threads from the ChatGPT/Codex desktop app and CLI (`~/.codex/sessions`). AI ChatBridge saves those too, one note per session.
@@ -150,6 +164,17 @@ Some chats only live on your computer: Claude Code sessions from the Claude desk
 - Sessions still running wait until they have been quiet for a while (15 minutes by default)
 - Session files somewhere else? Add the folder under **Extra session folders**
 - Claude Cowork sessions are kept in the cloud, not on your computer, so they can't be read locally
+
+## Claude Code cloud sessions
+
+Sessions that ran in Anthropic's cloud - on claude.ai/code, or started from the Claude phone app - are saved with the claude.ai sync, into the **Code Cloud folder** (`Claude/Code-Cloud/<repo>/`), one subfolder per GitHub repository.
+
+- The note says `app: "Claude Code (cloud)"`, names the `repo:` and links back to the session on claude.ai. The raw `.json` holds every event
+- Pasted images go to `Attachments/` and files Claude wrote in full to `Artifacts/`
+- A session that is still running is saved once it's done. A session that goes on later gets an `(updated …)` note next to the old one
+- Sessions you steered from claude.ai but that ran on your computer (Remote Control) are left to **Code Local**, so nothing is saved twice
+- On by default. Turn it off per account with **Claude Code cloud sessions** in the Claude tab
+- Codex cloud tasks are not synced yet
 
 ## Hermes Agent
 
@@ -210,7 +235,7 @@ This is one of three pieces of the **Sundowna Second Brain Suite (SSBS)**. Toget
 | Piece | Kind | What it does | Get it |
 |---|---|---|---|
 | **AI ChatBridge** (you are here) | Plugin | Brings your chats from Claude, ChatGPT, Gemini and others into the vault as Markdown | [Obsidian community](https://community.obsidian.md/plugins/ai-chatbridge) |
-| [**OneNote Style**](https://github.com/Sundowna/obsidian-onenote-style) | Plugin | The ribbon you already know: Office-style tabs, groups and buttons for any command, plus note tags and subpages. Its **AI** group runs AI ChatBridge's sync commands with one click | [Obsidian community](https://community.obsidian.md/plugins/onenote-style) |
+| [**OneNote Style**](https://github.com/Sundowna/obsidian-onenote-style) | Plugin | The ribbon you already know: Office-style tabs, groups and buttons for any command, plus note tags, subpages and editing without Markdown syntax. Its **AI** group runs AI ChatBridge's sync commands with one click | [Obsidian community](https://community.obsidian.md/plugins/onenote-style) |
 | [**OneNote Style theme**](https://github.com/Sundowna/obsidian-onenote-theme) | Theme | OneNote's look: white pages, Calibri, OneNote's heading styles, light and dark | [Obsidian community](https://community.obsidian.md/themes/onenote-style) |
 
 Each works on its own. Together they are low friction from the first minute.
@@ -289,7 +314,7 @@ npm run lint    # eslint with eslint-plugin-obsidianmd
 
 For live testing, clone the repo into `<vault>/.obsidian/plugins/ai-chatbridge/` (or copy the build output there) and reload Obsidian.
 
-Tests run offline with made-up samples: `npm run test:gemini`, `test:lumo`, `test:desktop`, `test:hermes`, `test:inventory` and `test:sync`. `test:hermes` builds a small SQLite database in a temporary folder (set `HERMES_PYTHON` to also test the Python reader with a specific interpreter). `npm run test:offline` also reads chat exports from `samples/`, which is git-ignored because it holds real chats - add your own exports to run it.
+Tests run offline with made-up samples: `npm run test:gemini`, `test:lumo`, `test:desktop`, `test:cloud`, `test:hermes`, `test:inventory` and `test:sync`. `test:hermes` builds a small SQLite database in a temporary folder (set `HERMES_PYTHON` to also test the Python reader with a specific interpreter). `npm run test:offline` also reads chat exports from `samples/`, which is git-ignored because it holds real chats - add your own exports to run it.
 
 ### Releasing
 
