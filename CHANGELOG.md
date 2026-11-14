@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.30.0 - 2026-11-14
+
+### New
+- **How the last sync went** - each account now says when it last synced and what that run did, without waiting for a notice. The Overview's account cards and Hermes card show a **Last sync** line, e.g. "today 14:02: 3 new, 1 changed, 240 unchanged", and so does the sync row in each tab (Web, Desktop app, AI Studio, Hermes). A green dot means it went fine; orange means you stopped it, it is waiting for a ChatGPT cooldown, no projects were selected or Hermes profiles were not found; red means it failed, with the reason. Automatic syncs are marked "(automatic)"
+- **Last Sync all** - under "… saved so far" on the Overview, one line sums up the last **Sync all** and names any account that had a problem
+
 ## 0.29.0 - 2026-11-13
 
 ### New
