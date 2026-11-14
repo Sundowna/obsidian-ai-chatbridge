@@ -9,6 +9,7 @@ import type { ChatgptAccount, ClaudeAccount } from '../settings';
 import { advanced, bindSyncButton, count, folderSetting, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { desktopRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
+import { desktopRun, lastRunLine } from '../last-run';
 
 /** How this account's sessions are told apart from another account's. */
 function matchText(provider: Provider, account: DesktopAccount, isFirst: boolean, several: boolean): string {
@@ -43,6 +44,7 @@ export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provi
 		);
 	row.settingEl.addClass('ccs-primary-row');
 	if (conf.enabled) {
+		lastRunLine(row.infoEl, desktopRun(ctx.plugin.settings.lastRuns, provider, account.id));
 		row.addButton((b) =>
 			bindSyncButton(ctx, b.setButtonText('Sync now').setCta().buttonEl, () => ctx.plugin.isSyncing(provider, account.id), () => void ctx.plugin.syncAccount(provider, account, 'desktop').then(ctx.refresh)),
 		);

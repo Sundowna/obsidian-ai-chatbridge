@@ -177,6 +177,8 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			gemini: saved.gemini?.length ? saved.gemini.map(hydrateGemini) : firstGemini(hydratedClaude[0]!.web.chatFolder),
 			desktop: { ...DEFAULT_DESKTOP, ...saved.desktop },
 			hermes: hydrateHermes(saved.hermes, hydratedClaude[0]!.web.chatFolder),
+			lastRuns: { ...(saved.lastRuns ?? {}) },
+			lastAll: saved.lastAll,
 		},
 	};
 }
