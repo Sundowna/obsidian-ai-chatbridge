@@ -43,9 +43,18 @@ function fromBase64(data: string): ArrayBuffer {
 const toBuffer = (u: Uint8Array): ArrayBuffer => u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
 const slashes = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
 
+/**
+ * A temp folder: Windows (AppData/Local/Temp), Linux (/tmp, /var/tmp) and macOS
+ * (/var/folders/…/T, and the same under /private, where macOS really keeps them).
+ */
+export function inTempFolder(path: string): boolean {
+	const p = slashes(path);
+	return /\/AppData\/Local\/Temp\//i.test(p) || /^(\/private)?\/(tmp|var\/tmp|var\/folders)\//.test(p);
+}
+
 /** Working copies Claude wrote for itself: kept only if it sent or published them. */
 function scratch(ctx: FileSaveContext, path: string): boolean {
-	return sameOrUnder(path, claudeHome(ctx.fs)) || /\/AppData\/Local\/Temp\//i.test(slashes(path)) || /^\/tmp\//.test(slashes(path));
+	return sameOrUnder(path, claudeHome(ctx.fs)) || inTempFolder(path);
 }
 
 /** The file's bytes: from disk (its latest version), else what the session itself holds. */

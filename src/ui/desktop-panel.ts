@@ -9,6 +9,7 @@ import type { ChatgptAccount, ClaudeAccount } from '../settings';
 import { advanced, bindSyncButton, count, folderSetting, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { desktopRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
+import { hostPlatform } from '../platform';
 import { desktopRun, lastRunLine } from '../last-run';
 
 /** How this account's sessions are told apart from another account's. */
@@ -62,10 +63,11 @@ export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provi
 		.setDesc(`${roots.join(' and ')}.${matchText(provider, account, isFirst, list.length > 1)}`);
 
 	const more = advanced(ctx, el, `desktop-${provider}-${account.id}`);
-	const example = provider === 'claude' ? 'C:/Users/me/.claude-work/projects' : 'C:/Users/me/.codex-work/sessions';
+	const userHome = hostPlatform() === 'win32' ? 'C:/Users/me' : '~';
+	const example = provider === 'claude' ? `${userHome}/.claude-work/projects` : `${userHome}/.codex-work/sessions`;
 	new Setting(more)
 		.setName('Extra session folders')
-		.setDesc('One folder per line, for example the config folder of a second login. Everything in these folders belongs to this account. Subfolders are included.')
+		.setDesc('One folder per line, for example the config folder of a second login. Everything in these folders belongs to this account. Subfolders are included. A leading ~ means your home folder.')
 		.addTextArea((t) =>
 			t.setPlaceholder(example).setValue(conf.extraFolders.join('\n')).onChange(async (v) => {
 				conf.extraFolders = v.split('\n').map((x) => x.trim()).filter(Boolean);
