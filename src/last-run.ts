@@ -35,6 +35,7 @@ export type RunSurface = 'web' | 'desktop' | 'studio';
 export const runKey = (surface: RunSurface, provider: string, id: string): string => `${surface}:${provider}:${id}`;
 export const DESKTOP_ALL = 'desktop:all';
 export const HERMES = 'hermes';
+export const MEMORY = 'memory';
 
 /** The newer of two runs (either may be missing). */
 export function newer(a: LastRun | undefined, b: LastRun | undefined): LastRun | undefined {

@@ -21,6 +21,7 @@ Command IDs are stable API. Never rename.
 - [ ] `sync-all-chats` Sync all chats
 - [ ] `sync-claude-chats`, `sync-chatgpt-chats`, `sync-lumo-chats`, `sync-gemini-chats` (Gemini, then AI Studio if on)
 - [ ] `sync-desktop-app-chats`, `sync-hermes-chats`
+- [ ] `sync-ai-memory` Sync AI memory (not part of Sync all)
 - [ ] `reconcile-chatgpt-chats` (full check, not only recent changes)
 - [ ] `cancel-chatgpt-retry`: only offered while a retry waits and nothing runs
 - [ ] `stop-sync`: only offered while a sync runs and no stop was asked yet
@@ -82,7 +83,7 @@ Command IDs are stable API. Never rename.
 Every selected or active state needs a visible signal in light and dark theme.
 
 **Shell**
-- [ ] Tabs: Overview, Claude, ChatGPT, Lumo, Gemini, Hermes, General; each with icon; active tab has `is-active` and `aria-selected="true"`; hover style
+- [ ] Tabs: Overview, Claude, ChatGPT, Lumo, Gemini, Hermes, Memory, General; each with icon; active tab has `is-active` and `aria-selected="true"`; hover style
 - [ ] Current tab, selected account per provider, selected surface and open Advanced sections survive a redraw; scroll position kept on redraw, reset to top on tab change
 - [ ] Closing settings forgets in-memory project lists (Lumo)
 
@@ -121,6 +122,14 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Per profile: toggle, **Sync** when on, remove icon only with nothing saved
 - [ ] "No longer found" group: reason, toggle with tooltip, **Remove** (confirm when it has saved sessions; notes stay)
 - [ ] Advanced: Python path, "How it reads" note
+
+**Memory tab** [code: ui/memory-tab.ts]
+- [ ] Desktop-only message without Node
+- [ ] Head with description, last-sync line and **Sync now** (both only with a source on; `bindSyncButton`)
+- [ ] Memory folder (folder field with suggestions and **Browse…**)
+- [ ] "On this computer" heading naming the account (computer name); one row each for Codex and Claude Code: the folder it reads, last snapshot time and file count, toggle (off by default; redraws the tab)
+- [ ] Automatic memory sync (minutes): 0 off, minimum 30, bad input ignored; own timer, restarted on change
+- [ ] "What is saved" note
 
 **General tab**
 - [ ] Max chats per run, Delay, Sync all on startup, Automatic sync (each validated; bad input ignored)
@@ -175,6 +184,22 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Remote Control sessions left to Code Local, not saved twice
 - [ ] Hermes: read-only snapshot via SQLite backup (built-in SQLite, else Python), per-profile folder, tool steps as collapsed callout (600 / 1,200 char cut), helper sessions optional, recently active skipped, `Private` never read, missing profiles skipped
 - [ ] Vault layout `AI Chats/<Provider>/…`, raw files mirrored under the raw files folder, accounts share one folder per provider
+
+## 7b. AI memory [code: src/memory, covered by `npm run test:memory`]
+
+- [ ] Sources, each off by default: Codex local (`AGENTS.override.md`, `AGENTS.md`, `memories/`, `memories_v2/`, table `stage1_outputs` of `memories_*.sqlite` via read-only snapshot) and Claude Code local (`CLAUDE.md`, `projects/*/memory/`); `CODEX_HOME` and `CLAUDE_CONFIG_DIR` honoured
+- [ ] Output `<memory folder>/<provider>/<account>/YYYY-MM-DD.md` plus `_latest.md`; local account = computer name
+- [ ] Properties: `provider`, `account`, `source`, `synced`, `hash`, `files`, `unread: true`; `_latest.md` also `snapshot:` link
+- [ ] Body: places read with what was found, then one H2 per memory file (its path below the AI's home) with the text in a code block whose fence is longer than any backtick run inside
+- [ ] Text is never filtered, translated or corrected (user decision, 2026-11-16: no redaction)
+- [ ] Snapshot only when the SHA-256 of the body differs from the last one (sync history in `data.json`, else the hash in `_latest.md`); unchanged writes nothing, not even `_latest.md`
+- [ ] A dated snapshot is never written over: a second change that day is `YYYY-MM-DD (HHmm).md`; only `_latest.md` is replaced
+- [ ] All snapshots of a source deleted = saved again on the next sync
+- [ ] `Private`: a home inside one is refused, `Private` subfolders and Claude Code projects with `Private` as a name part are skipped (and named in the note), a memory folder inside one is refused
+- [ ] Files over 2 MB or not text are named, not copied; Codex's use counters (`usage_count`, `last_usage`, `selected_for_phase2…`) are left out
+- [ ] A source with no home folder writes nothing and is named in the result ("Nothing to read for: …")
+- [ ] Runs through the normal sync guard: one at a time, last-run line (`memory`), notice, log line **AI memory:** only when something was written or it stopped
+- [ ] Not done yet: claude.ai and ChatGPT memories (web), import from a data-export ZIP
 
 ## 8. Windows, macOS and Linux [code: platform.ts, folder-dialog.ts, computer.ts, desktop/scan.ts, hermes/profiles.ts]
 

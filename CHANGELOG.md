@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- **AI memory** - a new **Memory** tab saves what an AI keeps about you between chats as dated snapshots: its memory files and your global instructions. First sources, both on this computer and both off until you turn them on: **Codex** (`AGENTS.md`, `memories/`, `memories_v2/` and the per-thread notes in its memory database) and **Claude Code** (`CLAUDE.md` and every project's memory folder). A snapshot is written only when something changed, `_latest.md` always holds the current state, and the text is saved exactly as the AI keeps it: nothing is filtered, translated or corrected. New command **Sync AI memory**, with its own optional interval; **Sync all** does not include it
+
 ## 0.32.0 - 2026-11-16
 
 One note per chat. A chat that continues no longer gets a second `(updated …)` note.
