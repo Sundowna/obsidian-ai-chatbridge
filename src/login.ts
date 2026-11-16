@@ -1,6 +1,7 @@
 // Login windows: you sign in on the real website, in a window inside Obsidian.
 // The login cookies stay in that window's own Electron storage (outside the vault,
-// encrypted by Windows) – never in data.json, never in a note, never logged.
+// protected the way the system protects Obsidian's own: Windows DPAPI, the macOS Keychain,
+// the Linux keyring if one runs) – never in data.json, never in a note, never logged.
 // The plugin reads them in memory only, when it needs them for a sync.
 
 export type Provider = 'claude' | 'chatgpt' | 'lumo' | 'gemini';

@@ -7,7 +7,8 @@ import type { HermesProfile } from '../hermes/types';
 import {
 	addFoundProfiles, discoverProfiles, newProfile, nodeFs, profileGone, profileId, refreshProfiles, refreshSummary, removeProfile, uniqueLabel, type ProfileGone,
 } from '../hermes/profiles';
-import { isPrivatePath, nodeRequire } from '../hermes/reader';
+import { homeFolder, isPrivatePath, nodeRequire } from '../hermes/reader';
+import { expandHome, hostPlatform } from '../platform';
 import { hermesIcon } from './icons';
 import { HERMES, lastRunLine } from '../last-run';
 import { advanced, bindSyncButton, count, folderSetting, type PanelContext } from './fields';
@@ -53,7 +54,7 @@ export function hermesTab(ctx: PanelContext, el: HTMLElement): void {
 		.setName('Python')
 		.setDesc("Only used when Obsidian has no built-in SQLite. Empty = Hermes' own Python (in its tools folder), else the first Python found on this computer.")
 		.addText((t) =>
-			t.setPlaceholder('D:/AI/Hermes/tools/python-…/python.exe').setValue(h.pythonPath).onChange(async (v) => {
+			t.setPlaceholder(hostPlatform() === 'win32' ? 'D:/AI/Hermes/tools/python-…/python.exe' : '/usr/bin/python3').setValue(h.pythonPath).onChange(async (v) => {
 				h.pythonPath = v.trim();
 				await save();
 			}),
@@ -212,10 +213,11 @@ function missingProfiles(ctx: PanelContext, el: HTMLElement, gone: Map<HermesPro
 
 function addByPath(ctx: PanelContext): void {
 	const h = ctx.plugin.settings.hermes;
-	const folderOf = (typed: string) => typed.trim().replace(/[\\/]state\.db$/i, '');
+	// "~" is the home folder, as a shell on macOS or Linux reads it.
+	const folderOf = (typed: string) => expandHome(typed, homeFolder()).replace(/[\\/]state\.db$/i, '');
 	new NameModal(ctx.app, {
 		title: 'Add a Hermes profile',
-		hint: 'The profile folder that holds state.db, for example D:/AI/Hermes/profiles/coder.',
+		hint: `The profile folder that holds state.db, for example ${hostPlatform() === 'win32' ? 'D:/AI/Hermes/profiles/coder' : '~/.hermes/profiles/coder'}.`,
 		action: 'Add profile',
 		problem: (p) => {
 			const path = folderOf(p);

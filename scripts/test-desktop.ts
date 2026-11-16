@@ -6,7 +6,11 @@
 import { parseClaudeSession, cleanClaudePrompt } from '../src/desktop/claude-code';
 import { codexTitles, parseCodexSession } from '../src/desktop/codex';
 import { renderDesktopTranscript, sessionFolderName } from '../src/desktop/render';
-import { codexHomes, listSessionFiles, sameOrUnder, type DesktopFs } from '../src/desktop/scan';
+import { claudeAppDataRoots, claudeHome, codexHomes, defaultRoots, listSessionFiles, sameOrUnder, typedFolder, type DesktopFs } from '../src/desktop/scan';
+import { inTempFolder } from '../src/desktop/session-save';
+import { dialogStartPath, vaultRelative } from '../src/folder-dialog';
+import { hostLabel } from '../src/computer';
+import { expandHome, isWindowsPath } from '../src/platform';
 import { runDesktopSync } from '../src/desktop/sync';
 import { claudeGroups, claudePlacement, codexProjectFor, normFolder, parseClaudeMeta, parseCodexState } from '../src/desktop/sections';
 import { findLatestJson, lastJsonObject, snappyDecompress } from '../src/desktop/leveldb';
@@ -175,6 +179,48 @@ class FakeFs implements DesktopFs {
 		const f = this.files.get(p);
 		return f ? new TextEncoder().encode(f.text) : null;
 	}
+}
+
+// --- macOS and Linux ------------------------------------------------------
+{
+	const mac = new FakeFs();
+	mac.home = '/Users/w';
+	mac.env = () => undefined;
+	const linux = new FakeFs();
+	linux.home = '/home/w';
+	linux.env = (n: string) => (n === 'XDG_CONFIG_HOME' ? '/home/w/.cfg' : undefined);
+
+	expect('mac: session folders', defaultRoots(mac, 'claude').join() === '/Users/w/.claude/projects' && defaultRoots(mac, 'codex').join() === '/Users/w/.codex/sessions,/Users/w/.codex/archived_sessions');
+	expect('mac: Claude app data', claudeAppDataRoots(mac).join('|') === '/Users/w/Library/Application Support/Claude|/Users/w/.config/Claude');
+	expect('linux: Claude app data follows XDG_CONFIG_HOME', claudeAppDataRoots(linux).join('|') === '/home/w/Library/Application Support/Claude|/home/w/.cfg/Claude|/home/w/.config/Claude');
+	linux.env = (n: string) => (n === 'XDG_CONFIG_HOME' ? 'relative/cfg' : undefined);
+	expect('linux: a relative XDG_CONFIG_HOME is ignored', !claudeAppDataRoots(linux).some((r) => r.startsWith('relative')));
+	linux.env = (n: string) => (n === 'CLAUDE_CONFIG_DIR' ? '~/.claude-work' : undefined);
+	expect('linux: ~ in CLAUDE_CONFIG_DIR', claudeHome(linux) === '/home/w/.claude-work');
+
+	expect('~: home folder', expandHome('~/.codex-work/sessions', '/home/w') === '/home/w/.codex-work/sessions' && expandHome('~', '/Users/w/') === '/Users/w' && expandHome('~\\x', 'C:\\Users\\W') === 'C:\\Users\\W\\x');
+	expect('~: other spellings untouched', expandHome('~bob/x', '/home/w') === '~bob/x' && expandHome('/a/~/b', '/home/w') === '/a/~/b' && expandHome('~/x', '') === '~/x');
+	expect('~: typed extra folder', typedFolder(linux, ' ~/.codex-work/sessions ') === '/home/w/.codex-work/sessions');
+	expect('~: second Codex home found', codexHomes(linux, ['~/.codex-work/sessions']).join() === '/home/w/.codex,/home/w/.codex-work');
+
+	expect('temp: all three systems', inTempFolder('C:\\Users\\W\\AppData\\Local\\Temp\\a.png') && inTempFolder('/tmp/a.png') && inTempFolder('/var/tmp/a.png')
+		&& inTempFolder('/var/folders/zz/abc/T/a.png') && inTempFolder('/private/var/folders/zz/abc/T/a.png') && inTempFolder('/private/tmp/a.png'));
+	expect('temp: not a normal folder', !inTempFolder('/home/w/tmp/a.png') && !inTempFolder('/Users/w/Documents/a.png') && !inTempFolder('D:/Work/Temp/a.png'));
+
+	expect('paths: Windows or not', isWindowsPath('C:\\V') && isWindowsPath('d:/V') && isWindowsPath('\\\\nas\\share') && !isWindowsPath('/Users/w/V') && !isWindowsPath('/home/w/V'));
+	expect('dialog: starts with the system\'s separators', dialogStartPath('C:\\Vault', 'AI Chats/Claude') === 'C:\\Vault\\AI Chats\\Claude' && dialogStartPath('/Users/w/Vault', 'AI Chats/Claude') === '/Users/w/Vault/AI Chats/Claude' && dialogStartPath('/home/w/Vault/', '') === '/home/w/Vault');
+	const rel = (base: string, chosen: string, p: 'win32' | 'darwin' | 'linux') => {
+		const r = vaultRelative(base, chosen, p);
+		return r.ok ? r.path : r.reason;
+	};
+	expect('dialog: Windows pick', rel('C:\\Vault', 'c:\\vault\\AI Chats\\Claude', 'win32') === 'AI Chats/Claude' && rel('C:\\Vault', 'C:\\Vault', 'win32') === 'root' && rel('C:\\Vault', 'C:\\Vault2\\x', 'win32') === 'outside');
+	expect('dialog: macOS pick', rel('/Users/w/Vault', '/Users/w/Vault/AI Chats/Claude', 'darwin') === 'AI Chats/Claude' && rel('/Users/w/Vault', '/Users/w/vault/AI Chats', 'darwin') === 'AI Chats' && rel('/Users/w/Vault', '/Users/w/Vault/.obsidian', 'darwin') === 'hidden');
+	expect('dialog: Linux pick is case-sensitive', rel('/home/w/Vault', '/home/w/Vault/AI Chats', 'linux') === 'AI Chats' && rel('/home/w/Vault', '/home/w/vault/AI Chats', 'linux') === 'outside' && rel('/home/w/Vault', '/home/w/Vault/', 'linux') === 'root');
+	expect('dialog: a backslash in a Linux folder name stays', rel('/home/w/Vault', '/home/w/Vault/a\\b', 'linux') === 'a\\b');
+
+	expect('computer: network ending dropped', hostLabel('Walters-MacBook-Pro.local') === 'Walters-MacBook-Pro' && hostLabel('tower.fritz.box') === 'tower' && hostLabel('Tower') === 'Tower');
+	expect('computer: an address is no name', hostLabel('192.168.1.20') === '' && hostLabel('fe80::1') === '' && hostLabel('  ') === '');
+	expect('folder: macOS and Linux working folders', sessionFolderName('/Users/w/dev/My Repo/', 'Other') === 'My Repo' && sessionFolderName('/', 'Other') === 'Other' && sessionFolderName('/home/w/.claude/scratch-workspaces/a/b/scratch-1', 'Other') === 'Scratch');
 }
 
 const vaultFiles = new Map<string, string>();

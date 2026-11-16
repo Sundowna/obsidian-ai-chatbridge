@@ -2,6 +2,7 @@
 // outside the vault is ever changed. The file system is passed in, so tests can
 // use a fake one; inside Obsidian it is Node's fs (desktop only).
 
+import { expandHome } from '../platform';
 import type { DesktopApp } from './types';
 
 export interface DesktopFs {
@@ -27,12 +28,17 @@ const SKIP_DIRS = new Set(['subagents', 'node_modules', '.git']);
 
 const join = (a: string, b: string) => `${a.replace(/[\\/]+$/, '')}/${b}`;
 
+/** A folder you typed, as the scanner reads it: "~" is the home folder, slashes forward. */
+export function typedFolder(fs: Pick<DesktopFs, 'home'>, folder: string): string {
+	return expandHome(folder, fs.home).replace(/\\/g, '/');
+}
+
 export function claudeHome(fs: DesktopFs): string {
-	return (fs.env('CLAUDE_CONFIG_DIR') || join(fs.home, '.claude')).replace(/\\/g, '/');
+	return typedFolder(fs, fs.env('CLAUDE_CONFIG_DIR') || join(fs.home, '.claude'));
 }
 
 export function codexHome(fs: DesktopFs): string {
-	return (fs.env('CODEX_HOME') || join(fs.home, '.codex')).replace(/\\/g, '/');
+	return typedFolder(fs, fs.env('CODEX_HOME') || join(fs.home, '.codex'));
 }
 
 /** The folders the app itself writes sessions to. */
@@ -55,7 +61,7 @@ export function sameOrUnder(path: string, folder: string): boolean {
  */
 export function codexHomes(fs: DesktopFs, extraFolders: string[]): string[] {
 	const homes = extraFolders.flatMap((f) => {
-		const m = /^(.*)\/(?:archived_)?sessions\/*$/i.exec(f.trim().replace(/\\/g, '/'));
+		const m = /^(.*)\/(?:archived_)?sessions\/*$/i.exec(typedFolder(fs, f));
 		return m?.[1] ? [m[1]] : [];
 	});
 	return [...new Set([codexHome(fs), ...homes])];
@@ -73,7 +79,7 @@ async function walk(fs: DesktopFs, dir: string, depth: number, out: string[]): P
 
 /** Every session file for one app: its own folders plus your extra folders, each file once. */
 export async function listSessionFiles(fs: DesktopFs, app: DesktopApp, extraFolders: string[]): Promise<SourceFile[]> {
-	const roots = [...defaultRoots(fs, app), ...extraFolders.map((f) => f.trim().replace(/\\/g, '/')).filter(Boolean)];
+	const roots = [...defaultRoots(fs, app), ...extraFolders.map((f) => typedFolder(fs, f)).filter(Boolean)];
 	const paths: string[] = [];
 	for (const root of new Set(roots)) await walk(fs, root, 0, paths);
 	const out: SourceFile[] = [];
@@ -90,15 +96,22 @@ export async function listSessionFiles(fs: DesktopFs, app: DesktopApp, extraFold
 	return out;
 }
 
-/** Where the Claude desktop app keeps its own data (Windows, Microsoft Store/MSIX redirect, macOS, Linux). */
-function claudeAppDataRoots(fs: DesktopFs): string[] {
+/**
+ * Where the Claude desktop app keeps its own data: Windows (with the Microsoft Store/MSIX
+ * redirect), macOS, and Linux (XDG_CONFIG_HOME if set, else ~/.config).
+ */
+export function claudeAppDataRoots(fs: DesktopFs): string[] {
 	const local = fs.env('LOCALAPPDATA')?.replace(/\\/g, '/');
 	const roaming = fs.env('APPDATA')?.replace(/\\/g, '/');
+	const xdg = fs.env('XDG_CONFIG_HOME')?.trim();
 	const roots: string[] = [];
 	if (local) roots.push(join(local, 'Claude-Data'), join(local, 'Claude'));
 	if (roaming) roots.push(join(roaming, 'Claude'));
-	roots.push(join(fs.home, 'Library/Application Support/Claude'), join(fs.home, '.config/Claude'));
-	return roots;
+	roots.push(join(fs.home, 'Library/Application Support/Claude'));
+	// A relative XDG_CONFIG_HOME is invalid by the XDG rules and must be ignored.
+	if (xdg?.startsWith('/')) roots.push(join(xdg, 'Claude'));
+	roots.push(join(fs.home, '.config/Claude'));
+	return [...new Set(roots)];
 }
 
 /** The Code tab's per-session files (local_<id>.json), which hold the titles shown in the app. */

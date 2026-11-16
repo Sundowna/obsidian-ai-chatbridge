@@ -17,7 +17,7 @@ import { saveSessionFiles, type FileSaveContext } from './session-save';
 import { codexTitles, parseCodexSession } from './codex';
 import { findLatestJson } from './leveldb';
 import { renderDesktopTranscript, sessionFolderName } from './render';
-import { claudeDesktopMetaFiles, claudeLocalStorageFiles, codexHomes, listSessionFiles, nodeDesktopFs, sameOrUnder, type DesktopFs, type SourceFile } from './scan';
+import { claudeDesktopMetaFiles, claudeLocalStorageFiles, codexHomes, listSessionFiles, nodeDesktopFs, sameOrUnder, typedFolder, type DesktopFs, type SourceFile } from './scan';
 import { claudeGroups, claudePlacement, codexProjectFor, parseClaudeMeta, parseCodexState, type ClaudeDesktopMeta, type CodexProjects } from './sections';
 import { APP_LABEL, type DesktopApp, type DesktopIndexEntry, type DesktopSession } from './types';
 import type { DesktopAccount } from '../accounts';
@@ -75,8 +75,8 @@ export function anyDesktopEnabled(plugin: AIChatBridge): boolean {
  * Null = wait: the session is clearly not the first account's, and an added account has not
  * logged in yet. Saving it now would file it under the wrong account for good.
  */
-export function desktopOwner(accounts: DesktopAccount[], app: DesktopApp, path: string, ownerId: string | undefined): DesktopAccount | null {
-	const byFolder = accounts.find((a) => a.desktop.extraFolders.some((f) => sameOrUnder(path, f)));
+export function desktopOwner(accounts: DesktopAccount[], app: DesktopApp, path: string, ownerId: string | undefined, home = ''): DesktopAccount | null {
+	const byFolder = accounts.find((a) => a.desktop.extraFolders.some((f) => sameOrUnder(path, home ? typedFolder({ home }, f) : f)));
 	if (byFolder) return byFolder;
 	const byLogin = ownerId ? accounts.find((a) => ownerIdOf(app, a) === ownerId) : undefined;
 	if (byLogin) return byLogin;
@@ -244,7 +244,7 @@ export async function runDesktopSync(
 
 				// A session already saved stays with its account, so nothing is ever saved twice.
 				const sessionId = session.id;
-				const owner = accounts.find((a) => a.desktop.index[sessionId]) ?? desktopOwner(accounts, which, file.path, session.ownerId);
+				const owner = accounts.find((a) => a.desktop.index[sessionId]) ?? desktopOwner(accounts, which, file.path, session.ownerId, fs.home);
 				if (!owner || !wanted(owner)) continue;
 				const conf = owner.desktop;
 				const entry = conf.index[session.id];

@@ -147,6 +147,10 @@ async function main() {
 	expect('isPrivatePath', isPrivatePath('D:\\Notes\\Private\\x') && !isPrivatePath('D:/Notes/PrivateNot/x'));
 	expect('hermesRoots: profile HERMES_HOME -> root', hermesRoots({ HERMES_HOME: 'D:\\AI\\Hermes\\profiles\\coder' }, 'C:/Users/me', 'win32')[0] === 'D:/AI/Hermes');
 	expect('hermesRoots: defaults', hermesRoots({ LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' }, 'C:/Users/me', 'win32').join('|') === 'C:/Users/me/AppData/Local/hermes|C:/Users/me/.hermes');
+	expect('hermesRoots: macOS and Linux use ~/.hermes only', hermesRoots({ LOCALAPPDATA: 'C:\\x' }, '/Users/me', 'darwin').join('|') === '/Users/me/.hermes' && hermesRoots({}, '/home/me/', 'linux').join('|') === '/home/me/.hermes');
+	expect('hermesRoots: HERMES_HOME on Linux', hermesRoots({ HERMES_HOME: '/opt/hermes/profiles/coder/' }, '/home/me', 'linux').join('|') === '/opt/hermes|/home/me/.hermes');
+	const home = (require('os') as { homedir(): string }).homedir();
+	expect('python: ~ in the Python setting is the home folder', pythonCandidates(require as unknown as (m: string) => unknown, '~/venv/bin/python3', [])[0] === `${home}/venv/bin/python3`);
 
 	// ---- Reader 1: node:sqlite ----
 	const node = nodeSqliteBackend();

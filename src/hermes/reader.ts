@@ -11,6 +11,8 @@
 //   2. A short Python script (sqlite3.backup), with Hermes' own bundled Python or one on the PATH.
 // Desktop only; on mobile there is neither, and the caller reports that.
 
+import { expandHome } from '../platform';
+
 export type Row = Record<string, unknown>;
 
 /** A snapshot of one state.db, readable with SQL. */
@@ -33,6 +35,15 @@ export function nodeRequire(): Req | null {
 	const w = typeof window === 'undefined' ? undefined : (window as unknown as { require?: Req });
 	if (typeof w?.require === 'function') return w.require;
 	return typeof require === 'function' ? (require as Req) : null;
+}
+
+/** The home folder, or '' where there is none to ask (mobile). */
+export function homeFolder(req: Req | null = nodeRequire()): string {
+	try {
+		return req ? (req('os') as { homedir(): string }).homedir() : '';
+	} catch {
+		return '';
+	}
 }
 
 interface NodeFs {
@@ -225,12 +236,12 @@ function concat(parts: Uint8Array[]): Uint8Array {
 
 /**
  * Pythons to try: the one in the settings, Hermes' bundled one (<Hermes root>/tools/python-*),
- * then "python3", "python", "py". The Microsoft Store placeholder is skipped.
+ * then "python3" (macOS, Linux), "python" and "py" (Windows). The Microsoft Store placeholder is skipped.
  */
 export function pythonCandidates(req: Req, configured: string, profilePaths: string[]): string[] {
 	const { fs, path } = tools(req);
 	const out: string[] = [];
-	if (configured.trim()) out.push(configured.trim());
+	if (configured.trim()) out.push(expandHome(configured, homeFolder(req)));
 	const roots = new Set<string>();
 	for (const p of profilePaths) {
 		roots.add(p);
