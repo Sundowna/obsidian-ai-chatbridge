@@ -1,6 +1,8 @@
 // The ONLY place that talks to chatgpt.com.
 // Rules: https://chatgpt.com only, GET only, only the addresses seen in DevTools
 // (allowlist below), no retries, stop on anything odd.
+// One exception to GET only (user decision, 2026-11-16): the memory summary has no GET, so it
+// is read with the same empty POST the settings page sends. It never carries a body.
 // Login: the cookies of the ChatGPT login window (or, without one, a pasted session cookie
 // from secret storage) + the key the chatgpt.com page carries.
 // Both stay in memory; every error text is cleaned of them before it is shown or logged.
@@ -24,7 +26,12 @@ const ALLOWED = [
 	/^\/backend-api\/gizmos\/snorlax\/sidebar$/,
 	/^\/backend-api\/files\/download\/file[-_][0-9A-Za-z]{10,64}$/,
 	/^\/backend-api\/estuary\/content$/,
+	/^\/backend-api\/memories$/,
+	/^\/backend-api\/user_system_messages$/,
 ];
+
+/** The one path that is read with POST, always without a body (see the rules above). */
+const SUMMARY_STREAM = '/backend-api/memories/about_you/summary/stream';
 
 /**
  * Turns per chat request – the value ChatGPT's own page uses (seen in DevTools).
@@ -152,6 +159,15 @@ export class GptApi {
 		}
 	}
 
+	/**
+	 * The memory summary as chatgpt.com streams it (server-sent events). An empty POST, as the
+	 * settings page sends it: no body, so it can never ask for a rewrite with a hint. If the
+	 * stored summary is out of date, ChatGPT may write a fresh one first, as it does for the page.
+	 */
+	async memorySummaryStream(): Promise<string> {
+		return (await this.request(`${SUMMARY_STREAM}?source=personalization-setting`, 'text/event-stream', true, false, 'POST')).text;
+	}
+
 	/** File info (JSON) or null if chatgpt.com says 404. */
 	async fileInfo(fileId: string, chatId: string): Promise<unknown> {
 		const res = await this.request(this.fileInfoPath(fileId, chatId), 'application/json', true, true);
@@ -252,18 +268,19 @@ export class GptApi {
 		return headers;
 	}
 
-	/** The single GET used by everything above. Stops on anything but 200 (and 404 if allowed). */
+	/** The single request used by everything above. Stops on anything but 200 (and 404 if allowed). */
 	private async request(path: string, accept: string, auth: boolean, notFoundOk: true): Promise<RequestUrlResponse | null>;
-	private async request(path: string, accept: string, auth: boolean, notFoundOk: false): Promise<RequestUrlResponse>;
-	private async request(path: string, accept: string, auth: boolean, notFoundOk: boolean): Promise<RequestUrlResponse | null> {
+	private async request(path: string, accept: string, auth: boolean, notFoundOk: false, method?: 'GET' | 'POST'): Promise<RequestUrlResponse>;
+	private async request(path: string, accept: string, auth: boolean, notFoundOk: boolean, method: 'GET' | 'POST' = 'GET'): Promise<RequestUrlResponse | null> {
 		const url = new URL(path, ORIGIN);
-		if (url.origin !== ORIGIN || !ALLOWED.some((re) => re.test(url.pathname))) {
+		const allowed = method === 'POST' ? url.pathname === SUMMARY_STREAM : ALLOWED.some((re) => re.test(url.pathname));
+		if (url.origin !== ORIGIN || !allowed) {
 			throw new StopError('Blocked a request to a chatgpt.com address the plugin does not use.');
 		}
 		const headers = this.headers(accept, auth);
 		let res;
 		try {
-			res = await requestUrl({ url: url.toString(), method: 'GET', headers, throw: false });
+			res = await requestUrl({ url: url.toString(), method, headers, throw: false });
 		} catch (e) {
 			throw new StopError(`Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`);
 		}

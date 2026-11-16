@@ -43,7 +43,7 @@
 - **Runs on its own** - automatic sync every 30 minutes or more, optional sync on startup, and it waits out "too many requests" (HTTP 429) pauses by itself
 - **Stop anytime** - **Stop all** on the Overview, the ribbon, the status bar or any account's **Stop**; everything saved so far stays
 - **See how it went** - every account shows its last sync: when, what was saved, and why it stopped if it did
-- **What the AI remembers about you** - the memory files and global instructions of Codex and Claude Code as dated snapshots, written only when they change (see [AI memory](#ai-memory))
+- **What the AI remembers about you** - the memory files and global instructions of Codex and Claude Code, Claude's memory files and your instructions on claude.ai, and ChatGPT's memory summary, saved memories and custom instructions, as dated snapshots, written only when they change (see [AI memory](#ai-memory))
 - **Readable answers** - ChatGPT's visual answers (cards, charts, source chips) and voice chats come through as text and pictures, not "see raw JSON"
 
 ## What gets synced
@@ -256,8 +256,10 @@ Every source is **off** until you turn it on.
 | --- | --- |
 | **Codex** (this computer) | `~/.codex/AGENTS.md`, everything in `~/.codex/memories/` and `~/.codex/memories_v2/`, and the per-thread notes in Codex's memory database (`memories_*.sqlite`). `CODEX_HOME` is used if set |
 | **Claude Code** (this computer) | `~/.claude/CLAUDE.md` and every project's memory folder, `~/.claude/projects/*/memory/`. `CLAUDE_CONFIG_DIR` is used if set |
+| **Claude** (claude.ai, per account) | Every **memory file** Claude keeps: `/profile.md`, topics, areas, people, and each project's own memory (shown as `/projects/<project name>/…`), plus your **instructions for Claude**. Read with the login of that Claude account |
+| **ChatGPT** (chatgpt.com, per account) | The **memory summary** with ChatGPT's own section headings, the **saved memories** (date and text, newest first) and your **custom instructions**. Read with the login of that ChatGPT account |
 
-claude.ai and ChatGPT memories are not synced yet.
+**ChatGPT and the summary:** everything on chatgpt.com is read with GET requests, except the memory summary, which ChatGPT only hands out the way its settings page asks for it (an empty POST). The plugin sends that request without any content, so it cannot ask for changes. If ChatGPT's stored summary is out of date, ChatGPT may write a fresh one first, exactly as when you open **Settings → Personalization → Memory summary** yourself. Saved memories are never edited or deleted.
 
 1. Open the **Memory** tab and turn on the sources you want
 2. Set the **Memory folder** (default `AI Memory`)
@@ -274,7 +276,7 @@ AI Memory/
       _latest.md           <- always the current state
 ```
 
-A snapshot is written only when something changed since the last one; a sync with no change writes nothing. A second change on the same day is saved as `2026-11-17 (1432).md`. The properties are `provider`, `account`, `source` (`local`), `synced`, `hash` (SHA-256 of the text below the properties) and `files`, plus `redacted` when the privacy filter replaced something. Below them is a list of the places that were read and what was found, then one heading per memory file with its text in a code block:
+A snapshot is written only when something changed since the last one; a sync with no change writes nothing. A second change on the same day is saved as `2026-11-17 (1432).md`. The properties are `provider`, `account`, `source` (`local` or `web`), `synced`, `hash` (SHA-256 of the text below the properties) and `files`, plus `redacted` when the privacy filter replaced something. Below them is a list of the places that were read and what was found, then one heading per memory file with its text in a code block:
 
 ````markdown
 ## /projects/D--Work-garden/memory/beds.md
@@ -288,7 +290,7 @@ Drei Beete.
 ```
 ````
 
-The code block is there so nothing is reformatted: a memory file's own headings and `---` lines stay exactly as they are.
+The code block is there so nothing is reformatted: a memory file's own headings and `---` lines stay exactly as they are. One thing is evened out: Windows line ends are saved as plain line ends, because Obsidian would change them anyway the first time you open the note.
 
 **Nothing is translated or corrected.** You see what the AI keeps, in whatever language it keeps it.
 
@@ -319,7 +321,7 @@ Only the value is replaced; the label and the rest of the line stay (`Passwort: 
 | **Sync Lumo chats** | All Proton Lumo accounts you're logged in to |
 | **Sync desktop app chats (Claude, Codex)** | Local Claude Code and Codex sessions |
 | **Sync Hermes Agent chats** | The Hermes profiles that are on |
-| **Sync AI memory** | A snapshot of what Codex and Claude Code keep about you, for the sources that are on in the **Memory** tab. Writes nothing if nothing changed |
+| **Sync AI memory** | A snapshot of what Codex, Claude Code, Claude and ChatGPT keep about you, for the sources that are on in the **Memory** tab. Writes nothing if nothing changed |
 | **Reconcile all ChatGPT chats** | Check all ChatGPT chats again, not just recent changes |
 | **Stop the running sync** | Stops after the current chat - so do **Stop all** on the Overview, the ribbon icon, the status bar text and **Stop** in the settings |
 | **Cancel pending chat sync retry** | Stop a waiting retry after a 429 pause |
@@ -356,7 +358,9 @@ This plugin needs network access for the web providers. Please read this before 
 - **ChatGPT's visual answers:** turned into plain HTML and pictures in your notes - nothing from a chat is ever run, and drawings can't load anything from other websites
 - **What is written:** transcripts, raw JSON, downloaded files and a sync log - only in the vault folders you choose. The sync index in `data.json` holds chat IDs and paths, no chat content and no secrets
 - **Files outside the vault (desktop apps and Hermes only):** the plugin *reads* local files only for what you turn on - for Claude Code and Codex: `~/.claude/projects`, the Claude desktop app's session list and Local Storage (for titles and sidebar groups), `~/.codex/.codex-global-state.json`, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl` and any extra folders you add; for Hermes: the `state.db` of each profile that is on. It never changes them and sends nothing over the network. Hermes snapshots are written to your system's temporary folder and deleted right after reading; if Obsidian has no built-in SQLite, a Python on your computer is started to make them. Hermes tool results can contain file contents, so they are shortened in the notes and steps mentioning a `Private` folder are left out
-- **AI memory (only for the sources you turn on):** reads `~/.codex/AGENTS.md`, `~/.codex/memories`, `~/.codex/memories_v2` and `~/.codex/memories_*.sqlite` for Codex, and `~/.claude/CLAUDE.md` and `~/.claude/projects/*/memory` for Claude Code. It never changes them and sends nothing over the network. The text is saved readable in your vault, so anything that can read your vault can read it. The privacy filter replaces passwords, recovery codes, 2FA seeds, ID numbers and card numbers it recognises with `[REDACTED]`, but it can miss some
+- **AI memory, Claude (only for the accounts you turn on):** asks claude.ai for the list of memory files, each file's text, the names of the projects that have memory, and your instructions for Claude, with the same login as the chat sync. Listing and reading memory files are requests that only read (claude.ai asks for them with POST, like its chat view). Nothing is changed there
+- **AI memory, ChatGPT (only for the accounts you turn on):** asks chatgpt.com for the memory summary, the saved memories and the custom instructions, with the same login as the chat sync. It changes nothing there (see [AI memory](#ai-memory) for the one request that is not a GET). Saved memories can hold names and email addresses; the privacy filter does not replace those
+- **AI memory, on this computer (only for the sources you turn on):** reads `~/.codex/AGENTS.md`, `~/.codex/memories`, `~/.codex/memories_v2` and `~/.codex/memories_*.sqlite` for Codex, and `~/.claude/CLAUDE.md` and `~/.claude/projects/*/memory` for Claude Code. It never changes them and sends nothing over the network. The text is saved readable in your vault, so anything that can read your vault can read it. The privacy filter replaces passwords, recovery codes, 2FA seeds, ID numbers and card numbers it recognises with `[REDACTED]`, but it can miss some
 - **Terms of service:** automated access may be limited by the providers' terms. Keep a reasonable delay between requests and use your own judgment
 
 ## Requirements

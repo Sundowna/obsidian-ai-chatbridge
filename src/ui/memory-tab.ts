@@ -5,6 +5,7 @@ import { Setting } from 'obsidian';
 import { computerName } from '../computer';
 import { claudeHome, codexHome, nodeDesktopFs } from '../desktop/scan';
 import { MEMORY, lastRunLine, when } from '../last-run';
+import { anyMemoryEnabled } from '../memory/sync';
 import { MIN_INTERVAL_MINUTES } from '../settings';
 import { bindSyncButton, count, folderSetting, type PanelContext } from './fields';
 
@@ -19,7 +20,7 @@ export function memoryTab(ctx: PanelContext, el: HTMLElement): void {
 		return;
 	}
 
-	const anyOn = m.codexLocal || m.claudeCodeLocal;
+	const anyOn = anyMemoryEnabled(plugin);
 	const top = new Setting(el)
 		.setName('AI memory')
 		.setDesc('What each AI keeps about you between chats: its memory files and your global instructions. Saved as dated snapshots in the AI\'s own words, never translated or corrected; the privacy filter below replaces passwords and similar values. A new snapshot is written only when something changed. Read-only: the AI\'s own files are never changed.');
@@ -52,6 +53,36 @@ export function memoryTab(ctx: PanelContext, el: HTMLElement): void {
 	};
 	source('Codex', 'codexLocal', 'Codex', `Reads ${codexHome(fs)}: AGENTS.md, the memories and memories_v2 folders, and the per-thread notes in its memory database.`);
 	source('Claude Code', 'claudeCodeLocal', 'Claude Code', `Reads ${claudeHome(fs)}: CLAUDE.md and every project's memory folder.`);
+
+	new Setting(el).setName('On the web').setDesc('Read with the login of each account, the same one its chats are synced with.').setHeading();
+	for (const acc of plugin.settings.claude) {
+		const state = m.states[`Claude/${acc.label}`];
+		const last = state ? ` Last snapshot ${when(Date.parse(state.synced))}: ${count(state.files, 'file')}.` : '';
+		new Setting(el)
+			.setName(plugin.settings.claude.length > 1 ? `Claude (${acc.label})` : 'Claude')
+			.setDesc(`Reads claude.ai: every memory file (profile, topics, areas, people and each project's own memory) and your instructions for Claude. Nothing there is changed. Saved under the account "${acc.label}".${last}`)
+			.addToggle((t) =>
+				t.setValue(m.claudeWeb[acc.id] === true).onChange(async (v) => {
+					m.claudeWeb[acc.id] = v;
+					await save();
+					ctx.refresh();
+				}),
+			);
+	}
+	for (const acc of plugin.settings.chatgpt) {
+		const state = m.states[`ChatGPT/${acc.label}`];
+		const last = state ? ` Last snapshot ${when(Date.parse(state.synced))}.` : '';
+		new Setting(el)
+			.setName(plugin.settings.chatgpt.length > 1 ? `ChatGPT (${acc.label})` : 'ChatGPT')
+			.setDesc(`Reads chatgpt.com: the memory summary, the saved memories and your custom instructions. Nothing there is changed. The summary is asked for the way the settings page asks for it, so ChatGPT may write a fresh one first if its stored summary is out of date. Saved under the account "${acc.label}".${last}`)
+			.addToggle((t) =>
+				t.setValue(m.chatgptWeb[acc.id] === true).onChange(async (v) => {
+					m.chatgptWeb[acc.id] = v;
+					await save();
+					ctx.refresh();
+				}),
+			);
+	}
 
 	new Setting(el).setName('Schedule').setHeading();
 	new Setting(el)

@@ -13,7 +13,14 @@ export function fenceFor(text: string): string {
 	return '`'.repeat(Math.max(3, longest + 1));
 }
 
-function fileSection(f: MemoryFile): string {
+/**
+ * Windows line ends become plain ones. Obsidian does the same to a note the moment it is opened
+ * and saved, which would leave the snapshot different from its own fingerprint (seen 2026-11-16).
+ */
+export const plainLineEnds = (text: string): string => text.replace(/\r\n?/g, '\n');
+
+function fileSection(file: MemoryFile): string {
+	const f = file.text === undefined ? file : { ...file, text: plainLineEnds(file.text) };
 	if (f.text === undefined) return `## ${f.path}\n\n*${f.note ?? 'Not shown.'}*\n`;
 	if (f.text === '') return `## ${f.path}\n\n*Empty file.*\n`;
 	const fence = fenceFor(f.text);
@@ -27,7 +34,7 @@ export function renderBody(c: MemoryCapture): string {
 		? `Saved as the AI keeps it, except for ${c.redacted} sensitive ${c.redacted === 1 ? 'value' : 'values'} (password, recovery code, 2FA seed, ID or card number) replaced by ${REDACTED}. Nothing is translated or corrected.`
 		: 'Saved as the AI keeps it: nothing is filtered, translated or corrected.';
 	const intro = [
-		`Read from \`${c.home}\` on ${c.account}. ${kept}`,
+		`${c.source === 'web' ? `Read from ${c.home} with the login of the account "${c.account}".` : `Read from \`${c.home}\` on ${c.account}.`} ${kept}`,
 		'',
 		...c.places.map((p) => `- \`${p.name}\`: ${p.status}`),
 	].join('\n');

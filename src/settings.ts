@@ -276,6 +276,8 @@ export const DEFAULT_MEMORY: MemorySettings = {
 	folder: 'AI Memory',
 	intervalMinutes: 0,
 	redact: true,
+	claudeWeb: {},
+	chatgptWeb: {},
 	codexLocal: false,
 	claudeCodeLocal: false,
 	states: {},
