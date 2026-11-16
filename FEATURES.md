@@ -19,7 +19,7 @@ Source of each section: **[code]** = read from `src/` at 0.30.0; **[readme]** = 
 Command IDs are stable API. Never rename.
 
 - [ ] `sync-all-chats` Sync all chats
-- [ ] `sync-claude-chats`, `sync-chatgpt-chats`, `sync-lumo-chats`, `sync-gemini-chats` (Gemini, then AI Studio if on)
+- [ ] `sync-claude-chats` "Sync Claude (claude.ai and Claude Code)": every claude.ai account, then Claude Code for every account that has it on; `sync-chatgpt-chats` "Sync ChatGPT (chats and Codex)": every ChatGPT account, then Codex likewise; a part that fails does not stop the next; `sync-lumo-chats`, `sync-gemini-chats` (Gemini, then AI Studio if on)
 - [ ] `sync-desktop-app-chats`, `sync-hermes-chats`
 - [ ] `sync-ai-memory` Sync AI memory (not part of Sync all)
 - [ ] `reconcile-chatgpt-chats` (full check, not only recent changes)
@@ -36,9 +36,10 @@ Command IDs are stable API. Never rename.
 - [ ] Project-list fetch blocks syncs and cannot be stopped (`exclusive`)
 - [ ] Stop ends between two chats; everything saved stays; later accounts in the run are skipped
 - [ ] Order of Sync all: Claude, ChatGPT, Lumo, Gemini (+ AI Studio), desktop apps, Hermes
+- [ ] Sync all runs every part even when one fails (error or exception): the failure gets its notice and last-run entry, then the next part runs; only Stop ends the run early
 - [ ] Sync all runs only accounts that are logged in or have a pasted session; nothing to run gives a notice (manual only)
 - [ ] Provider-wide sync with one account always runs it, so "not logged in" is shown
-- [ ] Automatic sync: off at 0, minimum 30 min; pauses after an error until a manual sync
+- [ ] Automatic sync: off at 0, minimum 30 min; a source that stopped with an error is left out of the automatic sync until it syncs without an error again (by hand or otherwise); all other sources keep syncing
 - [ ] Sync on startup: once, 10 s after layout ready, quiet like the automatic sync
 - [ ] Automatic and resume runs skip ChatGPT accounts in cooldown; other accounts still run
 - [ ] ChatGPT 429: cooldown per account, automatic retry, countdown in status bar, survives restart (cooldown adopted on load)
@@ -71,7 +72,7 @@ Command IDs are stable API. Never rename.
 
 - [ ] Manual sync: sticky notice with text, progress bar (indeterminate until counts are known) and a Stop button; Stop turns to disabled "Stopping…"
 - [ ] Status bar while syncing: label, short step, percentage; ChatGPT shows "N of M chats saved"
-- [ ] Status bar idle: "next sync HH:MM" while automatic sync is on and not paused; "syncing in 10 s" before a startup sync; "retry in MM:SS" during a ChatGPT cooldown
+- [ ] Status bar idle: "next sync HH:MM" while automatic sync is on, plus " · waiting for you: <sources>" for sources paused after an error; "syncing in 10 s" before a startup sync; "retry in MM:SS" during a ChatGPT cooldown
 - [ ] Result notice after manual runs, and after automatic runs that saved or restored something: new, changed, unchanged, restored, left for next run, still active, Hermes profiles not found
 - [ ] Stopped, waiting (cooldown) and failed runs each have their own notice text
 - [ ] Last run stored per account surface in `data.json` (counts and reason only, never chat text; note cut at 300 chars)
@@ -153,6 +154,8 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Google login presents as Firefox, client hints removed
 - [ ] Hidden windows for Lumo, Gemini, AI Studio; pasted Google cookies go to an in-memory session cleared after use
 - [ ] Split cookies (`name.0`, `name.1`) count as logged in
+- [ ] ChatGPT: each sync reads the chatgpt.com page through the login window's own storage, so the renewed login cookie is kept there (a pasted session still goes through `requestUrl`)
+- [ ] `loginFetch` never passes an AbortSignal to Electron (it cannot cross to the main process); it times out on its own
 - [ ] No secrets in `data.json`, notes or logs; pasted sessions live in Obsidian secret storage; login window wins over a pasted session
 
 ## 6. Claude web [code: sync.ts]
@@ -182,6 +185,8 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Claude Code local: folders follow sidebar groups or working folder, forks nested, `Attachments/` and `Artifacts/` (latest version, no source code or scratch files, vault notes linked), quiet wait, extra folders
 - [ ] Codex local: per project or `Recent`, same file rules
 - [ ] Desktop sessions assigned to accounts: extra folder, then organization or workspace ID, then first account; a saved session stays with its account
+- [ ] A provider's desktop run (its command, no account): that app for every account with it on, filed as `desktop:<provider>:*`; the settings show the newest of the account's own run, this run and the all-desktop-apps run
+- [ ] One account's desktop Sync: new or changed sessions of another (turned-on) account are not saved, but counted and named in the notice ("… belongs to <account>: sync that account or use Sync all.")
 - [ ] Remote Control sessions left to Code Local, not saved twice
 - [ ] Hermes: read-only snapshot via SQLite backup (built-in SQLite, else Python), per-profile folder, tool steps as collapsed callout (600 / 1,200 char cut), helper sessions optional, recently active skipped, `Private` never read, missing profiles skipped
 - [ ] Vault layout `AI Chats/<Provider>/…`, raw files mirrored under the raw files folder, accounts share one folder per provider

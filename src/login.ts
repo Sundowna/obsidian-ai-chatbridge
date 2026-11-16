@@ -181,11 +181,31 @@ export function loginUserAgent(login: LoginRef): string {
 	return plainUserAgent(session(login));
 }
 
+/** True when requests can go through the login window's own storage (`loginFetch`). */
+export function hasLoginFetch(login: LoginRef): boolean {
+	try {
+		return typeof session(login).fetch === 'function';
+	} catch {
+		return false;
+	}
+}
+
 /** Use the login window's Chromium transport with redirects under caller control. */
-export async function loginFetch(login: LoginRef, url: string, init: RequestInit): Promise<Response> {
+export async function loginFetch(login: LoginRef, url: string, init: RequestInit, timeoutMs = 120_000): Promise<Response> {
 	const ses = session(login);
 	if (!ses.fetch) throw new Error('This Obsidian build does not support controlled downloads.');
-	return ses.fetch(url, init);
+	// The request runs in Obsidian's main process: an AbortSignal from this window cannot
+	// cross over (Electron refuses the whole request, seen 2026-11-16), so time out here instead.
+	const { signal: _unused, ...rest } = init;
+	let timer: number | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = window.setTimeout(() => reject(new Error(`no answer within ${Math.round(timeoutMs / 1000)} s`)), timeoutMs);
+	});
+	try {
+		return await Promise.race([ses.fetch(url, rest), timeout]);
+	} finally {
+		window.clearTimeout(timer);
+	}
 }
 
 const open = new Map<string, Win>();

@@ -3,7 +3,7 @@ import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type Gem
 import { accountsOf, hasPastedSession, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
 import { AIChatBridgeSettingTab } from './ui/settings-tab';
-import { anyDesktopEnabled, runDesktopSync, type DesktopOnly } from './desktop/sync';
+import { anyDesktopEnabled, elsewhereText, runDesktopSync, type DesktopOnly } from './desktop/sync';
 import { folderExists, layoutMoves, moveToAppLayout, pruneEmpty } from './desktop/layout';
 import { masterRaw, mirrorRaw } from './raw-folders';
 import { allRawMoves, moveRawFiles } from './raw-move';
@@ -23,7 +23,7 @@ import { runStudioSync } from './studio/sync';
 import { anyHermesEnabled, runHermesSync } from './hermes/sync';
 import { anyMemoryEnabled, runMemorySync } from './memory/sync';
 import { chatCountStatus, SyncProgress } from './progress';
-import { DESKTOP_ALL, HERMES, MEMORY, runKey, type LastRun, type RunOutcome } from './last-run';
+import { DESKTOP_ALL, DESKTOP_EVERY_ACCOUNT, HERMES, MEMORY, runKey, type LastRun, type RunOutcome } from './last-run';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
 
@@ -54,8 +54,11 @@ export default class AIChatBridge extends Plugin {
 	private gptResumeTimer: number | null = null;
 	private showingGptCooldown = false;
 	private unloaded = false;
-	/** After an error, the automatic sync waits until you sync by hand. */
-	private autoPaused = false;
+	/**
+	 * Sources that stopped with an error (run key -> label). The automatic sync skips only these
+	 * until they sync without an error again, by hand or otherwise; everything else keeps syncing.
+	 */
+	private paused = new Map<string, string>();
 
 	/** Status bar text while a sync runs (empty otherwise). */
 	private statusEl: HTMLElement | null = null;
@@ -95,13 +98,13 @@ export default class AIChatBridge extends Plugin {
 
 		this.addCommand({
 			id: 'sync-claude-chats',
-			name: 'Sync Claude chats',
+			name: 'Sync Claude (claude.ai and Claude Code)',
 			callback: () => void this.sync('manual'),
 		});
 
 		this.addCommand({
 			id: 'sync-chatgpt-chats',
-			name: 'Sync ChatGPT chats',
+			name: 'Sync ChatGPT (chats and Codex)',
 			callback: () => void this.syncGpt('manual'),
 		});
 
@@ -295,10 +298,11 @@ export default class AIChatBridge extends Plugin {
 		new Notice('Pending retry canceled. The cooldown still applies.');
 	}
 
-	/** Idle status bar text: the next automatic sync time while it is on (and not paused after an error). */
+	/** Idle status bar text: the next automatic sync time while it is on, and which sources it leaves out after an error. */
 	private idleStatus(): string {
-		if (this.timer === null || this.nextAutoAt === null || this.autoPaused) return '';
-		return `AI ChatBridge: next sync ${formatClock(this.nextAutoAt)}`;
+		if (this.timer === null || this.nextAutoAt === null) return '';
+		const paused = [...new Set(this.paused.values())];
+		return `AI ChatBridge: next sync ${formatClock(this.nextAutoAt)}${paused.length ? ` · waiting for you: ${paused.join(', ')}` : ''}`;
 	}
 
 	/** Refreshes the idle text when nothing is running or counting down. */
@@ -370,21 +374,28 @@ export default class AIChatBridge extends Plugin {
 		if (trigger === 'manual') new Notice(`${SITE_LABEL[provider]}: none of the accounts is logged in. Log in in the plugin settings.`);
 	}
 
-	/** Every claude.ai account. One account stopping does not hold back the others. */
+	/**
+	 * Everything from Claude: every claude.ai account, then Claude Code on this computer for every
+	 * account that has it turned on. One part stopping does not hold back the others.
+	 */
 	async sync(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
 			const accounts = await this.webAccounts('claude', this.settings.claude);
-			if (!accounts.length) this.notLoggedIn('claude', trigger);
-			for (const account of accounts) await this.runOne({ kind: 'claude', account }, trigger);
+			const desktop = this.settings.claude.some((a) => a.desktop.enabled);
+			if (!accounts.length && !desktop) this.notLoggedIn('claude', trigger);
+			for (const account of accounts) await this.runPart({ kind: 'claude', account }, trigger);
+			if (desktop) await this.runPart({ kind: 'desktop', only: { provider: 'claude' }, label: 'Claude Code' }, trigger);
 		});
 	}
 
-	/** Every ChatGPT account. */
+	/** Everything from ChatGPT: every ChatGPT account, then Codex on this computer for every account that has it turned on. */
 	async syncGpt(trigger: 'manual' | 'auto', forceFull = false) {
 		await this.guarded(trigger, async () => {
 			const accounts = await this.webAccounts('chatgpt', this.settings.chatgpt);
-			if (!accounts.length) this.notLoggedIn('chatgpt', trigger);
-			for (const account of accounts) await this.runOne({ kind: 'chatgpt', account, forceFull }, trigger);
+			const desktop = this.settings.chatgpt.some((a) => a.desktop.enabled);
+			if (!accounts.length && !desktop) this.notLoggedIn('chatgpt', trigger);
+			for (const account of accounts) await this.runPart({ kind: 'chatgpt', account, forceFull }, trigger);
+			if (desktop) await this.runPart({ kind: 'desktop', only: { provider: 'chatgpt' }, label: 'Codex' }, trigger);
 		});
 	}
 
@@ -595,24 +606,38 @@ export default class AIChatBridge extends Plugin {
 			if (trigger === 'manual') new Notice('Sync all: not logged in to any provider. Log in in the plugin settings.');
 			return;
 		}
-		let claudeOk = true;
-		for (const account of claude) if (!(await this.runOne({ kind: 'claude', account }, trigger))) claudeOk = false;
-		if (!claudeOk) return; // a stop pauses the rest too
+		// One source that fails (an expired login, say) must not keep the others from syncing:
+		// each runs on its own. Only your Stop ends the run, and runOne skips the rest after it.
+		for (const account of claude) await this.runPart({ kind: 'claude', account }, trigger);
 		for (const account of gpt) {
 			const waiting = account.web.resumeAfter429 || (account.web.cooldownUntil ?? 0) > Date.now();
 			// A ChatGPT cooldown only waits; other accounts and the desktop apps still run.
 			if (trigger !== 'manual' && waiting) continue;
-			if (!(await this.runOne({ kind: 'chatgpt', account }, trigger)) && this.autoPaused) return;
+			await this.runPart({ kind: 'chatgpt', account }, trigger);
 		}
-		for (const account of lumo) if (!(await this.runOne({ kind: 'lumo', account }, trigger)) && this.autoPaused) return;
-		for (const account of gemini) if (!(await this.runGoogle(account, trigger)) && this.autoPaused) return;
-		if (desktop && !(await this.runOne({ kind: 'desktop' }, trigger)) && this.autoPaused) return;
-		if (hermes) await this.runOne({ kind: 'hermes' }, trigger);
+		for (const account of lumo) await this.runPart({ kind: 'lumo', account }, trigger);
+		for (const account of gemini) {
+			await this.runPart({ kind: 'gemini', account }, trigger);
+			if (account.studio.enabled) await this.runPart({ kind: 'studio', account }, trigger);
+		}
+		if (desktop) await this.runPart({ kind: 'desktop' }, trigger);
+		if (hermes) await this.runPart({ kind: 'hermes' }, trigger);
 	}
 
-	/** One sync at a time; after an error the automatic sync waits until you sync by hand. */
+	/** One part of Sync all: an error is shown and recorded, then the next part runs. */
+	private async runPart(target: Target, trigger: SyncTrigger): Promise<void> {
+		try {
+			await this.runOne(target, trigger);
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e);
+			console.error(`AI ChatBridge: ${this.targetLabel(target)} failed`, message);
+			new Notice(`${this.targetLabel(target)} sync failed: ${message} The other sources still sync.`, 15_000);
+		}
+	}
+
+	/** One sync at a time. (A source that stopped with an error is skipped by runOne, not here.) */
 	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>) {
-		if (this.unloaded || (trigger === 'auto' && this.autoPaused)) return;
+		if (this.unloaded) return;
 		if (this.running) {
 			if (trigger === 'manual') new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is already running.');
 			return;
@@ -621,7 +646,6 @@ export default class AIChatBridge extends Plugin {
 		this.running = true;
 		this.stopRequested = false;
 		this.busyChanged();
-		if (trigger === 'manual') this.autoPaused = false;
 		try {
 			await fn();
 		} finally {
@@ -642,9 +666,9 @@ export default class AIChatBridge extends Plugin {
 		return this.stopRequested;
 	}
 
-	/** This account (or this account's desktop app) is the one syncing right now. */
+	/** This account (or this account's desktop app, also as part of its provider's button) is the one syncing right now. */
 	isSyncing(provider: Provider, id: string): boolean {
-		return this.syncing && this.current?.provider === provider && this.current.id === id;
+		return this.syncing && this.current?.provider === provider && (this.current.id === id || this.current.id === undefined);
 	}
 
 	/** Ends the running sync after its current chat. Everything saved so far stays saved. */
@@ -720,6 +744,9 @@ export default class AIChatBridge extends Plugin {
 	private async runOne(target: Target, trigger: SyncTrigger): Promise<boolean> {
 		// After a stop, the accounts still queued in this run are skipped.
 		if (this.stopRequested) return false;
+		const key = this.runKeyOf(target);
+		// A source that stopped with an error waits for you; the automatic sync leaves it out.
+		if (trigger === 'auto' && this.paused.has(key)) return false;
 		const label = this.targetLabel(target);
 		// Progress bar in a notice (manual syncs) and a percentage in the status bar (all syncs).
 		const progress = new SyncProgress(label, this.statusEl, trigger === 'manual',
@@ -750,6 +777,7 @@ export default class AIChatBridge extends Plugin {
 				: target.kind === 'memory' ? await runMemorySync(this, update)
 				: await runDesktopSync(this, update, undefined, undefined, target.only);
 		} catch (e) {
+			this.paused.set(key, label);
 			await this.recordRun(target, label, trigger, 'error', undefined, e instanceof Error ? e.message : String(e));
 			throw e;
 		} finally {
@@ -777,17 +805,20 @@ export default class AIChatBridge extends Plugin {
 				new Notice(`${label} sync waiting: ${r.stopped}`, 15_000);
 				return false;
 			}
-			this.autoPaused = true;
+			this.paused.set(key, label);
 			new Notice(`${label} sync stopped: ${r.stopped}`, 15_000);
 			return false;
 		}
+		this.paused.delete(key);
 		if (trigger === 'manual' || r.written.length || r.restored.length) {
 			const active = 'active' in r && r.active ? `, ${r.active} still active` : '';
 			const more = (r.leftForLater ? `, ${r.leftForLater} left for next run` : '') + active;
 			const restored = r.restored.length ? `, ${r.restored.length} restored` : '';
 			// Hermes profiles whose state.db is gone were skipped; say so, so a quiet result isn't a surprise.
 			const gone = 'missing' in r && r.missing.length ? ` Skipped, not found: ${r.missing.join(', ')}.` : 'nothing' in r && r.nothing.length ? ` Nothing to read for: ${r.nothing.join(', ')}.` : '';
-			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.${gone}`);
+			// A one-account desktop run: say so when another account has sessions waiting.
+			const others = 'elsewhere' in r ? elsewhereText(r.elsewhere) : '';
+			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.${gone}${others ? ` ${others}` : ''}`, others ? 15_000 : undefined);
 		}
 		return true;
 	}
@@ -796,7 +827,7 @@ export default class AIChatBridge extends Plugin {
 	private runKeyOf(target: Target): string {
 		if (target.kind === 'hermes') return HERMES;
 		if (target.kind === 'memory') return MEMORY;
-		if (target.kind === 'desktop') return target.only ? runKey('desktop', target.only.provider, target.only.id) : DESKTOP_ALL;
+		if (target.kind === 'desktop') return target.only ? runKey('desktop', target.only.provider, target.only.id ?? DESKTOP_EVERY_ACCOUNT) : DESKTOP_ALL;
 		if (target.kind === 'studio') return runKey('studio', 'gemini', target.account.id);
 		return runKey('web', target.kind, target.account.id);
 	}
