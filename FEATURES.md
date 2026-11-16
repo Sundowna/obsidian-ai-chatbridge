@@ -128,6 +128,8 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Desktop-only message without Node
 - [ ] Head with description, last-sync line and **Sync now** (both only with a source on; `bindSyncButton`)
 - [ ] Memory folder (folder field with suggestions and **Browse…**)
+- [ ] "On the web" heading; one row per Claude account ("Claude", or "Claude (label)" with several): what is read, last snapshot time and file count, toggle (off by default; redraws the tab)
+- [ ] One row per ChatGPT account ("ChatGPT", or "ChatGPT (label)" with several): what is read, the summary note, last snapshot time, toggle (off by default; redraws the tab)
 - [ ] "On this computer" heading naming the account (computer name); one row each for Codex and Claude Code: the folder it reads, last snapshot time and file count, toggle (off by default; redraws the tab)
 - [ ] Automatic memory sync (minutes): 0 off, minimum 30, bad input ignored; own timer, restarted on change
 - [ ] "Privacy" heading with the **Privacy filter** toggle (on by default)
@@ -197,7 +199,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Output `<memory folder>/<provider>/<account>/YYYY-MM-DD.md` plus `_latest.md`; local account = computer name
 - [ ] Properties: `provider`, `account`, `source`, `synced`, `hash`, `files`, `unread: true`; `_latest.md` also `snapshot:` link
 - [ ] Body: places read with what was found, then one H2 per memory file (its path below the AI's home) with the text in a code block whose fence is longer than any backtick run inside
-- [ ] Text is never translated or corrected
+- [ ] Text is never translated or corrected; Windows line ends (CRLF) are saved as LF, so the note still matches its `hash` after Obsidian has opened it
 - [ ] Privacy filter [code: memory/redact.ts], on by default, switch in the Memory tab (user decision, 2026-11-16 afternoon; replaces the morning's "no redaction"): passwords, PINs, secret keys (by label, EN/DE/AF), 2FA seeds (`otpauth://`, labelled seeds), recovery codes (label line and the list below), ID numbers (by label, Swiss AHV by shape), card numbers (Luhn) and IBANs (mod 97) become `[REDACTED]`; only the value is replaced; runs before hashing and writing
 - [ ] With a hit: intro sentence says how many values were replaced, property `redacted: N`, log line adds "replaced by [REDACTED]: <kind> in <provider> <file>" (never the value). Without a hit the note is identical with the filter on or off
 - [ ] Snapshot only when the SHA-256 of the body differs from the last one (sync history in `data.json`, else the hash in `_latest.md`); unchanged writes nothing, not even `_latest.md`
@@ -207,7 +209,12 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Files over 2 MB or not text are named, not copied; Codex's use counters (`usage_count`, `last_usage`, `selected_for_phase2…`) are left out
 - [ ] A source with no home folder writes nothing and is named in the result ("Nothing to read for: …")
 - [ ] Runs through the normal sync guard: one at a time, last-run line (`memory`), notice, log line **AI memory:** only when something was written or it stopped
-- [ ] Not done yet: claude.ai and ChatGPT memories (web), import from a data-export ZIP
+- [ ] ChatGPT web [code: memory/chatgpt-web.ts, chatgpt/api.ts], per account, off by default: memory summary (`POST /backend-api/memories/about_you/summary/stream`, always without a body; the only POST in the plugin, user decision 2026-11-16), saved memories (`GET /backend-api/memories?include_memory_entries=true`), custom instructions (`GET /backend-api/user_system_messages`); same login as the chat sync
+- [ ] ChatGPT note: `source: web`, account = the account's label, H2s `/memory-summary` (ChatGPT's section titles as headings inside the block, sections without text left out), `/saved-memories` (`[date] text`, newest first, `status` left out), `/custom-instructions` (fields with text, short settings as lines)
+- [ ] ChatGPT: an answer with an unknown shape or a missing login stops the run and writes nothing for that account; web sources run after the local ones; they need no file access
+- [ ] Claude web [code: memory/claude-web.ts, api.ts], per account, off by default: memory files via the store's two read methods (`POST /api/organizations/<org>/melange/list` with `{}`, `POST …/melange/read` with `{path}`; only these two can be called), project names (`GET …/projects?uuids=…`), older single-text memory (`GET …/memory`, saved only when not empty), instructions (`GET /api/account_profile`: `conversation_preferences`, `cowork_global_instructions`); same login as the chat sync; 300 ms between file reads
+- [ ] Claude note: `source: web`, account = the account's label, one H2 per memory file by its own path, a project's ID replaced by the project's name where known, then `/instructions-for-claude`; paths with `..` or an odd form are dropped, files under a folder named `Private` are not read and are counted in the note
+- [ ] Not done yet: import from a data-export ZIP
 
 ## 8. Windows, macOS and Linux [code: platform.ts, folder-dialog.ts, computer.ts, desktop/scan.ts, hermes/profiles.ts]
 

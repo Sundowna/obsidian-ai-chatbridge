@@ -2,7 +2,8 @@
 // Rules: https://claude.ai only, no retries, stop on anything odd.
 // GET for the REST addresses (claude.ai/api/organizations/<org>/… and the Claude Code
 // session list claude.ai/v1/code/sessions…); POST only to the READ methods of claude.ai's
-// ConversationService (allowlist below) – never to anything that changes data.
+// ConversationService (allowlist below) and to the two READ methods of its memory store
+// (list, read) – never to anything that changes data.
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { isUuid } from './schema';
@@ -27,6 +28,12 @@ const RPC_BASE = '/claudeai-rpc/anthropic.bard.api.v1alpha.ConversationService/'
 /** Read-only RPC methods (names from claude.ai's own service definition). */
 export const READ_RPCS = ['ReadConversation', 'ReadConversationHistory'] as const;
 export type ReadRpc = (typeof READ_RPCS)[number];
+
+/** claude.ai keeps memory as files in a store its page calls "melange". These two methods only read. */
+export const MEMORY_READS = ['list', 'read'] as const;
+export type MemoryRead = (typeof MEMORY_READS)[number];
+/** Your instructions for Claude (profile preferences); belongs to the login, not to one organization. */
+export const ACCOUNT_PROFILE = '/api/account_profile';
 
 export interface RpcAnswer {
 	status: number;
@@ -162,6 +169,50 @@ export class ClaudeApi {
 		}
 	}
 
+	/** The memory files of this account's projects are named by project ID; this asks for the projects' names. */
+	projectNamesPath(uuids: string[]): string {
+		if (!uuids.every(isUuid)) throw new StopError('Refusing to fetch: project ID has an odd format.');
+		return `/api/organizations/${this.orgId}/projects?include_harmony_projects=true&limit=100${uuids.map((u) => `&uuids=${u}`).join('')}`;
+	}
+
+	/** The older, single-text memory of this account (empty on accounts that have memory files). */
+	get legacyMemoryPath(): string {
+		return `/api/organizations/${this.orgId}/memory`;
+	}
+
+	/**
+	 * POST to a READ method of claude.ai's memory store: "list" (every memory file) or "read"
+	 * (one file by its path). Only these two can be called; both change nothing.
+	 */
+	async memory(method: MemoryRead, body: Record<string, string>): Promise<unknown> {
+		if (!(MEMORY_READS as readonly string[]).includes(method)) throw new StopError('Blocked: not a read-only memory method.');
+		const key = this.getKey();
+		if (!key) throw new StopError('Not logged in to claude.ai. Use \'Log in to claude.ai\' in the plugin settings.');
+		let res;
+		try {
+			res = await requestUrl({
+				url: `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`,
+				method: 'POST',
+				contentType: 'application/json',
+				body: JSON.stringify(body),
+				headers: { Cookie: `sessionKey=${key}; lastActiveOrg=${this.orgId}`, Accept: 'application/json', 'anthropic-client-platform': 'web_claude_ai' },
+				throw: false,
+			});
+		} catch (e) {
+			throw new StopError(`Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`);
+		}
+		const s = res.status;
+		if (s === 401) throw new StopError('claude.ai answered 401 (not logged in). The login has probably expired – log in again in the plugin settings.');
+		if (s === 403) throw new StopError('claude.ai answered 403 (forbidden) to reading memory.');
+		if (s === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');
+		if (s !== 200) throw new StopError(`claude.ai answered ${s} to reading memory – unexpected, so the sync stopped.`);
+		try {
+			return JSON.parse(res.text) as unknown;
+		} catch {
+			throw new StopError('claude.ai\'s memory answer was not valid JSON.');
+		}
+	}
+
 	/**
 	 * Diagnostics only: GET a path and return status + text without judging it.
 	 * Same guard (claude.ai/api/organizations/<org>/ only) and same 401/403/429 stops.
@@ -177,10 +228,11 @@ export class ClaudeApi {
 	private async request(path: string, accept: string, notFoundOk: false): Promise<RequestUrlResponse>;
 	private async request(path: string, accept: string, notFoundOk: boolean | 'any'): Promise<RequestUrlResponse | null> {
 		const url = new URL(path, ORIGIN);
-		// Safety guard: never anything but claude.ai/api/organizations/<your org>/...
-		// or the Claude Code session list (claude.ai/v1/code/sessions…), and only GET.
+		// Safety guard: never anything but claude.ai/api/organizations/<your org>/...,
+		// the Claude Code session list (claude.ai/v1/code/sessions…) or the account profile, and only GET.
 		const code = url.pathname === CODE_SESSIONS || url.pathname.startsWith(`${CODE_SESSIONS}/`);
-		if (url.origin !== ORIGIN || !(code || url.pathname.startsWith(`/api/organizations/${this.orgId}/`))) {
+		const profile = url.pathname === ACCOUNT_PROFILE && !url.search;
+		if (url.origin !== ORIGIN || !(code || profile || url.pathname.startsWith(`/api/organizations/${this.orgId}/`))) {
 			throw new StopError('Blocked a request that was not for claude.ai/api/organizations/<your org>/ or claude.ai/v1/code/sessions.');
 		}
 		const key = this.getKey();

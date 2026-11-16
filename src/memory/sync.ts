@@ -5,14 +5,21 @@
 
 import { TFile } from 'obsidian';
 import type AIChatBridge from '../main';
+import { loginRef } from '../accounts';
+import { ClaudeApi } from '../api';
+import { GptApi } from '../chatgpt/api';
+import { claudeAuth } from '../claude-auth';
 import { computerName } from '../computer';
+import { pastedSession } from '../cookies';
 import { nodeDesktopFs, type DesktopFs } from '../desktop/scan';
 import { isPrivatePath, pickBackend, type SqliteBackend } from '../hermes/reader';
 import { appendLog } from '../log';
 import { dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
-import { cleanFolder } from '../settings';
+import { cleanFolder, type ChatgptAccount, type ClaudeAccount } from '../settings';
 import { createNew, ensureFolder, writeOver } from '../vaultio';
+import { captureChatgpt, type MemoryGptApi } from './chatgpt-web';
+import { captureClaude, type MemoryClaudeApi } from './claude-web';
 import { describeHits, redact } from './redact';
 import { hashOfNote, renderBody, renderNote, sha256 } from './render';
 import { captureClaudeCode, captureCodex } from './sources';
@@ -37,7 +44,14 @@ export interface MemorySyncResult {
 
 export const LATEST = '_latest.md';
 
-export const anyMemoryEnabled = (plugin: AIChatBridge): boolean => plugin.settings.memory.codexLocal || plugin.settings.memory.claudeCodeLocal;
+/** The ChatGPT accounts whose memories on chatgpt.com are turned on (accounts that were removed do not count). */
+export const chatgptMemoryAccounts = (plugin: AIChatBridge): ChatgptAccount[] => plugin.settings.chatgpt.filter((a) => plugin.settings.memory.chatgptWeb[a.id]);
+
+/** The Claude accounts whose memories on claude.ai are turned on. */
+export const claudeMemoryAccounts = (plugin: AIChatBridge): ClaudeAccount[] => plugin.settings.claude.filter((a) => plugin.settings.memory.claudeWeb[a.id]);
+
+export const anyMemoryEnabled = (plugin: AIChatBridge): boolean =>
+	plugin.settings.memory.codexLocal || plugin.settings.memory.claudeCodeLocal || claudeMemoryAccounts(plugin).length > 0 || chatgptMemoryAccounts(plugin).length > 0;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const dateOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -49,6 +63,12 @@ export interface MemoryRunOptions {
 	now?: Date;
 	/** The account folder for local sources: this computer's name. */
 	account?: string;
+	/** The connection to chatgpt.com for an account; a test hands in a fake. */
+	gpt?: (account: ChatgptAccount) => Promise<MemoryGptApi>;
+	/** The connection to claude.ai for an account; a test hands in a fake. */
+	claude?: (account: ClaudeAccount) => Promise<MemoryClaudeApi>;
+	/** The wait between two memory file reads on claude.ai (ms). */
+	pauseMs?: number;
 }
 
 export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn = () => undefined, o: MemoryRunOptions = {}): Promise<MemorySyncResult> {
@@ -56,21 +76,43 @@ export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn =
 	const result: MemorySyncResult = { newCount: 0, changedCount: 0, unchanged: 0, written: [], restored: [], leftForLater: 0, nothing: [], redactions: [] };
 	const now = o.now ?? new Date();
 	try {
+		const local = m.codexLocal || m.claudeCodeLocal;
+		const web = chatgptMemoryAccounts(plugin);
+		const claudeWeb = claudeMemoryAccounts(plugin);
+		const steps = (m.codexLocal ? 1 : 0) + (m.claudeCodeLocal ? 1 : 0) + claudeWeb.length + web.length;
+		let step = 0;
 		const fs = o.fs === undefined ? nodeDesktopFs() : o.fs;
-		if (!fs) throw new Error('AI memory on this computer can only be read in Obsidian on desktop.');
+		if (local && !fs) throw new Error('AI memory on this computer can only be read in Obsidian on desktop.');
 		const base = cleanFolder(m.folder);
 		if (!base) throw new Error('The memory folder setting is empty or invalid.');
 		if (isPrivatePath(base)) throw new Error('The memory folder is inside a Private folder, which is never written to.');
-		const account = o.account ?? computerName();
+		const account = o.account ?? (local ? computerName() : '');
 
-		if (m.codexLocal) {
-			progress('AI memory: reading Codex…', 0, 2);
+		if (m.codexLocal && fs) {
+			progress('AI memory: reading Codex…', step++, steps);
 			const backend = o.backend === undefined ? await pickBackend(plugin.settings.hermes.pythonPath, []) : o.backend;
 			await save(plugin, await captureCodex(fs, account, backend), base, now, result);
 		}
-		if (m.claudeCodeLocal) {
-			progress('AI memory: reading Claude Code…', 1, 2);
+		if (m.claudeCodeLocal && fs) {
+			progress('AI memory: reading Claude Code…', step++, steps);
 			await save(plugin, await captureClaudeCode(fs, account), base, now, result);
+		}
+		// The websites last: a login that has run out stops the run, and the local snapshots are saved by then.
+		for (const acc of claudeWeb) {
+			progress(`AI memory: reading Claude (${acc.label})…`, step++, steps);
+			let api: MemoryClaudeApi;
+			if (o.claude) api = await o.claude(acc);
+			else {
+				const auth = await claudeAuth(plugin, acc);
+				api = new ClaudeApi(auth.orgId, auth.getKey);
+			}
+			const pauseMs = o.pauseMs ?? 300;
+			await save(plugin, await captureClaude(api, acc.label, () => (pauseMs > 0 ? new Promise((done) => window.setTimeout(done, pauseMs)) : Promise.resolve())), base, now, result);
+		}
+		for (const acc of web) {
+			progress(`AI memory: reading ChatGPT (${acc.label})…`, step++, steps);
+			const api = o.gpt ? await o.gpt(acc) : await GptApi.connect(loginRef('chatgpt', acc), pastedSession(plugin.app, acc.web.secretId));
+			await save(plugin, await captureChatgpt(api, acc.label), base, now, result);
 		}
 	} catch (e) {
 		result.stopped = e instanceof Error ? e.message : String(e);

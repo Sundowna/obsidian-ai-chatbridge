@@ -22,6 +22,10 @@ export interface MemorySettings {
 	codexLocal: boolean;
 	/** Claude Code on this computer (~/.claude, or CLAUDE_CONFIG_DIR). */
 	claudeCodeLocal: boolean;
+	/** Claude accounts (by account ID) whose memories on claude.ai are read. */
+	claudeWeb: Record<string, boolean>;
+	/** ChatGPT accounts (by account ID) whose memories on chatgpt.com are read. */
+	chatgptWeb: Record<string, boolean>;
 	/** The privacy filter: passwords, recovery codes, 2FA seeds, ID and card numbers become [REDACTED]. */
 	redact: boolean;
 	/** "<provider>/<account>" -> its last snapshot. */
@@ -52,8 +56,8 @@ export interface MemoryPlace {
 export interface MemoryCapture {
 	provider: string;
 	account: string;
-	source: 'local';
-	/** The AI's home folder that was read. */
+	source: 'local' | 'web';
+	/** The AI's home folder that was read, or the website. */
 	home: string;
 	places: MemoryPlace[];
 	files: MemoryFile[];
