@@ -22,7 +22,7 @@ export function memoryTab(ctx: PanelContext, el: HTMLElement): void {
 	const anyOn = m.codexLocal || m.claudeCodeLocal;
 	const top = new Setting(el)
 		.setName('AI memory')
-		.setDesc('What each AI keeps about you between chats: its memory files and your global instructions. Saved as dated snapshots, exactly as the AI keeps them. A new snapshot is written only when something changed. Read-only: the AI\'s own files are never changed.');
+		.setDesc('What each AI keeps about you between chats: its memory files and your global instructions. Saved as dated snapshots in the AI\'s own words, never translated or corrected; the privacy filter below replaces passwords and similar values. A new snapshot is written only when something changed. Read-only: the AI\'s own files are never changed.');
 	top.settingEl.addClass('ccs-primary-row');
 	if (anyOn) {
 		lastRunLine(top.infoEl, plugin.settings.lastRuns[MEMORY]);
