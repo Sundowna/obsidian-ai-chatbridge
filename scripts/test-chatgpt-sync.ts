@@ -174,6 +174,8 @@ function harness() {
 	settings.chatgpt[0]!.web = { ...DEFAULT_GPT, folder: 'Chats', includeArchived: true };
 	let saved = structuredClone(settings);
 	let crashOnOlder = false;
+	/** Paths whose content was replaced (the one-note rule), in order. */
+	const rewritten: string[] = [];
 	const read = (path: string) => new TextDecoder().decode(contents.get(path));
 	const put = (path: string, content: ArrayBuffer) => {
 		assert(!entries.has(path), 'original was overwritten');
@@ -194,19 +196,23 @@ function harness() {
 		createBinary: async (path: string, content: ArrayBuffer) => put(path, content),
 		create: async (path: string, text: string) => put(path, bytes(text)),
 		process: async (file: TFile, fn: (value: string) => string) => { contents.set(file.path, bytes(fn(read(file.path)))); },
+		read: async (file: TFile) => read(file.path),
+		readBinary: async (file: TFile) => contents.get(file.path)!,
+		modify: async (file: TFile, text: string) => { rewritten.push(file.path); contents.set(file.path, bytes(text)); },
+		modifyBinary: async (file: TFile, content: ArrayBuffer) => { rewritten.push(file.path); contents.set(file.path, content); },
 		adapter: { readBinary: async (path: string) => contents.get(path)!, read: async (path: string) => read(path) },
 	};
 	const plugin = {
-		settings, app: { vault, fileManager: { processFrontMatter: async () => {} } },
+		settings, app: { vault, fileManager: { processFrontMatter: async () => {}, trashFile: async (file: TFile) => { entries.delete(file.path); contents.delete(file.path); } } },
 		saveSettings: async () => { saved = structuredClone(settings); },
 	} as unknown as AIChatBridge;
-	return { settings, entries, contents, plugin, read,
+	return { settings, entries, contents, plugin, read, rewritten,
 		interrupt: () => { crashOnOlder = true; },
 		restart: () => { Object.assign(settings.chatgpt[0]!.web, structuredClone(saved.chatgpt[0]!.web)); },
 	};
 }
 
-/** A voice chat saved by an older version gets a new transcript once; syncing again adds nothing. */
+/** A voice chat saved by an older version has its one note brought up to date once; syncing again changes nothing. */
 async function testVoiceReimport() {
 	const voiceId = '87654321-4321-4321-4321-cba987654321';
 	const pointer = { content_type: 'real_time_user_audio_video_asset_pointer', frames_asset_pointers: [], video_container_asset_pointer: null,
@@ -250,12 +256,14 @@ async function testVoiceReimport() {
 		h.contents.set(entry.md, bytes(oldNote));
 		entry.viewHash = 'old-renderer';
 		delete entry.view;
+		delete entry.noteHash; // older versions saved no fingerprint
 		const files = h.entries.size;
 		const second = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.equal(second.refreshedViews, 1);
-		assert.equal(h.read(entry.md), oldNote, 'the original note is kept as it was');
-		assert.equal(h.entries.size, files + 1, 'one new transcript, nothing else');
-		const view = h.read(entry.view!);
+		assert.equal(h.entries.size, files, 'the note is rewritten in place: no "(transcript …)" copy');
+		assert.equal(entry.view, entry.md);
+		assert(!!entry.noteHash, 'fingerprint saved from now on');
+		const view = h.read(entry.md);
 		assert.equal(view.split('Spoken user words').length, 2);
 		assert.equal(view.split('Spoken answer').length, 2);
 
@@ -352,6 +360,8 @@ async function main() {
 	const h = harness();
 	const paths: string[] = [];
 	let olderPayload = older;
+	let topPayload: typeof top = top;
+	let listDate = date;
 	const connect = GptApi.connect;
 	GptApi.connect = async () => {
 		calls++;
@@ -365,11 +375,11 @@ async function main() {
 			get: async (path: string) => {
 				paths.push(path);
 				if (listingLimit && path === 'list:1:false:true') throw new GptRateLimitError(Date.now() + 60_000);
-				if (fixtureVisible && path === 'list:0:false:true') return raw({ items: [{ id, title: 'Fixture', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: listingLimit ? 2 : 1 });
+				if (fixtureVisible && path === 'list:0:false:true') return raw({ items: [{ id, title: 'Fixture', create_time: date, update_time: listDate, gizmo_id: null }], offset: 0, total: listingLimit ? 2 : 1 });
 				if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
 				if (path === 'projects:') return raw({ items: [], cursor: 'next' });
 				if (path === 'projects:next') return raw({ items: [] });
-				if (path === 'chat') return raw(top);
+				if (path === 'chat') return raw(topPayload);
 				if (path === 'older') {
 					if (olderPageLimit) throw new GptRateLimitError(Date.now() + 60_000);
 					return raw(olderPayload);
@@ -453,9 +463,10 @@ async function main() {
 		assert.equal(recovered.filesSaved, 1);
 		assert.equal(recovered.refreshedViews, 1);
 		const index = h.settings.chatgpt[0]!.web.index[id]!;
-		assert(h.read(index.view!).includes('demo (1).pdf|PDF]]'));
-		assert(h.read(index.view!).includes('https://example.org/reference'));
-		assert(h.read(index.md).includes('generated file not downloaded'));
+		assert.equal(index.view, index.md, 'the file link goes into the one note');
+		assert(h.read(index.md).includes('demo (1).pdf|PDF]]'));
+		assert(h.read(index.md).includes('https://example.org/reference'));
+		assert(![...h.entries.keys()].some((p) => p.includes('(transcript ')), 'no "(transcript …)" copy');
 		assert.equal((await runGptSync(h.plugin, h.settings.chatgpt[0]!)).refreshedViews, 0);
 		assert.equal(h.settings.chatgpt[0]!.web.assetRetries?.[key], undefined);
 
@@ -466,16 +477,55 @@ async function main() {
 		assert.equal(paths.filter((path) => path === 'chat').length, beforeReconciliation);
 		assert.equal(h.read(journal.json), initial);
 
-		// Missing older bytes after a remote change must create a separate capture.
+		// A deleted older part is fetched again under the same names: no "(recovered)" pair.
 		h.entries.delete(journal.older![0]!);
 		h.contents.delete(journal.older![0]!);
 		olderPayload = { ...older, messages: [message('different-old', 'Changed remote text')] };
 		const repaired = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
 		assert.equal(repaired.restored.length, 1);
-		assert.notEqual(h.settings.chatgpt[0]!.web.index[id]?.json, journal.json);
+		assert.equal(h.settings.chatgpt[0]!.web.index[id]?.json, journal.json);
 		assert.equal(h.read(journal.json), initial);
 		assert(h.read(h.settings.chatgpt[0]!.web.index[id]!.older![0]!).includes('Changed remote text'));
-		console.log('ChatGPT sync integration passed: listing and download 429 recovery, archive scope, project cursors, interrupted capture, file retry, citations, refreshed transcript, and repair outside the listing window.');
+		assert(![...h.entries.keys()].some((p) => p.includes('(recovered)')));
+		assert(!h.settings.chatgpt[0]!.web.index[id]!.versions?.length, 'the same version again keeps no earlier one');
+
+		// The chat continues: one note, rewritten; the version before (main file and older part) is kept.
+		fixtureVisible = true;
+		const web = h.settings.chatgpt[0]!.web;
+		const beforeMd = web.index[id]!.md;
+		const beforeOlder = h.read(web.index[id]!.older![0]!);
+		const notes = () => [...h.entries.keys()].filter((p) => p.endsWith('.md') && p.startsWith('Chats/')).sort();
+		const notesBefore = notes();
+		listDate = '2026-11-08T10:30:00Z';
+		topPayload = { ...top, update_time: 1794133800, messages: [...top.messages, message('message-newer', 'A later answer')] };
+		// Stopped in the middle of keeping the earlier version, then run again: still exactly one version.
+		h.interrupt();
+		assert.match((await runGptSync(h.plugin, h.settings.chatgpt[0]!)).stopped ?? '', /simulated interruption/);
+		h.restart();
+		assert.equal(h.read(web.index[id]!.json), initial, 'nothing written over before the earlier version is safe');
+		const continued = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		const now = web.index[id]!;
+		assert.equal(continued.changedCount, 1, continued.stopped);
+		assert.equal(now.md, beforeMd);
+		assert.equal(now.json, journal.json);
+		assert.deepEqual(notes(), notesBefore, 'no second note');
+		assert(h.read(now.md).includes('A later answer'));
+		assert(h.read(now.json).includes('A later answer'));
+		assert.equal(now.versions?.length, 1);
+		const [keptMain, keptOlder] = now.versions![0]!.files;
+		assert.match(keptMain!, /Fixture \(version \d{4}-\d\d-\d\d \d{4}\)\.json$/);
+		assert.match(keptOlder!, /Fixture \(version \d{4}-\d\d-\d\d \d{4}\) \(older 1\)\.json$/);
+		assert.equal(h.read(keptMain!), initial);
+		assert.equal(h.read(keptOlder!), beforeOlder);
+		assert(h.read(now.md).includes('earlier_versions: 1'));
+		assert(h.read(now.md).includes(`  - "[[${keptMain}]]"`));
+		assert(![...h.entries.keys()].some((p) => p.includes('(updated ')));
+		assert.equal(web.pendingCaptures?.[id], undefined);
+		const settledFiles = h.entries.size;
+		const quiet = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(quiet.changedCount + quiet.newCount + quiet.refreshedViews, 0);
+		assert.equal(h.entries.size, settledFiles, 'syncing again adds no files');
+		console.log('ChatGPT sync integration passed: listing and download 429 recovery, archive scope, project cursors, interrupted capture, file retry, citations, note refreshed in place, repair under the same names, and a continued chat as one note with its earlier version kept.');
 	} finally {
 		GptApi.connect = connect;
 	}

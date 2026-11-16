@@ -1,17 +1,18 @@
 // One desktop sync run: find session files -> skip unchanged and still-active ones ->
 // write a transcript (and optionally a raw copy) for each new or changed session -> log.
-// Like the other providers, files are only ever CREATED: a changed session gets a new
-// "(updated …)" transcript next to the old one.
+// Like the other providers, a session has one note: when it goes on, the note is rewritten and
+// a raw copy that no longer contains the earlier one is kept as a version (see versions.ts).
 
 import { guardMissing } from '../missing-guard';
 import { FileSystemAdapter, TFile } from 'obsidian';
 import type AIChatBridge from '../main';
 import { appendLog } from '../log';
-import { baseName, dailyNoteName, localStamp, safeTitle, tagAccount } from '../naming';
+import { baseName, dailyNoteName, safeTitle, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
 import { createNew, ensureFolder } from '../vaultio';
-import { masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
+import { dirOf, masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
+import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { parseClaudeSession } from './claude-code';
 import { saveSessionFiles, type FileSaveContext } from './session-save';
 import { codexTitles, parseCodexSession } from './codex';
@@ -40,6 +41,8 @@ export interface DesktopSyncResult {
 	filesSaved: number;
 	/** Sessions synced before files were saved, whose files were added now. */
 	filesBackfilled: number;
+	/** Notes you had edited whose session went on. */
+	edits: EditedReport;
 	stopped?: string;
 }
 
@@ -109,7 +112,7 @@ export async function runDesktopSync(
 	const app = plugin.app;
 	const s = plugin.settings;
 	const d = s.desktop;
-	const result: DesktopSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], filesSaved: 0, filesBackfilled: 0 };
+	const result: DesktopSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], filesSaved: 0, filesBackfilled: 0, edits: noEdits() };
 	const exists = (p: string | undefined): boolean => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
 	const quietMs = Math.max(0, d.quietMinutes) * 60_000;
 	const adapter = app.vault.adapter;
@@ -119,6 +122,7 @@ export async function runDesktopSync(
 	/** Saved files of an entry that are still in the vault. */
 	const savedFiles = (e: DesktopIndexEntry | undefined) => new Map(Object.entries(e?.files ?? {}).filter(([, p]) => exists(p)));
 
+	const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.md$/, '');
 	const pathTaken = (p: string) => app.vault.getAbstractFileByPath(p) !== null;
 	/** A stem free for both the .md and the raw .jsonl. */
 	const freeStem = (folder: string, stem: string, id: string, rawFolder = folder): string => {
@@ -268,7 +272,9 @@ export async function runDesktopSync(
 					// Transcript deleted from the vault: write it again under the same name, so links stay valid.
 					const folder = entry.md.split('/').slice(0, -1).join('/');
 					await ensureFolder(app, folder);
-					await createNew(app, entry.md, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: entry.raw && exists(entry.raw) ? rawLink(folder, entry.raw) : undefined, files: savedFiles(entry) }), owner.label));
+					const md = withVersionInfo(tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: entry.raw && exists(entry.raw) ? rawLink(folder, entry.raw) : undefined, files: savedFiles(entry) }), owner.label), entry.versions, folder);
+					await createNew(app, entry.md, md);
+					entry.noteHash = noteHash(md);
 					result.restored.push(entry.md.split('/').pop()!.replace(/\.md$/, ''));
 					continue;
 				}
@@ -293,23 +299,34 @@ export async function runDesktopSync(
 			const rawFolder = root !== undefined ? mirrorRaw(folder, root) : rb ? (sub ? `${rb}/${sub}` : rb) : folder;
 			await ensureFolder(app, folder);
 			if (d.keepRaw) await ensureFolder(app, rawFolder);
-			let stem = baseName(session.created, session.title);
-			if (isUpdate) stem = `${stem} (updated ${localStamp(session.updated)})`;
-			stem = freeStem(folder, stem, session.id, rawFolder);
-			const mdPath = `${folder}/${stem}.md`;
-			const rawPath = d.keepRaw ? `${rawFolder}/${stem}.jsonl` : undefined;
-			if (rawPath) await createNew(app, rawPath, text);
-			const before = conf.index[session.id];
+			// A session that goes on keeps its one note, where it is now; only a new one is given a place.
+			const before = isUpdate ? conf.index[session.id] : undefined;
+			const noteFolder = before ? dirOf(before.md) : folder;
+			const stem = before ? stemOf(before.md) : freeStem(folder, baseName(session.created, session.title), session.id, rawFolder);
+			const mdPath = before?.md ?? `${folder}/${stem}.md`;
+			const rawPath = d.keepRaw ? before?.raw ?? `${rawFolder}/${stem}.jsonl` : before?.raw && exists(before.raw) ? before.raw : undefined;
+			let versions = before?.versions;
+			if (d.keepRaw && rawPath) {
+				// A session file only grows, so the copy saved before is normally the start of this one
+				// and nothing of it is lost. Only a file that was rewritten is kept as an earlier version.
+				const oldFile = before?.raw ? app.vault.getAbstractFileByPath(before.raw) : null;
+				const old = oldFile instanceof TFile ? await app.vault.read(oldFile) : null;
+				if (old !== null && !text.startsWith(old)) versions = addVersion(before, await keepVersion(app, [before!.raw!], before!.updated, text));
+				await writeRaw(app, rawPath, text);
+			}
 			let files: Record<string, string> | undefined;
 			if (d.saveFiles && fileCtx) {
-				const saved = await saveSessionFiles(fileCtx, session, folder, stem, before?.files);
+				const saved = await saveSessionFiles(fileCtx, session, noteFolder, stem, before?.files);
 				files = saved.files;
 				result.filesSaved += saved.saved;
 			}
-			await createNew(app, mdPath, tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? rawLink(folder, rawPath) : undefined, files: new Map(Object.entries(files ?? {})) }), owner.label));
+			const md = tagAccount(renderDesktopTranscript(session, { source: file.path, rawFileName: rawPath ? rawLink(noteFolder, rawPath) : undefined, files: new Map(Object.entries(files ?? {})) }), owner.label);
+			const note = await writeNote(app, mdPath, withVersionInfo(md, versions, noteFolder), { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced });
+			recordEdit(result.edits, note, mdPath);
 			conf.index[session.id] = {
 				updated: session.updated, size: file.size, mtime: file.mtime, source: file.path, md: mdPath, raw: rawPath, synced: new Date().toISOString(),
 				...(files ? { files: { ...before?.files, ...files }, filesChecked: session.updated } : {}),
+				versions, noteHash: note.hash,
 			};
 			await plugin.saveSettings();
 			result.written.push(stem);
@@ -334,6 +351,7 @@ async function writeLog(plugin: AIChatBridge, r: DesktopSyncResult): Promise<voi
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.filesSaved) parts.push(`${r.filesSaved} file${r.filesSaved === 1 ? '' : 's'} saved${r.filesBackfilled ? ` (${r.filesBackfilled} older session${r.filesBackfilled === 1 ? '' : 's'})` : ''}`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion: ${r.restored.map((w) => `[[${w}]]`).join(', ')}`);
+	parts.push(...editsLog(r.edits));
 	let line = `- [[${dailyNoteName(now)}]] ${time} – ${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');

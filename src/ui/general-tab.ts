@@ -7,6 +7,7 @@ import { ConfirmModal } from './modals';
 import { DEFAULT_SETTINGS, MIN_DELAY_SECONDS, MIN_INTERVAL_MINUTES } from '../settings';
 import { allRawMoves } from '../raw-move';
 import { rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
+import type { EditedPolicy } from '../versions';
 
 export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 	const { plugin } = ctx;
@@ -57,6 +58,22 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 				await save();
 				plugin.restartTimer();
 			}),
+		);
+
+	new Setting(el).setName('Notes').setHeading();
+	new Setting(el)
+		.setName('When an edited note gets an update')
+		.setDesc('A chat has one note. When the chat continues, the note is updated to the whole chat, and the version before stays in the raw files as "(version …)". Properties you added are always kept. This is for a note whose text you changed yourself.')
+		.addDropdown((dd) =>
+			dd
+				.addOption('copy', 'Keep my version as a copy')
+				.addOption('keep', "Don't update that note")
+				.addOption('overwrite', 'Overwrite')
+				.setValue(s.editedNotes)
+				.onChange(async (v) => {
+					s.editedNotes = v as EditedPolicy;
+					await save();
+				}),
 		);
 
 	new Setting(el).setName('Raw files').setHeading();
@@ -145,6 +162,10 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 	reindex.descEl.toggleClass('ccs-result', !!last);
+	new Setting(el)
+		.setName('Merge chat copies into one note')
+		.setDesc('Earlier versions saved a second note, named "(updated …)", whenever a chat continued. This merges the copies of each chat into its first note, keeps the earlier versions as raw files and rewrites links. You see a preview first; nothing changes until you confirm.')
+		.addButton((b) => b.setButtonText('Preview…').onClick(() => plugin.openMergePreview()));
 
 	const moves = layoutMoves(s, folderExists(ctx.app));
 	if (!moves.length) return;

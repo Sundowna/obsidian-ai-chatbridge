@@ -8,6 +8,7 @@ import { emptyCloudResult, syncClaudeCloud, type CloudSyncContext } from '../src
 import { normalizeSettings } from '../src/migrate';
 import { MassMissingError } from '../src/missing-guard';
 import { followRename } from '../src/follow';
+import { readWrite } from './fake-vault';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -71,7 +72,7 @@ const vault = {
 	createFolder: async () => undefined,
 	create: async (p: string, d: string) => void files.set(p, d),
 	createBinary: async (p: string, d: ArrayBuffer) => void files.set(p, new TextDecoder().decode(d)),
-	readBinary: async (f: TFile) => new TextEncoder().encode(files.get(f.path) ?? '').buffer,
+	...readWrite(files),
 	adapter: { read: async (p: string) => files.get(p) ?? '' },
 };
 let sessionList: unknown[] = [];
@@ -115,14 +116,18 @@ const r2 = emptyCloudResult();
 await syncClaudeCloud(ctx(), r2);
 expect('sync again: nothing new, no events fetched', r2.newCount === 0 && r2.unchanged === 1 && !requested.some((p) => p.includes('/events')));
 
-// The session goes on: a new transcript next to the old one.
+// The session goes on: its one note is rewritten, the version before stays as raw .json.
 eventsOf[CLOUD] = [...BASE_EVENTS, ev('user', { type: 'user', uuid: 'u3', timestamp: '2026-11-11T09:00:00Z', message: { role: 'user', content: 'One more thing' } }, '2026-11-11T09:00:00Z')];
 sessionList = [listEntry(CLOUD, 'anthropic_cloud', 'idle', '2026-11-11T09:00:00Z')];
 const r3 = emptyCloudResult();
 await syncClaudeCloud(ctx(), r3);
-const updated = [...files.keys()].find((p) => p.includes('(updated') && p.endsWith('.md'));
-expect('sync: changed session gets an "(updated …)" transcript, old one stays', r3.changedCount === 1 && !!updated && files.has(md1));
-expect('sync: unchanged file not copied again', ![...files.keys()].some((p) => p.includes('(updated') && p.includes('/Artifacts/')));
+const e3 = account.web.cloudIndex![CLOUD]!;
+const mds = [...files.keys()].filter((p) => p.endsWith('.md') && !p.includes('/Artifacts/'));
+expect('sync: changed session updates its one note', r3.changedCount === 1 && e3.md === md1 && mds.length === 1 && (files.get(md1) ?? '').includes('One more thing') && ![...files.keys()].some((p) => p.includes('(updated')), mds.join(' | '));
+const keptRaw = e3.versions?.[0]?.files[0] ?? '';
+expect('sync: the version before is kept as raw .json and named in the note', e3.versions?.length === 1 && keptRaw.startsWith(`${s.rawRoot}/${code}/notes-app/2026-11-10 Fix the README (version 2026-11-`) && keptRaw.endsWith('.json') && files.has(keptRaw) && (files.get(md1) ?? '').includes('earlier_versions: 1'), keptRaw);
+expect('sync: the kept version reads back as the session it was', parseCloudSession(parseCloudRaw(files.get(keptRaw) ?? '{}').session, parseCloudRaw(files.get(keptRaw) ?? '{}').events)?.turns.length === parsed.turns.length);
+expect('sync: unchanged file not copied again', [...files.keys()].filter((p) => p.includes('/Artifacts/')).length === 1);
 
 // Deleted transcript: written again from the saved raw file, same name.
 const latest = account.web.cloudIndex![CLOUD]!.md;

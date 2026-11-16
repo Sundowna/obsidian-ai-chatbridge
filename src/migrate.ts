@@ -2,6 +2,7 @@
 // had one flat set of fields; those become the first account of each provider, so its login,
 // folders and sync history carry over unchanged.
 
+import { EDITED_POLICIES, type EditedPolicy } from './versions';
 import { layoutFolders, layoutRoot } from './desktop/layout';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import { onlySelected } from './project-catalog';
@@ -171,6 +172,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			logPath: saved.logPath ?? DEFAULT_SETTINGS.logPath,
 			rawRootOn: saved.rawRootOn ?? DEFAULT_SETTINGS.rawRootOn,
 			rawRoot: saved.rawRoot ?? DEFAULT_SETTINGS.rawRoot,
+			editedNotes: EDITED_POLICIES.includes(saved.editedNotes as EditedPolicy) ? (saved.editedNotes as EditedPolicy) : DEFAULT_SETTINGS.editedNotes,
 			claude: hydratedClaude,
 			chatgpt: chatgpt.map(hydrateGpt),
 			lumo: saved.lumo?.length ? saved.lumo.map(hydrateLumo) : firstLumo(hydratedClaude[0]!.web.chatFolder),

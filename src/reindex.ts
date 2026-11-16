@@ -7,6 +7,7 @@
 
 import { TFile, type App } from 'obsidian';
 import type { Settings } from './settings';
+import type { NoteState } from './types';
 
 /** One saved item's paths, as the indexes keep them. Updated in place. */
 export interface IndexedPaths {
@@ -67,6 +68,23 @@ export function refreshEntries(entries: readonly IndexedPaths[], vault: VaultLoo
 	return r;
 }
 
+/** An entry's own raw files, then the ones kept as earlier versions; `set` gets the own-file index. */
+function withVersions(own: string[], state: NoteState, set: (i: number, p: string) => void): Pick<IndexedPaths, 'raws' | 'setRaw'> {
+	const kept = (state.versions ?? []).flatMap((v) => v.files.map((_p, i) => ({ v, i })));
+	return {
+		// A missing main file keeps its place, so an earlier version is never taken for it.
+		raws: [...(own.length ? own : kept.length ? [''] : []), ...kept.map(({ v, i }) => v.files[i]!)],
+		setRaw: (i, p) => {
+			const base = own.length || (kept.length ? 1 : 0);
+			if (i < base) set(i, p);
+			else {
+				const k = kept[i - base];
+				if (k) k.v.files[k.i] = p;
+			}
+		},
+	};
+}
+
 /** Every index entry of every account, as IndexedPaths. */
 export function allEntries(s: Settings): IndexedPaths[] {
 	const out: IndexedPaths[] = [];
@@ -77,16 +95,15 @@ export function allEntries(s: Settings): IndexedPaths[] {
 			out.push({
 				id,
 				md: e.md,
-				raws: [e.json, ...(e.older ?? [])],
 				setMd: (p) => {
 					// ChatGPT's refreshed transcript is the same note unless it was saved separately.
 					if (e.view === e.md) e.view = p;
 					e.md = p;
 				},
-				setRaw: (i, p) => {
+				...withVersions([e.json, ...(e.older ?? [])], e, (i, p) => {
 					if (i === 0) e.json = p;
 					else if (e.older) e.older[i - 1] = p;
-				},
+				}),
 			});
 		}
 	}
@@ -94,7 +111,7 @@ export function allEntries(s: Settings): IndexedPaths[] {
 	for (const a of s.claude) {
 		for (const [id, e] of Object.entries(a.web.cloudIndex ?? {})) {
 			if (!e.md) continue;
-			out.push({ id, md: e.md, raws: [e.json], setMd: (p) => (e.md = p), setRaw: (_i, p) => (e.json = p) });
+			out.push({ id, md: e.md, setMd: (p) => (e.md = p), ...withVersions([e.json], e, (_i, p) => (e.json = p)) });
 		}
 	}
 	for (const a of [...s.claude, ...s.chatgpt]) {
@@ -102,9 +119,8 @@ export function allEntries(s: Settings): IndexedPaths[] {
 			out.push({
 				id,
 				md: e.md,
-				raws: e.raw ? [e.raw] : [],
 				setMd: (p) => (e.md = p),
-				setRaw: (_i, p) => (e.raw = p),
+				...withVersions(e.raw ? [e.raw] : [], e, (_i, p) => (e.raw = p)),
 			});
 		}
 	}

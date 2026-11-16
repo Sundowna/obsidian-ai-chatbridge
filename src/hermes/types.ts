@@ -2,6 +2,8 @@
 // database, <profile home>/state.db (WAL mode: state.db + -wal + -shm are one image).
 // Pure types, no Obsidian.
 
+import type { NoteState } from '../types';
+
 /** One Hermes profile: a Hermes home folder with a state.db. */
 export interface HermesProfile {
 	/** Stable key for the index (the profile's folder path, lower case, forward slashes). */
@@ -17,12 +19,14 @@ export interface HermesProfile {
 }
 
 /** What we remember per Hermes session in data.json (no chat text). */
-export interface HermesIndexEntry {
+export interface HermesIndexEntry extends NoteState {
 	/** Revision of the session when last written: last message row ID and row count. */
 	rev: string;
 	/** Last activity (ISO). */
 	updated: string;
 	md: string;
+	/** The session as read from state.db, saved as raw JSON (sessions saved before 0.31 have none). */
+	json?: string;
 	synced: string;
 }
 

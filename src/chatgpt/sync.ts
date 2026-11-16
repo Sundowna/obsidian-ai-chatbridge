@@ -9,9 +9,10 @@ import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
 import { ShapeError } from '../schema';
 import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames } from '../select';
-import { baseName, dailyNoteName, localStamp, safeTitle, tagAccount, untagAccount } from '../naming';
+import { baseName, dailyNoteName, safeTitle, tagAccount, untagAccount } from '../naming';
 import { createNew, ensureFolder, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
+import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from '../settings';
 import { KIND_FOLDER, numbered, safeFileName } from '../files';
 import type { IndexEntry, ListItem } from '../types';
@@ -53,6 +54,8 @@ export interface GptSyncResult {
 	projectsCut: boolean;
 	pendingAssets: number;
 	refreshedViews: number;
+	/** Notes you had edited whose chat continued or was rendered again. */
+	edits: EditedReport;
 	listingRequests: number;
 	projectRequests: number;
 	fullLists: number;
@@ -102,7 +105,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	const g = account.web;
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
-	const result: GptSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, tooLong: [], projectsCut: false, pendingAssets: 0, refreshedViews: 0, listingRequests: 0, projectRequests: 0, fullLists: 0, incrementalLists: 0 };
+	const result: GptSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, tooLong: [], projectsCut: false, pendingAssets: 0, refreshedViews: 0, edits: noEdits(), listingRequests: 0, projectRequests: 0, fullLists: 0, incrementalLists: 0 };
 	if (nothingSelected(g)) {
 		// A waiting retry would otherwise come back here every second.
 		if (g.resumeAfter429) {
@@ -370,8 +373,17 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		const dirOf = (p: string) => p.split('/').slice(0, -1).join('/');
 		const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/, '');
 
-		/** Checkpoint the intended bytes/paths before creating any file. */
-		const capture = async (item: ListItem, suffix: string): Promise<{ chat: GptChat; entry: Capture } | null> => {
+		/** A note saved before fingerprints existed that is still exactly what the plugin wrote. */
+		const asWritten = async (e: IndexEntry | undefined): Promise<boolean> =>
+			!!e && !e.noteHash && !!e.viewHash && (e.view ?? e.md) === e.md && exists(e.md) && (await viewHash(await app.vault.adapter.read(e.md))) === e.viewHash;
+
+		/**
+		 * Saves one chat. A chat saved before keeps its one note and its file names: the version it
+		 * had is kept in the raw folder first, then the new pages are written over the old ones.
+		 * The intended bytes and paths are checkpointed before any file is written.
+		 */
+		const capture = async (item: ListItem): Promise<{ chat: GptChat; entry: Capture } | null> => {
+			const before = g.index[item.uuid];
 			let entry: Capture | undefined = pending[item.uuid];
 			if (entry?.updated_at !== item.updated_at) entry = undefined;
 			let chat = entry ? await readSaved(item, entry) : null;
@@ -381,7 +393,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				chat = loaded.chat;
 				const hashes = await Promise.all(loaded.bytes.map((bytes) => fingerprint(bytes)));
 				if (entry && JSON.stringify(entry.pageHashes) !== JSON.stringify(hashes)) entry = undefined;
-				if (entry) {
+				if (entry && !before) {
+					// A new chat's files are never written over: a different file there means another capture.
 					for (const [i, path] of [entry.json, ...(entry.older ?? [])].entries()) {
 						if (exists(path) && (await fingerprint(await app.vault.adapter.readBinary(path))) !== hashes[i]) {
 							entry = undefined;
@@ -390,51 +403,70 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 					}
 				}
 				if (!entry) {
-					const { md: folder, raw: rawFolder } = foldersFor(item);
-					await ensureFolder(app, folder);
-					await ensureFolder(app, rawFolder);
-					const stem = freeStem(app, folder, baseName(item.created_at, item.name) + suffix, item.uuid, rawFolder);
+					let json: string;
+					let md: string;
+					if (before) {
+						json = before.json;
+						md = before.md;
+					} else {
+						const { md: folder, raw: rawFolder } = foldersFor(item);
+						await ensureFolder(app, folder);
+						await ensureFolder(app, rawFolder);
+						const stem = freeStem(app, folder, baseName(item.created_at, item.name), item.uuid, rawFolder);
+						json = `${rawFolder}/${stem}.json`;
+						md = `${folder}/${stem}.md`;
+					}
+					// The earlier version: its main file and its older parts, kept together.
+					const kept = before ? await keepVersion(app, [before.json, ...(before.older ?? [])], before.updated_at, loaded.bytes[0]) : null;
 					entry = {
 						updated_at: item.updated_at,
 						synced: new Date().toISOString(),
-						json: `${rawFolder}/${stem}.json`,
-						md: `${folder}/${stem}.md`,
-						older: loaded.bytes.slice(1).map((_bytes, i) => olderPartPath(rawFolder, stem, i + 1)),
+						json,
+						md,
+						older: loaded.bytes.slice(1).map((_bytes, i) => olderPartPath(dirOf(json), stemOf(json), i + 1)),
 						pageHashes: hashes,
+						versions: addVersion(before, kept),
+						noteHash: before?.noteHash,
 					};
 					pending[item.uuid] = entry;
 					await plugin.saveSettings();
 				}
-				for (const [i, path] of [entry.json, ...(entry.older ?? [])].entries()) {
-					if (!exists(path)) await createNew(app, path, loaded.bytes[i]!);
+				const paths = [entry.json, ...(entry.older ?? [])];
+				for (const [i, path] of paths.entries()) {
+					if (!exists(path) || (await fingerprint(await app.vault.adapter.readBinary(path))) !== hashes[i]) await writeRaw(app, path, loaded.bytes[i]!);
+				}
+				// Older parts the earlier version had and this one has not: they are in the kept version.
+				const keptNow = entry.versions?.some((v) => v.at === before?.updated_at) ?? false;
+				for (const stale of (before?.older ?? []).filter((p) => !paths.includes(p))) {
+					const file = app.vault.getAbstractFileByPath(stale);
+					if (keptNow && file instanceof TFile) await app.fileManager.trashFile(file);
 				}
 			}
 			if (!entry) throw new Error('ChatGPT capture has no saved journal entry.');
-			const view = transcript(chat, item, entry);
-			if (!exists(entry.md)) await createNew(app, entry.md, view);
-			const isNew = !g.index[item.uuid];
-			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(await app.vault.adapter.read(entry.md)) };
-			if (isNew && catalogIds.has(item.uuid)) counts.saved++;
+			const view = withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md));
+			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, unedited: await asWritten(before), keep: before?.updated_at === item.updated_at ? ['unread'] : [] });
+			recordEdit(result.edits, note, entry.md);
+			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(view), noteHash: note.hash };
+			if (!before && catalogIds.has(item.uuid)) counts.saved++;
 			delete pending[item.uuid];
 			await plugin.saveSettings();
 			return { chat, entry };
 		};
 
+		/** Brings the chat's one note up to date when it would be rendered differently now (new files, a newer plugin). */
 		const refreshView = async (chat: GptChat, item: ListItem, entry: IndexEntry): Promise<void> => {
-			const view = transcript(chat, item, entry);
+			const view = withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md));
 			const hash = await viewHash(view);
 			const latest = entry.view ?? entry.md;
 			if (exists(entry.md) && exists(latest) && (entry.viewHash === hash || (await viewHash(await app.vault.adapter.read(latest))) === hash)) return;
-			const path = !exists(entry.md) ? entry.md : `${dirOf(entry.md)}/${stemOf(entry.json)} (transcript ${hash.slice(0, 16)}).md`;
-			if (!exists(path)) {
-				await createNew(app, path, view);
-				if (path === entry.md) result.restored.push(stemOf(path));
-				else result.refreshedViews++;
-			} else if ((await viewHash(await app.vault.adapter.read(path))) !== hash) {
-				throw new Error('ChatGPT derived transcript path is occupied by different content.');
-			}
-			entry.view = path;
+			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: entry.noteHash, lastSynced: entry.synced, unedited: await asWritten(entry), keep: ['unread'] });
+			recordEdit(result.edits, note, entry.md);
+			if (note.outcome === 'created') result.restored.push(stemOf(entry.md));
+			else if (note.outcome === 'updated') result.refreshedViews++;
+			// A note left as you edited it is not tried again until the chat changes.
+			entry.view = entry.md;
 			entry.viewHash = hash;
+			entry.noteHash = note.hash;
 			await plugin.saveSettings();
 		};
 
@@ -449,7 +481,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			const position = isUpdate ? undefined : counts.saved + 1;
 			activeDownload = position === undefined ? 'updating a saved chat' : `downloading chat ${position}`;
 			progress(`${i + 1} of ${batch.length} queued chats: ${item.name}`, i, batch.length, activeDownload);
-			const saved = await capture(item, isUpdate ? ` (updated ${localStamp(item.updated_at)})` : '');
+			const saved = await capture(item);
 			if (!saved) continue;
 			done.add(item.uuid);
 			completeInventoryJob(inventory, item.uuid, item.updated_at);
@@ -474,7 +506,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			let chat = await readSaved(item, entry);
 			if (!chat) {
 				// Fetch a new capture as a unit. Pages from different revisions never share a capture.
-				const saved = await capture(item, ' (recovered)');
+				const saved = await capture(item);
 				if (!saved) continue;
 				chat = saved.chat;
 				entry = g.index[item.uuid]!;
@@ -535,6 +567,7 @@ async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyn
 	if (r.pendingAssets) parts.push(`${r.pendingAssets} known assets pending`);
 	parts.push('selected branches only');
 	if (r.refreshedViews) parts.push(`${r.refreshedViews} refreshed transcripts`);
+	parts.push(...editsLog(r.edits));
 	if (r.filesSkipped.length) parts.push(`${r.filesSkipped.length} asset attempts failed: ${r.filesSkipped.slice(0, 10).join(', ')}`);
 	if (r.tooLong.length) parts.push(`too long to load in one piece, skipped: ${r.tooLong.join(', ')}`);
 	if (r.projectsCut) parts.push('more projects exist than chatgpt.com listed – chats in unlisted projects use the project ID as folder name');

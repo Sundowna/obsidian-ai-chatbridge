@@ -8,6 +8,8 @@ import { folderExists, layoutMoves, moveToAppLayout, pruneEmpty } from './deskto
 import { masterRaw, mirrorRaw } from './raw-folders';
 import { allRawMoves, moveRawFiles } from './raw-move';
 import { refreshIndex, type ReindexResult } from './reindex';
+import { mergeReportText, runMerge, writeMergeReport, type MergePreview, type MergeResult, type PreviewGroup } from './merge-run';
+import { MergeModal } from './ui/merge-modal';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { followRename } from './follow';
@@ -165,6 +167,12 @@ export default class AIChatBridge extends Plugin {
 			id: 'refresh-index',
 			name: 'Refresh index: find synced notes moved outside the app',
 			callback: () => void this.refreshIndexNow(),
+		});
+
+		this.addCommand({
+			id: 'merge-chat-copies',
+			name: 'Merge chat copies into one note (preview first)',
+			callback: () => this.openMergePreview(),
 		});
 
 		this.addCommand({
@@ -472,6 +480,38 @@ export default class AIChatBridge extends Plugin {
 				notice.hide();
 			}
 		});
+	}
+
+	/** Shows what "Merge chat copies into one note" would do. Reads only. */
+	openMergePreview(): void {
+		if (this.running) {
+			new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is running. Merge the copies when it has finished.');
+			return;
+		}
+		new MergeModal(this.app, this).open();
+	}
+
+	/**
+	 * Merges each chat's "(updated …)" notes (and the other copies chosen in the preview) into one
+	 * note, and writes a report note saying what was done and which links could not be fixed.
+	 */
+	async mergeCopies(groups: readonly PreviewGroup[], skipped: MergePreview['skipped']): Promise<MergeResult | null> {
+		let result: MergeResult | null = null;
+		await this.guarded('manual', async () => {
+			const notice = new Notice('AI ChatBridge: merging chat copies…', 0);
+			try {
+				const r = await runMerge(this.app, this.settings, groups, () => this.saveSettings(), (done, total, name) => notice.setMessage(`AI ChatBridge: merging ${done + 1} of ${total}: ${name}`), () => this.stopRequested);
+				await this.saveSettings();
+				const problems = r.linksLeft.length + r.failed.length;
+				r.report = await writeMergeReport(this.app, this.settings, 'merge report', mergeReportText(groups, skipped, r),
+					`**Merged chat copies:** ${r.merged} chats into one note each, ${r.notesTrashed} notes to the trash, ${r.versionsKept} earlier versions kept, ${r.linksFixed} links rewritten${problems ? `, ${problems} to check` : ''}`);
+				new Notice(`AI ChatBridge: merged ${r.merged} chats. ${r.notesTrashed} notes went to the trash, ${r.linksFixed} links were rewritten.${problems ? ` ${problems} things need a look:` : ''} See ${r.report}`, 20_000);
+				result = r;
+			} finally {
+				notice.hide();
+			}
+		});
+		return result;
 	}
 
 	/** Finds chats moved outside Obsidian and points the sync history at them. */

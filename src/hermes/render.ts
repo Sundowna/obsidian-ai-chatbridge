@@ -81,7 +81,7 @@ export function renderToolSteps(steps: HermesToolStep[]): string {
 
 const y = (s: string) => JSON.stringify(s);
 
-export function renderHermesTranscript(s: HermesSession, dbPath: string): string {
+export function renderHermesTranscript(s: HermesSession, dbPath: string, rawFileName?: string): string {
 	const fm = [
 		'---',
 		'source: hermes',
@@ -99,7 +99,9 @@ export function renderHermesTranscript(s: HermesSession, dbPath: string): string
 	if (s.cwd) fm.push(`cwd: ${y(s.cwd.replace(/\\/g, '/'))}`);
 	if (s.parentId) fm.push(`parent_session: ${y(s.parentId)}`);
 	if (s.isSubagent) fm.push('subagent: true');
-	fm.push(`source_file: ${y(dbPath.replace(/\\/g, '/'))}`, 'unread: true', '---', '');
+	fm.push(`source_file: ${y(dbPath.replace(/\\/g, '/'))}`);
+	if (rawFileName) fm.push(`raw: ${y(`[[${rawFileName}]]`)}`);
+	fm.push('unread: true', '---', '');
 
 	const body: string[] = [];
 	for (const t of s.turns) {
