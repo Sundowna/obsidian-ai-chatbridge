@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.32.0 - 2026-11-16
+
+One note per chat. A chat that continues no longer gets a second `(updated …)` note.
+
+### New
+- **One note per chat** - when a chat continues after it was synced, its note is now updated to the whole current chat instead of getting a second `(updated …)` note next to it. The note keeps its name and place, so links stay valid. This goes for every provider: Claude, Claude Code (cloud and local), ChatGPT, Codex, Gemini, AI Studio, Lumo and Hermes
+- **Earlier versions stay as raw files** - before a chat's raw file is replaced, the one from before is kept beside it as `<name> (version <date>).json`. The note says how many there are (`earlier_versions:`) and links them (`earlier_raw:`)
+- **Your edits are safe** - properties you added to a note are always carried over. If you changed the note's text, your version is saved first as `<name> (my edits <date>).md`. **General → When an edited note gets an update** can instead leave such notes alone or overwrite them
+- **Merge chat copies into one note** - for vaults that already hold `(updated …)` notes: **General → Merge chat copies into one note** (also a command) shows a preview of what merges into what and changes nothing until you confirm. Then each chat's first note gets the newest text, earlier versions become `(version …)` raw files, saved files move to the note's own folder, links are rewritten, and the merged notes go to Obsidian's trash. A report note lists everything, including any link that could not be fixed. ChatGPT `(transcript …)` copies and `(recovered)` notes can be merged too
+- **Hermes raw files** - each Hermes session now also gets a raw `.json` in the raw files folder, linked from its note
+
+### Changed
+- **"Nothing is overwritten" no longer holds for the notes themselves** - the note of a continued chat is rewritten. What you lose: an earlier version is no longer a readable note, only raw JSON in the raw files folder
+- ChatGPT no longer writes `(transcript …)` copies when a chat is shown differently (for example once its files are downloaded): the chat's one note is brought up to date
+- A chat whose files you deleted comes back under its own name; `(recovered)` notes are no longer made
+- A continued chat stays in the folder its note is in, even if you moved the chat to another project on the provider's side. Its raw file stays where it is too; **Move … files** in the settings moves raw files to where the settings put them now
+- Desktop sessions: with **Keep the raw session file** on, the `.jsonl` copy is rewritten as the session grows; an earlier copy is kept only if the app rewrote the session file
+
 ## 0.31.0 - 2026-11-16
 
 Better on macOS and Linux. Nothing changes on Windows.

@@ -1,5 +1,9 @@
 # Obsidian community plugin
 
+## No silent regressions
+
+Before rebuilding, redesigning or replacing any existing UI or module, read [FEATURES.md](FEATURES.md) and follow its rule. Never drop a listed behaviour or visual state silently. Update FEATURES.md with every feature change.
+
 ## Project overview
 
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).

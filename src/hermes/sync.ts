@@ -1,15 +1,17 @@
 // One Hermes sync run: snapshot each enabled profile's state.db (read-only, see reader.ts) ->
 // skip unchanged and still-active sessions -> write a transcript for each new or changed one -> log.
-// Like every other provider, files are only ever CREATED: a changed session gets a new
-// "(updated …)" transcript next to the old one; an unchanged one is never touched again.
+// Like every other provider, a session has one note: when it goes on, the note is rewritten and
+// the version before stays in the raw folder (see versions.ts). An unchanged one is never touched.
 
 import { TFile } from 'obsidian';
 import type AIChatBridge from '../main';
 import { appendLog } from '../log';
-import { baseName, dailyNoteName, localStamp, safeTitle } from '../naming';
+import { baseName, dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
+import { dirOf, masterRaw, mirrorRaw, rawLink } from '../raw-folders';
+import { addVersion, editsLog, keepNoteAsVersion, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { buildSession, columns, messagesSql, revisionOf, sessionsSql, toMessageRow, toSessionRow } from './parse';
 import { profileGone } from './profiles';
 import { isPrivatePath, nodeRequire, pickBackend, type Snapshot, type SqliteBackend } from './reader';
@@ -31,12 +33,15 @@ export interface HermesSyncResult {
 	backend?: string;
 	/** Profiles turned on whose state.db is gone: skipped, the others still sync. */
 	missing: string[];
+	/** Notes you had edited whose session went on. */
+	edits: EditedReport;
 	stopped?: string;
 }
 
 export const anyHermesEnabled = (plugin: AIChatBridge): boolean => plugin.settings.hermes.profiles.some((p) => p.enabled);
 
 const CHUNK = 500;
+const stemOf = (p: string): string => (p.split('/').pop() ?? '').replace(/\.md$/, '');
 
 async function loadMessages(db: Snapshot, cols: Set<string>, ids: string[]): Promise<Map<string, HermesMessageRow[]>> {
 	const out = new Map<string, HermesMessageRow[]>(ids.map((id) => [id, []]));
@@ -71,7 +76,7 @@ export async function runHermesSync(
 	const app = plugin.app;
 	const s = plugin.settings;
 	const h = s.hermes;
-	const result: HermesSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], missing: [] };
+	const result: HermesSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], missing: [], edits: noEdits() };
 	const exists = (p: string | undefined): boolean => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
 	const quietMs = Math.max(0, s.desktop.quietMinutes) * 60_000;
 	let budget = s.maxChatsPerRun > 0 ? s.maxChatsPerRun : Infinity;
@@ -177,20 +182,33 @@ async function syncProfile(
 	const dbPath = `${profile.path}/state.db`;
 	for (const [i, { row, session, isUpdate, restoreTo }] of now_.entries()) {
 		progress(`Hermes ${profile.label}: ${i + 1} of ${now_.length}: ${session.title}`, i, now_.length);
-		const md = renderHermesTranscript(session, dbPath);
-		if (restoreTo) {
-			await ensureFolder(app, restoreTo.split('/').slice(0, -1).join('/'));
+		const before = isUpdate || restoreTo ? profile.index[row.id] : undefined;
+		if (restoreTo && before) {
+			const noteFolder = dirOf(restoreTo);
+			const md = withVersionInfo(renderHermesTranscript(session, dbPath, before.json && exists(before.json) ? rawLink(noteFolder, before.json) : undefined), before.versions, noteFolder);
+			await ensureFolder(app, noteFolder);
 			await createNew(app, restoreTo, md);
-			result.restored.push(restoreTo.split('/').pop()!.replace(/\.md$/, ''));
+			before.noteHash = noteHash(md);
+			result.restored.push(stemOf(restoreTo));
 			continue;
 		}
-		await ensureFolder(app, folder);
-		let stem = baseName(session.created, session.title);
-		if (isUpdate) stem = `${stem} (updated ${localStamp(session.updated)})`;
-		stem = freeStem(app, folder, stem, session.id);
-		const path = `${folder}/${stem}.md`;
-		await createNew(app, path, md);
-		profile.index[row.id] = { rev: revisionOf(row), updated: session.updated, md: path, synced: new Date().toISOString() };
+		// A session that goes on keeps its one note, where it is now; only a new one is given a place.
+		const noteFolder = before ? dirOf(before.md) : folder;
+		const root = masterRaw(plugin.settings);
+		const rawFolder = root !== undefined ? mirrorRaw(noteFolder, root) : noteFolder;
+		await ensureFolder(app, noteFolder);
+		const stem = before ? stemOf(before.md) : freeStem(app, folder, baseName(session.created, session.title), session.id, rawFolder);
+		const path = before?.md ?? `${folder}/${stem}.md`;
+		const jsonPath = before?.json ?? `${rawFolder}/${stem}.json`;
+		// The raw file: the session's rows as state.db has them.
+		const raw = JSON.stringify({ format: 'hermes-session', profile: profile.label, session: row, messages: messages.get(row.id) ?? [] }, null, '\t');
+		// A session saved before it had a raw file: its old note text is the earlier version.
+		const kept = !before ? null : before.json ? await keepVersion(app, [before.json], before.updated, raw) : await keepNoteAsVersion(app, before.md, jsonPath, before.updated);
+		const versions = addVersion(before, kept);
+		await writeRaw(app, jsonPath, raw);
+		const note = await writeNote(app, path, withVersionInfo(renderHermesTranscript(session, dbPath, rawLink(noteFolder, jsonPath)), versions, noteFolder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced });
+		recordEdit(result.edits, note, path);
+		profile.index[row.id] = { rev: revisionOf(row), updated: session.updated, md: path, json: jsonPath, synced: new Date().toISOString(), versions, noteHash: note.hash };
 		await plugin.saveSettings();
 		result.written.push(stem);
 		if (isUpdate) result.changedCount++;
@@ -208,6 +226,7 @@ async function writeLog(plugin: AIChatBridge, r: HermesSyncResult): Promise<void
 	if (r.active) parts.push(`${r.active} still active (next run)`);
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion: ${r.restored.map((w) => `[[${w}]]`).join(', ')}`);
+	parts.push(...editsLog(r.edits));
 	let line = `- [[${dailyNoteName(now)}]] ${time} – ${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');

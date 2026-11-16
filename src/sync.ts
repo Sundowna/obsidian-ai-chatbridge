@@ -7,12 +7,13 @@ import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
 import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, targetFor } from './select';
-import { baseName, dailyNoteName, localStamp, tagAccount } from './naming';
+import { baseName, dailyNoteName, tagAccount } from './naming';
 import { renderTranscript } from './transcript';
 import { chatFolders, dirOf, masterRaw, rawLink } from './raw-folders';
 import type { Chat } from './types';
 import { createNew, ensureFolder, freeFileName, freeStem } from './vaultio';
 import { appendLog } from './log';
+import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
 import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, safeFileName, visibleFiles } from './files';
 import { TFile, TFolder } from 'obsidian';
@@ -44,6 +45,8 @@ export interface SyncResult {
 	viewNotRead: string[];
 	/** Chats whose deleted .json/.md were written again. */
 	restored: string[];
+	/** Notes you had edited whose chat continued. */
+	edits: EditedReport;
 	stopped?: string;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
@@ -52,6 +55,7 @@ export interface SyncResult {
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/, '');
 
 /** The whole chat list, 30 at a time. */
 export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn): Promise<ListItem[]> {
@@ -128,7 +132,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const s = account.web;
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, plugin.settings.delaySeconds) * 1000;
-	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], restored: [] };
+	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], restored: [], edits: noEdits() };
 	if (nothingSelected(s)) return { ...result, nothingSelected: true };
 	const auth = await claudeAuth(plugin, account);
 	const getKey = auth.getKey;
@@ -274,7 +278,11 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			progress(`${i + 1} of ${todo.length} chats: ${item.name}`, i, todo.length);
 			const target = targetFor(item);
 			if (!folders[target]) throw new StopError(`The ${target === 'chat' ? 'Chat' : 'Code Cloud'} folder setting is empty or invalid.`);
-			const { md: folder, raw: rawFolder } = foldersOf(item);
+			// A chat that continues keeps its one note, where it is now; only a new chat is given a place.
+			const before = isUpdate ? s.index[item.uuid] : undefined;
+			const today = foldersOf(item);
+			const folder = before ? dirOf(before.md) : today.md;
+			const rawFolder = before ? dirOf(before.json) : today.raw;
 			for (const f of new Set([folder, rawFolder])) {
 				if (!app.vault.getAbstractFileByPath(f) && !result.foldersCreated.includes(f)) result.foldersCreated.push(f);
 			}
@@ -300,26 +308,25 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			const allFiles = mergeFiles(chatFiles(chat), visible);
 			const fetched = s.downloadFiles ? await fetchFiles(api, allFiles.filter(isMissing), delayMs, result, s.fileIndex) : [];
 
-			let stem = baseName(chat.created_at, chat.name || item.name);
-			if (isUpdate) stem = `${stem} (updated ${localStamp(chat.updated_at)})`;
-			stem = freeStem(app, folder, stem, item.uuid, rawFolder);
-
-			const jsonPath = `${rawFolder}/${stem}.json`;
-			const mdPath = `${folder}/${stem}.md`;
-			await createNew(app, jsonPath, raw.bytes); // exact bytes from claude.ai
+			const stem = before ? stemOf(before.json) : freeStem(app, folder, baseName(chat.created_at, chat.name || item.name), item.uuid, rawFolder);
+			const jsonPath = before?.json ?? `${rawFolder}/${stem}.json`;
+			const mdPath = before?.md ?? `${folder}/${stem}.md`;
+			// The version saved before stays in the raw folder; then the exact bytes from claude.ai.
+			const versions = addVersion(before, before ? await keepVersion(app, [before.json], before.updated_at, raw.bytes) : null);
+			await writeRaw(app, jsonPath, raw.bytes);
 			await saveFiles(fetched, folder, stem);
-			await createNew(app, mdPath, transcriptFor(chat, item, jsonPath, folder, visible));
+			const note = await writeNote(app, mdPath, withVersionInfo(transcriptFor(chat, item, jsonPath, folder, visible), versions, folder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced });
+			recordEdit(result.edits, note, mdPath);
 
 			// Remember it right away, so a later stop doesn't lose progress.
-			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked };
+			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash };
 			await plugin.saveSettings();
-			result.written.push(stem);
+			result.written.push(stemOf(mdPath));
 			if (isUpdate) result.changedCount++;
 			else result.newCount++;
 		}
 
 		const done = new Set(todo.map((t) => t.item.uuid));
-		const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/, '');
 
 		// 6. Restore: synced chats whose .json and/or .md were deleted from the vault.
 		//    A deleted transcript is rewritten from the saved .json (same name, so links stay valid);
@@ -357,7 +364,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			let stem: string;
 			if (jsonOk || mdOk) {
 				stem = stemOf(jsonOk ? entry.json : entry.md);
-				folder = mdOk ? dirOf(entry.md) : split ? today.md : dirOf(entry.json);
+				folder = dirOf(entry.md); // a deleted note comes back where it was, under its own name
 				rawFolder = jsonOk ? dirOf(entry.json) : split ? today.raw : dirOf(entry.md);
 			} else {
 				folder = today.md;
@@ -379,12 +386,17 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			const fetched = s.downloadFiles ? await fetchFiles(api, mergeFiles(chatFiles(chat), visible).filter(isMissing), delayMs, result, s.fileIndex) : [];
 
 			const jsonPath = jsonOk ? entry.json : `${rawFolder}/${stem}.json`;
-			const mdPath = mdOk ? entry.md : `${folder}/${stem}.md`;
+			const mdPath = jsonOk || mdOk ? entry.md : `${folder}/${stem}.md`;
 			if (rawBytes && !exists(jsonPath)) await createNew(app, jsonPath, rawBytes);
 			await saveFiles(fetched, folder, stem);
-			if (!exists(mdPath)) await createNew(app, mdPath, transcriptFor(chat, item, jsonPath, folder, visible));
+			let restoredHash = entry.noteHash;
+			if (!exists(mdPath)) {
+				const md = withVersionInfo(transcriptFor(chat, item, jsonPath, folder, visible), entry.versions, folder);
+				await createNew(app, mdPath, md);
+				restoredHash = noteHash(md);
+			}
 
-			s.index[item.uuid] = { ...entry, json: jsonPath, md: mdPath, outputsChecked };
+			s.index[item.uuid] = { ...entry, json: jsonPath, md: mdPath, outputsChecked, noteHash: restoredHash };
 			await plugin.saveSettings();
 			result.restored.push(stem);
 			done.add(item.uuid);
@@ -458,6 +470,8 @@ function addCloud(r: SyncResult, c: CloudSyncResult): void {
 	r.leftForLater += c.leftForLater;
 	r.written.push(...c.written);
 	r.restored.push(...c.restored);
+	r.edits.copies.push(...c.edits.copies);
+	r.edits.kept.push(...c.edits.kept);
 	r.filesSaved += c.filesSaved;
 }
 
@@ -470,6 +484,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 	if (r.filteredOut) parts.push(`${r.filteredOut} skipped (other projects)`);
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion: ${r.restored.map((w) => `[[${w}]]`).join(', ')}`);
+	parts.push(...editsLog(r.edits));
 	if (r.filesSaved) parts.push(`${r.filesSaved} files saved${r.backfilledChats ? ` (incl. files for ${r.backfilledChats} older chats)` : ''}`);
 	if (r.filesDeduped) parts.push(`${r.filesDeduped} files already there under another ID (not copied)`);
 	if (r.viewNotRead.length) parts.push(`chat-view files not readable (will retry): ${r.viewNotRead.join(', ')}`);

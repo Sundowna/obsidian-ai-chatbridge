@@ -1,16 +1,17 @@
 // Claude Code cloud sessions (claude.ai/code) -> the account's Code Cloud folder.
 // Runs as part of the claude.ai sync, with the same login, delay and per-run limit.
-// Like everywhere else, files are only ever CREATED: a changed session gets a new
-// "(updated …)" transcript next to the old one.
+// Like everywhere else, a session has one note: when it goes on, the note is rewritten and the
+// version before stays in the raw folder (see versions.ts).
 
 import { TFile, type App } from 'obsidian';
 import { type ClaudeApi, StopError } from '../api';
 import { guardMissing } from '../missing-guard';
-import { baseName, localStamp, tagAccount } from '../naming';
+import { baseName, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
 import { cleanFolder, type ClaudeAccount, type CloudIndexEntry, type Settings } from '../settings';
 import { createNew, ensureFolder, freeStem } from '../vaultio';
+import { addVersion, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { renderDesktopTranscript } from '../desktop/render';
 import type { DesktopFs } from '../desktop/scan';
 import { saveSessionFiles } from '../desktop/session-save';
@@ -23,6 +24,8 @@ import {
 const MAX_LIST_PAGES = 50;
 const MAX_EVENT_PAGES = 200;
 const NO_FOLDER = 'Other';
+const dirOf = (p: string) => p.split('/').slice(0, -1).join('/');
+const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.md$/, '');
 export const CLOUD_APP_LABEL = 'Claude Code (cloud)';
 
 export interface CloudSyncResult {
@@ -36,9 +39,10 @@ export interface CloudSyncResult {
 	written: string[];
 	restored: string[];
 	filesSaved: number;
+	edits: EditedReport;
 }
 
-export const emptyCloudResult = (): CloudSyncResult => ({ listed: 0, unchanged: 0, running: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0 });
+export const emptyCloudResult = (): CloudSyncResult => ({ listed: 0, unchanged: 0, running: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, edits: noEdits() });
 
 export interface CloudSyncContext {
 	app: App;
@@ -164,22 +168,25 @@ export async function syncClaudeCloud(c: CloudSyncContext, r: CloudSyncResult): 
 			await c.save();
 			continue;
 		}
-		const isUpdate = !!entry?.md;
-		const { md: folder, raw: rawFolder } = cloudFolders(c.settings, account, session, parsed);
+		// A session that goes on keeps its one note, where it is now; only a new one is given a place.
+		const before = entry?.md ? entry : undefined;
+		const isUpdate = !!before;
+		const today = cloudFolders(c.settings, account, session, parsed);
+		const folder = before ? dirOf(before.md) : today.md;
+		const stem = before ? stemOf(before.md) : freeStem(app, folder, baseName(parsed.created, parsed.title), session.id.replace(/^cse_/, ''), today.raw);
+		const mdPath = before?.md ?? `${folder}/${stem}.md`;
+		const jsonPath = before?.json || `${today.raw}/${stem}.json`;
 		await ensureFolder(app, folder);
-		await ensureFolder(app, rawFolder);
-		let stem = baseName(parsed.created, parsed.title);
-		if (isUpdate) stem = `${stem} (updated ${localStamp(versionOf(session))})`;
-		stem = freeStem(app, folder, stem, session.id.replace(/^cse_/, ''), rawFolder);
 
-		const jsonPath = `${rawFolder}/${stem}.json`;
-		const mdPath = `${folder}/${stem}.md`;
-		await createNew(app, jsonPath, cloudRaw(session, events));
-		const files = saveFiles ? await saveSessionFiles({ app, fs: NO_DISK }, parsed, folder, stem, entry?.files) : { files: {}, saved: 0 };
+		const raw = cloudRaw(session, events);
+		const versions = addVersion(before, before ? await keepVersion(app, [jsonPath], before.updated, raw) : null);
+		await writeRaw(app, jsonPath, raw);
+		const files = saveFiles ? await saveSessionFiles({ app, fs: NO_DISK }, parsed, folder, stem, before?.files) : { files: {}, saved: 0 };
 		r.filesSaved += files.saved;
-		await createNew(app, mdPath, transcript(account, session, parsed, folder, jsonPath, files.files));
+		const note = await writeNote(app, mdPath, withVersionInfo(transcript(account, session, parsed, folder, jsonPath, files.files), versions, folder), { policy: c.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced });
+		recordEdit(r.edits, note, mdPath);
 
-		index[session.id] = { updated: versionOf(session), md: mdPath, json: jsonPath, synced: new Date().toISOString(), files: files.files };
+		index[session.id] = { updated: versionOf(session), md: mdPath, json: jsonPath, synced: new Date().toISOString(), files: files.files, versions, noteHash: note.hash };
 		await c.save();
 		r.written.push(stem);
 		if (isUpdate) r.changedCount++;
@@ -206,13 +213,17 @@ export async function syncClaudeCloud(c: CloudSyncContext, r: CloudSyncResult): 
 		}
 		const parsed = parseCloudSession(saved.session, saved.events);
 		if (!parsed) continue;
-		const dirOf = (p: string) => p.split('/').slice(0, -1).join('/');
 		const jsonPath = entry.json && dirOf(entry.json) ? entry.json : `${cloudFolders(c.settings, account, session, parsed).raw}/${(entry.md.split('/').pop() ?? 'session').replace(/\.md$/, '')}.json`;
 		await ensureFolder(app, dirOf(jsonPath));
 		await ensureFolder(app, dirOf(entry.md));
 		if (!jsonOk) await createNew(app, jsonPath, cloudRaw(saved.session, saved.events));
-		if (!mdOk) await createNew(app, entry.md, transcript(account, saved.session, parsed, dirOf(entry.md), jsonPath, entry.files ?? {}));
-		index[session.id] = { ...entry, json: jsonPath };
+		let hash = entry.noteHash;
+		if (!mdOk) {
+			const md = withVersionInfo(transcript(account, saved.session, parsed, dirOf(entry.md), jsonPath, entry.files ?? {}), entry.versions, dirOf(entry.md));
+			await createNew(app, entry.md, md);
+			hash = noteHash(md);
+		}
+		index[session.id] = { ...entry, json: jsonPath, noteHash: hash };
 		await c.save();
 		r.restored.push((entry.md.split('/').pop() ?? '').replace(/\.md$/, ''));
 	}

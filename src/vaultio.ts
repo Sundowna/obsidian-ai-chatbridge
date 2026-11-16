@@ -1,7 +1,22 @@
-// Writing files into the vault. There is deliberately no "modify" or "delete"
-// here: chat files are only ever CREATED. If a name is taken, we pick another.
+// Writing files into the vault. Nothing is deleted here. createNew never overwrites; writeOver
+// replaces a file's content and is only for the one-note-per-chat rule (versions.ts), which
+// keeps the earlier version first.
 
-import { App, normalizePath } from 'obsidian';
+import { App, normalizePath, TFile } from 'obsidian';
+
+/** Creates the file, or replaces the content of the file already there. */
+export async function writeOver(app: App, path: string, data: string | ArrayBuffer): Promise<void> {
+	const p = normalizePath(path);
+	const file = app.vault.getAbstractFileByPath(p);
+	if (file === null) {
+		if (typeof data === 'string') await app.vault.create(p, data);
+		else await app.vault.createBinary(p, data);
+		return;
+	}
+	if (!(file instanceof TFile)) throw new Error(`Refusing to overwrite ${p}: it is a folder`);
+	if (typeof data === 'string') await app.vault.modify(file, data);
+	else await app.vault.modifyBinary(file, data);
+}
 
 export async function ensureFolder(app: App, folder: string): Promise<void> {
 	const parts = normalizePath(folder).split('/').filter(Boolean);

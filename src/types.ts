@@ -64,8 +64,24 @@ export interface Chat {
 	chat_messages: ChatMessage[];
 }
 
+/** The raw files of one earlier version of a chat, kept when the chat continued. */
+export interface RawVersion {
+	/** That version's own "updated" time, as the provider gave it. */
+	at: string;
+	/** The main raw file first, then its parts (ChatGPT's older pages). */
+	files: string[];
+}
+
+/** What every index entry remembers about its one note (see versions.ts). */
+export interface NoteState {
+	/** Earlier versions, oldest first. */
+	versions?: RawVersion[];
+	/** Fingerprint of the note's text as the plugin last wrote it, to notice your edits. */
+	noteHash?: string;
+}
+
 /** What we remember per chat in data.json (no secrets). */
-export interface IndexEntry {
+export interface IndexEntry extends NoteState {
 	updated_at: string;
 	json: string;
 	md: string;

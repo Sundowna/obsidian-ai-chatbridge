@@ -21,3 +21,4 @@ export const normalizePath = (path: string) => path.replace(/\\/g, '/');
 export async function requestUrl(): Promise<never> {
 	throw new Error('Network requests are forbidden in this test.');
 }
+export const getLinkpath = (linktext: string) => linktext.split('#')[0] ?? linktext;

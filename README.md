@@ -15,6 +15,7 @@
 - [What gets synced](#what-gets-synced)
 - [Quick start](#quick-start)
 - [How it looks in your vault](#how-it-looks-in-your-vault)
+- [When a chat continues](#when-a-chat-continues)
 - [Choosing what to sync](#choosing-what-to-sync)
 - [Multiple accounts](#multiple-accounts)
 - [See how the last sync went](#see-how-the-last-sync-went)
@@ -34,7 +35,7 @@
 - **Looks like the apps** - projects, recent chats, Claude Code groups and Codex projects become the same folders in your vault
 - **Everything comes along** - files you uploaded, files the AI made, images and artifacts
 - **Only what's new** - each sync saves new or changed chats; moving or renaming notes in Obsidian is tracked
-- **Nothing is overwritten** - a changed chat gets a new `(updated …)` note next to the old one
+- **One note per chat** - when a chat continues, its note is updated to the whole chat and keeps its name, so links stay valid. The version before is kept as raw JSON, and a note you edited yourself is not lost (see [When a chat continues](#when-a-chat-continues))
 - **Newest first** - a limited or stopped sync always has your latest chats
 - **Pick what you want** - only selected projects, and a folder of your choice per project (e.g. your "Thesis" project straight into `10 Projects/Thesis`)
 - **Several accounts per provider** - e.g. two Claude Pro accounts; they share one folder per provider and `account:` in each note tells them apart
@@ -125,6 +126,39 @@ My sourdough starter smells like nail polish. Is it ruined?
 
 Coming from an older version? **General → Move into the new layout** shows what would move where and moves it with Obsidian's own move, so links, the sync history and the raw files follow. Folders you picked yourself stay where they are.
 
+## When a chat continues
+
+Each chat has one note. When you carry on with a chat after it was synced, the next sync updates that note to the whole current chat. The note keeps its name and place (also if you renamed or moved it), so links to it stay valid.
+
+- **Earlier versions are kept** - the raw file the chat had before stays in the raw files folder as `<name> (version 2026-11-07 1951).json`, next to the current `<name>.json`. For ChatGPT's long chats the older parts are kept with it
+- **The note tells you** - `updated:` is when the chat last changed, `earlier_versions:` how many earlier versions exist, and `earlier_raw:` links them:
+
+```markdown
+updated: 2026-11-09T11:03:44Z
+raw: "[[80 Archive/raw/AI Chats/Claude/Chat/Recent/2026-11-06 RAM upgrade.json]]"
+earlier_versions: 2
+earlier_raw:
+  - "[[80 Archive/raw/AI Chats/Claude/Chat/Recent/2026-11-06 RAM upgrade (version 2026-11-06 0112).json]]"
+  - "[[80 Archive/raw/AI Chats/Claude/Chat/Recent/2026-11-06 RAM upgrade (version 2026-11-08 2349).json]]"
+```
+
+- **Properties you added stay** - tags, aliases and your own properties are carried over. Ticking `unread` is not an edit
+- **A note whose text you changed** - by default your version is saved first as `<name> (my edits <date>).md` next to it, then the note is updated, and the sync log names it. **General → When an edited note gets an update** can instead leave such a note alone (**Don't update that note**) or replace it (**Overwrite**)
+- **Desktop sessions** - a session file only grows, so the saved `.jsonl` normally just grows with it. An earlier copy is kept as a version only if the app rewrote the file. With **Keep the raw session file** off, no earlier versions are kept
+- **Hermes** - each session now also gets a raw `.json` (its rows from `state.db`), so earlier versions can be kept like everywhere else
+- **Deleted a note or its raw file?** The next sync writes it again under the same name
+
+### Coming from a version that made "(updated …)" notes
+
+Up to 0.31 a chat that continued got a second note, `<name> (updated <date>)`, and ChatGPT chats could get `(transcript …)` copies. **General → Merge chat copies into one note** (or the command of that name) tidies them up:
+
+1. It shows a **preview**: per chat, which notes merge into which, which raw files become earlier versions and how many links change. Nothing changes until you press **Merge**. **Save preview as a note** keeps the full list
+2. Per chat, the first note keeps its name and gets the newest text. Raw files of earlier versions become `(version …)` files, saved files move into the note's own `Artifacts/` and `Attachments/` folders, and links to the merged notes are rewritten to the note that stays
+3. The merged notes go to Obsidian's trash (the one set under **Files and links → Deleted files**), not deleted for good
+4. A **report note** next to the sync log lists what was merged and any link that could not be fixed
+
+`(transcript …)` copies and `(recovered)` notes of chats that have no `(updated …)` note are offered separately in the preview and are off until you switch them on. Notes with the same chat ID that are not named like a copy are never touched. Back up or commit your vault first.
+
 ## Choosing what to sync
 
 - **Project folders** - one subfolder per project, or everything in one folder
@@ -171,7 +205,7 @@ Sessions that ran in Anthropic's cloud - on claude.ai/code, or started from the 
 
 - The note says `app: "Claude Code (cloud)"`, names the `repo:` and links back to the session on claude.ai. The raw `.json` holds every event
 - Pasted images go to `Attachments/` and files Claude wrote in full to `Artifacts/`
-- A session that is still running is saved once it's done. A session that goes on later gets an `(updated …)` note next to the old one
+- A session that is still running is saved once it's done. A session that goes on later updates its one note; the version before stays as raw `.json`
 - Sessions you steered from claude.ai but that ran on your computer (Remote Control) are left to **Code Local**, so nothing is saved twice
 - On by default. Turn it off per account with **Claude Code cloud sessions** in the Claude tab
 - Codex cloud tasks are not synced yet
@@ -225,6 +259,7 @@ Long arguments and results are shortened (600 and 1,200 characters), so notes st
 | **Stop the running sync** | Stops after the current chat - so do **Stop all** on the Overview, the ribbon icon, the status bar text and **Stop** in the settings |
 | **Cancel pending chat sync retry** | Stop a waiting retry after a 429 pause |
 | **Refresh index: find synced notes moved outside the app** | Finds notes you moved in the file manager (or while the plugin was off) by their chat ID, so the next sync doesn't save them twice |
+| **Merge chat copies into one note (preview first)** | For vaults from before one note per chat: merges each chat's `(updated …)` notes into its first note, keeps earlier versions as raw files and rewrites links. Shows a preview; nothing changes until you confirm |
 | **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |
 | **Diagnose: save claude.ai answers for the open chat** | Saves the raw answers of the open chat, for bug reports |
 

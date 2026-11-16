@@ -20,6 +20,8 @@ import { addAccount, nameProblem, removeAccount } from '../src/accounts';
 import { desktopOwner } from '../src/desktop/sync';
 import { claudeAuth } from '../src/claude-auth';
 import { followRename } from '../src/follow';
+import { desktopRawMoves } from '../src/raw-move';
+import { readWrite } from './fake-vault';
 import { type ChatgptAccount, type ClaudeAccount, type Settings } from '../src/settings';
 import { FileSystemAdapter, TFile, TFolder } from 'obsidian';
 import { newestFirst } from '../src/select';
@@ -233,6 +235,7 @@ const vault = {
 		vaultFiles.set(p, d);
 	},
 	process: async () => undefined,
+	...readWrite(vaultFiles),
 };
 const settings: Settings = normalizeSettings({ maxChatsPerRun: 0, chatFolder: '30 Sources/AI Chats/Claude Chat', logPath: 'log.md' }).settings;
 expect('settings: layout next to Claude Chat', settings.claude[0]!.desktop.folder === '30 Sources/AI Chats/Claude/Code-Local/This computer' && settings.chatgpt[0]!.desktop.folder === '30 Sources/AI Chats/ChatGPT/Codex-Local/This computer');
@@ -336,36 +339,67 @@ const plugin = { app: { vault, fileManager: { processFrontMatter: async () => un
 	expect('sync 2: nothing new, unchanged counted', r2.newCount === 0 && r2.changedCount === 0 && r2.unchanged === 4, JSON.stringify(r2));
 	expect('sync 2: groups cached for when the app storage is unreadable', settings.claude[0]!.desktop.groupCache?.local_abc === 'Obsidian');
 
-	// Session continues: new transcript as "(updated …)", old one kept.
-	fs.put(cPath, claudeFile + '\n' + jl({ type: 'user', timestamp: '2026-11-07T09:00:00.000Z', message: { role: 'user', content: 'One more thing' } }), old + 1000);
+	// Session continues: the same note is rewritten with the whole session; no second note.
+	const more1 = claudeFile + '\n' + jl({ type: 'user', timestamp: '2026-11-07T09:00:00.000Z', message: { role: 'user', content: 'One more thing' } });
+	fs.put(cPath, more1, old + 1000);
 	settings.desktop.keepRaw = true;
 	const r3 = await runDesktopSync(plugin, undefined, fs, NOW);
-	expect('sync 3: changed session written as update', r3.changedCount === 1 && /\(updated 2026-11-07 \d{4}\)$/.test(r3.written[0] ?? ''), JSON.stringify(r3.written));
-	expect('sync 3: raw copy next to it', [...vaultFiles.keys()].some((p) => p.endsWith('(updated 2026-11-07 ' + r3.written[0]!.slice(-5, -1) + ').jsonl')));
-	expect('sync 3: old transcript untouched', vaultFiles.has(claudeMd));
+	const e3 = settings.claude[0]!.desktop.index[SID]!;
+	const noteCount = () => [...vaultFiles.keys()].filter((p) => p.endsWith('.md') && p.includes('Sidebar title') && !p.includes('(fork)')).length;
+	expect('sync 3: changed session updates its one note', r3.changedCount === 1 && r3.written[0] === '2026-11-06 Sidebar title' && e3.md === claudeMd && noteCount() === 1, JSON.stringify(r3.written));
+	expect('sync 3: no "(updated …)" file anywhere', ![...vaultFiles.keys()].some((p) => p.includes('(updated')));
+	expect('sync 3: the note holds the new turn', (vaultFiles.get(claudeMd) ?? '').includes('One more thing'));
+	expect('sync 3: raw copy in the raw files folder, linked', e3.raw === `80 Archive/raw/${code}/Obsidian/2026-11-06 Sidebar title.jsonl` && vaultFiles.get(e3.raw) === more1 && (vaultFiles.get(claudeMd) ?? '').includes(`raw: "[[${e3.raw}]]"`), e3.raw);
+	expect('sync 3: fingerprint saved, no earlier version yet', !!e3.noteHash && !e3.versions?.length && !(vaultFiles.get(claudeMd) ?? '').includes('earlier_versions'));
 
-	// Raw session folder: the next update's .jsonl goes there, mirrored, linked by path.
-	settings.rawRootOn = false; // own raw session folder: only with the raw files folder off
+	// It goes on again: the raw copy grows in place. The file only grew, so no earlier version is kept.
+	settings.rawRootOn = false; // a changed raw folder setting does not move a session's raw copy
 	settings.claude[0]!.desktop.rawFolder = 'Raw/Claude Code';
-	fs.put(cPath, claudeFile + '\n' + jl({ type: 'user', timestamp: '2026-11-07T10:00:00.000Z', message: { role: 'user', content: 'And another' } }), old + 2000);
+	const more2 = more1 + '\n' + jl({ type: 'user', timestamp: '2026-11-07T10:00:00.000Z', message: { role: 'user', content: 'And another' } });
+	fs.put(cPath, more2, old + 2000);
 	const r3b = await runDesktopSync(plugin, undefined, fs, NOW);
 	const e3b = settings.claude[0]!.desktop.index[SID]!;
-	expect('raw folder: .jsonl mirrored into the raw session folder', r3b.changedCount === 1 && !!e3b.raw?.startsWith('Raw/Claude Code/Obsidian/') && vaultFiles.has(e3b.raw!), e3b.raw);
-	expect('raw folder: transcript stays in the code folder', e3b.md.startsWith(`${code}/Obsidian/`));
-	expect('raw folder: transcript links the raw copy by path', (vaultFiles.get(e3b.md) ?? '').includes(`raw: "[[${e3b.raw}]]"`));
+	expect('grown file: raw copy rewritten in place, no earlier version', r3b.changedCount === 1 && e3b.raw === e3.raw && vaultFiles.get(e3b.raw!) === more2 && !e3b.versions?.length && ![...vaultFiles.keys()].some((p) => p.includes('(version')), e3b.raw);
+	expect('grown file: still one note, same name', e3b.md === claudeMd && noteCount() === 1 && (vaultFiles.get(claudeMd) ?? '').includes('And another'));
+	expect('raw folder: the move is offered instead', desktopRawMoves({ vault } as never, settings.claude[0]!).some((m) => m.from === e3b.raw && m.to === 'Raw/Claude Code/Obsidian/2026-11-06 Sidebar title.jsonl'));
 	delete settings.claude[0]!.desktop.rawFolder;
-
-	// Master raw folder (General): the next update's .jsonl goes to it, at the transcript's path.
 	settings.rawRootOn = true;
-	settings.claude[0]!.desktop.rawFolder = 'Raw/Claude Code'; // hidden and ignored while on
-	settings.rawRoot = '80 Archive/raw';
-	fs.put(cPath, claudeFile + '\n' + jl({ type: 'user', timestamp: '2026-11-07T10:00:00.000Z', message: { role: 'user', content: 'And another' } }) + '\n' + jl({ type: 'user', timestamp: '2026-11-07T10:01:00.000Z', message: { role: 'user', content: 'One more' } }), old + 3000);
+
+	// The app rewrote the session file (it no longer starts with the saved copy): the copy is kept as a version.
+	const rewritten = claudeFile + '\n' + jl({ type: 'user', timestamp: '2026-11-07T10:30:00.000Z', message: { role: 'user', content: 'Rewritten history' } });
+	fs.put(cPath, rewritten, old + 3000);
 	const r3c = await runDesktopSync(plugin, undefined, fs, NOW);
 	const e3c = settings.claude[0]!.desktop.index[SID]!;
-	const mdDir = e3c.md.split('/').slice(0, -1).join('/');
-	expect('master raw: .jsonl under the master folder at the transcript path', r3c.changedCount === 1 && e3c.raw === `80 Archive/raw/${mdDir}/${e3c.md.split('/').pop()!.replace(/\.md$/, '.jsonl')}` && vaultFiles.has(e3c.raw!), e3c.raw);
-	expect('master raw: transcript links it by path', (vaultFiles.get(e3c.md) ?? '').includes(`raw: "[[${e3c.raw}]]"`));
-	delete settings.claude[0]!.desktop.rawFolder;
+	const version = e3c.versions?.[0]?.files[0] ?? '';
+	expect('rewritten file: earlier raw copy kept as a version', r3c.changedCount === 1 && e3c.versions?.length === 1 && /Sidebar title \(version 2026-11-07 \d{4}\)\.jsonl$/.test(version) && vaultFiles.get(version) === more2 && vaultFiles.get(e3c.raw!) === rewritten, version);
+	expect('rewritten file: the note says so', (vaultFiles.get(claudeMd) ?? '').includes('earlier_versions: 1') && (vaultFiles.get(claudeMd) ?? '').includes(`  - "[[${version}]]"`));
+	expect('rewritten file: version follows a folder move', followRename(settings, '80 Archive/raw', 'Raw') > 0 && e3c.versions![0]!.files[0]!.startsWith('Raw/') && followRename(settings, 'Raw', '80 Archive/raw') > 0);
+
+	// You edited the note, then the session goes on: your version is kept as a copy first.
+	const edited = vaultFiles.get(claudeMd)!.replace('Rewritten history', 'Rewritten history\n\nMY OWN REMARK').replace('unread: true', 'unread: false\nmytag: keep-me');
+	vaultFiles.set(claudeMd, edited);
+	const more4 = rewritten + '\n' + jl({ type: 'user', timestamp: '2026-11-07T11:00:00.000Z', message: { role: 'user', content: 'Fourth' } });
+	fs.put(cPath, more4, old + 4000);
+	const r3d = await runDesktopSync(plugin, undefined, fs, NOW);
+	const copy = [...vaultFiles.keys()].find((p) => p.includes('Sidebar title (my edits '));
+	expect('edited note: your version saved as a copy, then updated', r3d.edits.copies.length === 1 && !!copy && vaultFiles.get(copy!) === edited && (vaultFiles.get(claudeMd) ?? '').includes('Fourth') && !(vaultFiles.get(claudeMd) ?? '').includes('MY OWN REMARK'), copy);
+	expect('edited note: a property you added stays', (vaultFiles.get(claudeMd) ?? '').includes('mytag: keep-me'));
+
+	// Only a property changed (unread ticked): that is not an edit.
+	vaultFiles.set(claudeMd, vaultFiles.get(claudeMd)!.replace('unread: true', 'unread: false'));
+	fs.put(cPath, more4 + '\n' + jl({ type: 'user', timestamp: '2026-11-07T11:10:00.000Z', message: { role: 'user', content: 'Fifth' } }), old + 5000);
+	const r3e = await runDesktopSync(plugin, undefined, fs, NOW);
+	expect('property change is no edit: no copy', r3e.edits.copies.length === 0 && [...vaultFiles.keys()].filter((p) => p.includes('(my edits ')).length === 1 && (vaultFiles.get(claudeMd) ?? '').includes('Fifth'));
+
+	// Setting "Don't update that note": the edited note stays, the raw copy still updates.
+	settings.editedNotes = 'keep';
+	const mine = vaultFiles.get(claudeMd)!.replace('Fifth', 'Fifth, as I rewrote it');
+	vaultFiles.set(claudeMd, mine);
+	const more6 = more4 + '\n' + jl({ type: 'user', timestamp: '2026-11-07T11:10:00.000Z', message: { role: 'user', content: 'Fifth' } }) + '\n' + jl({ type: 'user', timestamp: '2026-11-07T11:20:00.000Z', message: { role: 'user', content: 'Sixth' } });
+	fs.put(cPath, more6, old + 6000);
+	const r3f = await runDesktopSync(plugin, undefined, fs, NOW);
+	expect('edited note, keep: note untouched, raw updated, reported', r3f.edits.kept.length === 1 && vaultFiles.get(claudeMd) === mine && vaultFiles.get(settings.claude[0]!.desktop.index[SID]!.raw!) === more6);
+	settings.editedNotes = 'copy';
 
 	// Codex archives a thread: file moves, content same -> no new transcript.
 	const t = fs.files.get('C:/Users/W/.codex/sessions/2026/11/06/rollout-a.jsonl')!;
@@ -459,7 +493,7 @@ async function accountsTest() {
 	fs.put('C:/Users/W/.codex-work/session_index.jsonl', jl({ id: 't-home', thread_name: 'From second home' }), old);
 	gptWork.desktop.extraFolders = ['C:/Users/W/.codex-work/sessions'];
 	const written = new Map<string, string>();
-	const memVault = { getAbstractFileByPath: (p: string) => (written.has(p) ? Object.assign(new TFile(p, { size: 0 }), { path: p }) : null), createFolder: async () => undefined, create: async (p: string, d: string) => void written.set(p, d), process: async () => undefined };
+	const memVault = { getAbstractFileByPath: (p: string) => (written.has(p) ? Object.assign(new TFile(p, { size: 0 }), { path: p }) : null), createFolder: async () => undefined, create: async (p: string, d: string) => void written.set(p, d), process: async () => undefined, ...readWrite(written) };
 	const p = { app: { vault: memVault, fileManager: { processFrontMatter: async () => undefined } }, settings: s, saveSettings: async () => undefined } as never;
 
 	work.desktop.enabled = false;
@@ -639,6 +673,7 @@ async function filesTest() {
 	const bin = (d: ArrayBuffer | string) => (typeof d === 'string' ? new TextEncoder().encode(d).buffer : d);
 	const fileObj = (p: string) => Object.assign(new TFile(), { path: p, stat: { size: bin(files.get(p)!).byteLength } });
 	const v = {
+		...readWrite<string | ArrayBuffer>(files as Map<string, string | ArrayBuffer>, false),
 		getAbstractFileByPath: (p: string) => (files.has(p) ? fileObj(p) : folders.has(p) ? {} : null),
 		getFiles: () => [...files.keys()].map(fileObj),
 		createFolder: async (p: string) => void folders.add(p),
@@ -712,6 +747,7 @@ async function codexFilesTest() {
 	const bin = (d: ArrayBuffer | string) => (typeof d === 'string' ? new TextEncoder().encode(d).buffer : d);
 	const fileObj = (p: string) => Object.assign(new TFile(), { path: p, stat: { size: bin(files.get(p)!).byteLength } });
 	const v = {
+		...readWrite<string | ArrayBuffer>(files as Map<string, string | ArrayBuffer>, false),
 		getAbstractFileByPath: (p: string) => (files.has(p) ? fileObj(p) : folders.has(p) ? {} : null),
 		getFiles: () => [...files.keys()].map(fileObj),
 		createFolder: async (p: string) => void folders.add(p),
@@ -748,6 +784,7 @@ async function guardTest() {
 	const fs = new FakeFs();
 	const vaultFiles2 = new Map<string, string>();
 	const v = {
+		...readWrite<string | ArrayBuffer>(vaultFiles2 as Map<string, string | ArrayBuffer>, false),
 		getAbstractFileByPath: (p: string) => (vaultFiles2.has(p) ? Object.assign(new TFile(), { path: p }) : null),
 		createFolder: async () => undefined,
 		create: async (p: string, d: string) => void vaultFiles2.set(p, d),
@@ -784,6 +821,7 @@ async function live() {
 	};
 	const files = new Map<string, string>();
 	const memVault = {
+		...readWrite<string | ArrayBuffer>(files as Map<string, string | ArrayBuffer>, false),
 		getAbstractFileByPath: (p: string) => (files.has(p) ? Object.assign(new TFile(p, { size: 0 }), { path: p }) : null),
 		createFolder: async () => undefined,
 		create: async (p: string, d: string) => void files.set(p, d),

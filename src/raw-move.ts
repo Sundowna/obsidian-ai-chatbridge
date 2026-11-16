@@ -10,6 +10,7 @@ import { DEFAULT_RECENT, plainFolder } from './select';
 import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount, Settings } from './settings';
 import type { ProjectCatalog } from './project-catalog';
 import { ensureFolder } from './vaultio';
+import { versionFiles } from './versions';
 
 const fileExists = (app: App) => (path: string): boolean => app.vault.getAbstractFileByPath(normalizePath(path)) instanceof TFile;
 
@@ -41,22 +42,29 @@ export function webRawMoves(app: App, provider: Provider, account: ClaudeAccount
 		const base = plainFolder(g.folder);
 		if (base) r.push(...projectRoots(g, base, g.rawFolder, names, recent, rawRoot));
 	}
-	const chats: SavedChat[] = Object.values(w.index).map((e) => ({ md: e.md, raws: [e.json, ...(e.older ?? [])] }));
+	const chats: SavedChat[] = Object.values(w.index).map((e) => ({ md: e.md, raws: [e.json, ...(e.older ?? []), ...versionFiles(e)] }));
+	if (provider === 'claude') chats.push(...Object.values((account as ClaudeAccount).web.cloudIndex ?? {}).flatMap((e) => (e.md ? [{ md: e.md, raws: [e.json, ...versionFiles(e)] }] : [])));
 	return rawMoves(chats, r, fileExists(app));
 }
 
 /** Gemini chats or AI Studio prompts. */
 export function googleRawMoves(app: App, account: GeminiAccount, surface: 'web' | 'studio', rawRoot?: string): RawMove[] {
 	const s = surface === 'web' ? account.web : account.studio;
-	const chats: SavedChat[] = Object.values(s.index).map((e) => ({ md: e.md, raws: [e.json] }));
+	const chats: SavedChat[] = Object.values(s.index).map((e) => ({ md: e.md, raws: [e.json, ...versionFiles(e)] }));
 	return rawMoves(chats, roots(rawRoot, [s.folder, s.rawFolder]), fileExists(app));
 }
 
 /** Desktop sessions' raw .jsonl copies. */
 export function desktopRawMoves(app: App, account: DesktopAccount, rawRoot?: string): RawMove[] {
 	const d = account.desktop;
-	const chats: SavedChat[] = Object.values(d.index).flatMap((e) => (e.raw ? [{ md: e.md, raws: [e.raw] }] : []));
+	const chats: SavedChat[] = Object.values(d.index).flatMap((e) => (e.raw ? [{ md: e.md, raws: [e.raw, ...versionFiles(e)] }] : []));
 	return rawMoves(chats, roots(rawRoot, [d.folder, d.rawFolder]), fileExists(app));
+}
+
+/** Hermes sessions' raw .json files (they follow the raw files folder; Hermes has no JSON folder of its own). */
+export function hermesRawMoves(app: App, s: Settings, rawRoot?: string): RawMove[] {
+	const chats: SavedChat[] = s.hermes.profiles.flatMap((p) => Object.values(p.index)).map((e) => ({ md: e.md, raws: [...(e.json ? [e.json] : []), ...versionFiles(e)] }));
+	return rawMoves(chats, roots(rawRoot, [s.hermes.folder, undefined]), fileExists(app));
 }
 
 /** Every account's raw files that are not where today's settings put them (for the master raw folder). */
@@ -67,6 +75,7 @@ export function allRawMoves(app: App, s: Settings): RawMove[] {
 		...s.chatgpt.flatMap((a) => [...webRawMoves(app, 'chatgpt', a, root), ...desktopRawMoves(app, a, root)]),
 		...s.lumo.flatMap((a) => webRawMoves(app, 'lumo', a, root)),
 		...s.gemini.flatMap((a) => [...googleRawMoves(app, a, 'web', root), ...googleRawMoves(app, a, 'studio', root)]),
+		...hermesRawMoves(app, s, root),
 	];
 }
 

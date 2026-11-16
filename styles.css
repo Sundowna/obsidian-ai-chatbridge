@@ -987,3 +987,45 @@
 .ccs-last-run.is-bad .ccs-last-run-text {
 	color: var(--text-error);
 }
+
+/* Merge chat copies: the preview dialog. */
+.ccs-merge-modal {
+	width: min(760px, 92vw);
+}
+
+.ccs-merge-total {
+	font-weight: var(--font-semibold);
+}
+
+.ccs-merge-list {
+	max-height: 40vh;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 6px 10px;
+	margin-bottom: 10px;
+}
+
+.ccs-merge-list details {
+	margin: 2px 0;
+}
+
+.ccs-merge-list summary {
+	cursor: pointer;
+}
+
+.ccs-merge-count {
+	color: var(--text-muted);
+}
+
+.ccs-merge-list ul {
+	margin: 4px 0 8px;
+	padding-left: 22px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	overflow-wrap: anywhere;
+}
+
+.ccs-merge-list li.ccs-merge-warn {
+	color: var(--text-warning);
+}

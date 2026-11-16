@@ -2,6 +2,7 @@
 // (Claude Code, Cowork) and the ChatGPT/Codex desktop app. Pure types, no Obsidian.
 
 import type { SessionFile, SessionLink } from './session-files';
+import type { NoteState } from '../types';
 
 export type DesktopApp = 'claude' | 'codex';
 
@@ -51,7 +52,7 @@ export interface DesktopSession {
 }
 
 /** What we remember per desktop session in data.json (no secrets, no chat text). */
-export interface DesktopIndexEntry {
+export interface DesktopIndexEntry extends NoteState {
 	/** Last activity in the session (ISO) when it was last written. */
 	updated: string;
 	/** Source file size and modification time, to skip unchanged files without reading them. */

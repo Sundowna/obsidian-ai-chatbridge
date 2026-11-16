@@ -1,17 +1,19 @@
 // Saving a list of Google chats (Gemini or AI Studio) into one folder: new and changed ones,
-// plus ones whose files were deleted from the vault. Never overwrites a file.
+// plus ones whose files were deleted from the vault. A chat has one note: when it continues,
+// the note is rewritten and the version before stays in the raw folder (see versions.ts).
 
 import { TFile } from 'obsidian';
 import { withAccount } from '../accounts';
 import { appendLog } from '../log';
 import type AIChatBridge from '../main';
-import { baseName, dailyNoteName, localStamp } from '../naming';
+import { baseName, dailyNoteName } from '../naming';
 import type { ProgressFn } from '../progress';
 import { newestFirst, pickTodo, type Todo } from '../select';
 import type { GeminiAccount } from '../settings';
 import type { IndexEntry, ListItem } from '../types';
-import { createNew, ensureFolder, freeStem } from '../vaultio';
-import { rawLink } from '../raw-folders';
+import { ensureFolder, freeStem } from '../vaultio';
+import { dirOf, rawLink } from '../raw-folders';
+import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 
 export interface GoogleSyncResult {
 	listed: number;
@@ -23,10 +25,14 @@ export interface GoogleSyncResult {
 	restored: string[];
 	/** Chats that could not be read and were left out. */
 	failed: string[];
+	/** Notes you had edited whose chat continued. */
+	edits: EditedReport;
 	stopped?: string;
 }
 
-export const emptyResult = (): GoogleSyncResult => ({ listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], failed: [] });
+const stemOf = (p: string): string => (p.split('/').pop() ?? '').replace(/\.md$/, '');
+
+export const emptyResult = (): GoogleSyncResult => ({ listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], failed: [], edits: noEdits() });
 
 /** What one chat becomes: its file name's date, and the two files' contents. */
 export interface Saved {
@@ -71,15 +77,19 @@ export async function saveChats(
 			result.failed.push(item.name);
 			continue;
 		}
-		await ensureFolder(app, folder);
-		await ensureFolder(app, rawFolder);
-		const suffix = isRecovery ? ' (recovered)' : isUpdate ? ` (updated ${localStamp(item.updated_at)})` : '';
-		const stem = freeStem(app, folder, baseName(saved.createdAt, item.name) + suffix, item.uuid, rawFolder);
-		const json = `${rawFolder}/${stem}.json`;
-		const md = `${folder}/${stem}.md`;
-		await createNew(app, json, saved.json);
-		await createNew(app, md, saved.md(rawLink(folder, json)));
-		index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString() };
+		// A chat that continues (or whose files were deleted) keeps its one note and its name.
+		const before = isUpdate ? index[item.uuid] : undefined;
+		const noteFolder = before ? dirOf(before.md) : folder;
+		await ensureFolder(app, noteFolder);
+		const stem = before ? stemOf(before.md) : freeStem(app, folder, baseName(saved.createdAt, item.name), item.uuid, rawFolder);
+		const json = before?.json ?? `${rawFolder}/${stem}.json`;
+		const md = before?.md ?? `${folder}/${stem}.md`;
+		// A recovery is the same version again, so there is no earlier one to keep.
+		const versions = addVersion(before, before && !isRecovery ? await keepVersion(app, [json], before.updated_at, saved.json) : null);
+		await writeRaw(app, json, saved.json);
+		const note = await writeNote(app, md, withVersionInfo(saved.md(rawLink(noteFolder, json)), versions, noteFolder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery ? ['unread'] : [] });
+		recordEdit(result.edits, note, md);
+		index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash };
 		await plugin.saveSettings();
 		if (isRecovery) result.restored.push(stem);
 		else {
@@ -102,6 +112,7 @@ export async function writeLog(plugin: AIChatBridge, site: string, account: Gemi
 	const parts = [`${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion`);
+	parts.push(...editsLog(r.edits));
 	if (r.failed.length) parts.push(`could not read: ${r.failed.slice(0, 10).join(', ')}`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount(site, plugin.settings.gemini, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) line += `: ${r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ')}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;

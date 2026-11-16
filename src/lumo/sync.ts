@@ -1,19 +1,21 @@
 // One sync of one Lumo account: list, decrypt, save each new or changed chat as raw JSON
-// (readable text, no keys) plus a Markdown transcript. Never overwrites a file.
+// (readable text, no keys) plus a Markdown transcript. A chat has one note: when it continues,
+// the note is rewritten and the version before stays in the raw folder (see versions.ts).
 
 import { TFile } from 'obsidian';
 import { withAccount } from '../accounts';
 import { StopError } from '../api';
 import { appendLog } from '../log';
 import type AIChatBridge from '../main';
-import { baseName, dailyNoteName, localStamp, tagAccount } from '../naming';
+import { baseName, dailyNoteName, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
 import { DEFAULT_RECENT, filterByProjects, newestFirst, nothingSelected, pickTodo, type Todo } from '../select';
 import { cleanFolder, MIN_DELAY_SECONDS, type LumoAccount } from '../settings';
 import type { ListItem } from '../types';
-import { createNew, ensureFolder, freeStem } from '../vaultio';
-import { chatFolders, masterRaw, rawLink } from '../raw-folders';
+import { ensureFolder, freeStem } from '../vaultio';
+import { chatFolders, dirOf, masterRaw, rawLink } from '../raw-folders';
+import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { loginRef } from '../accounts';
 import { LumoApi } from './api';
 import { decryptChat, decryptListing, shallowMessages, type LumoEntry } from './chat';
@@ -33,12 +35,15 @@ export interface LumoSyncResult {
 	restored: string[];
 	/** Chats that could not be decrypted and were left out. */
 	failed: string[];
+	/** Notes you had edited whose chat continued. */
+	edits: EditedReport;
 	stopped?: string;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+const stemOf = (p: string): string => (p.split('/').pop() ?? '').replace(/\.md$/, '');
 
 /** Every space, oldest pages last. Pages overlap at their edge, so later copies are dropped. */
 export async function allSpaces(api: LumoApi, wait: () => Promise<void>, progress: ProgressFn): Promise<LumoWireSpace[]> {
@@ -75,7 +80,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
 	const wait = async (): Promise<void> => { await sleep(delayMs); };
-	const result: LumoSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], failed: [] };
+	const result: LumoSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], failed: [], edits: noEdits() };
 	if (nothingSelected(g)) return { ...result, nothingSelected: true };
 	const exists =(path: string): boolean => app.vault.getAbstractFileByPath(path) instanceof TFile;
 	let api: LumoApi | null = null;
@@ -129,16 +134,21 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 				result.failed.push(item.name);
 				continue;
 			}
-			const { md: folder, raw: rawFolder } = chatFolders(item, g, base, g.rawFolder, recent, masterRaw(plugin.settings));
+			// A chat that continues (or whose files were deleted) keeps its one note and its name.
+			const before = isUpdate ? g.index[item.uuid] : undefined;
+			const today = chatFolders(item, g, base, g.rawFolder, recent, masterRaw(plugin.settings));
+			const folder = before ? dirOf(before.md) : today.md;
 			await ensureFolder(app, folder);
-			await ensureFolder(app, rawFolder);
-			const suffix = isRecovery ? ' (recovered)' : isUpdate ? ` (updated ${localStamp(item.updated_at)})` : '';
-			const stem = freeStem(app, folder, baseName(item.created_at, item.name) + suffix, item.uuid, rawFolder);
-			const json = `${rawFolder}/${stem}.json`;
-			const md = `${folder}/${stem}.md`;
-			await createNew(app, json, JSON.stringify(chat, null, '\t'));
-			await createNew(app, md, tagAccount(renderLumoTranscript(chat, rawLink(folder, json)), account.label));
-			g.index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString() };
+			const stem = before ? stemOf(before.md) : freeStem(app, folder, baseName(item.created_at, item.name), item.uuid, today.raw);
+			const json = before?.json ?? `${today.raw}/${stem}.json`;
+			const md = before?.md ?? `${folder}/${stem}.md`;
+			const raw = JSON.stringify(chat, null, '\t');
+			// A recovery is the same version again, so there is no earlier one to keep.
+			const versions = addVersion(before, before && !isRecovery ? await keepVersion(app, [json], before.updated_at, raw) : null);
+			await writeRaw(app, json, raw);
+			const note = await writeNote(app, md, withVersionInfo(tagAccount(renderLumoTranscript(chat, rawLink(folder, json)), account.label), versions, folder), { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery ? ['unread'] : [] });
+			recordEdit(result.edits, note, md);
+			g.index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash };
 			await plugin.saveSettings();
 			if (isRecovery) result.restored.push(stem);
 			else {
@@ -171,6 +181,7 @@ async function writeLog(plugin: AIChatBridge, account: LumoAccount, r: LumoSyncR
 	if (r.filteredOut) parts.push(`${r.filteredOut} skipped (other projects)`);
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion`);
+	parts.push(...editsLog(r.edits));
 	if (r.failed.length) parts.push(`could not decrypt: ${r.failed.slice(0, 10).join(', ')}`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount('Lumo', plugin.settings.lumo, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) line += `: ${r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ')}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;

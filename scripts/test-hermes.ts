@@ -15,6 +15,7 @@ import { findPython, isPrivatePath, nodeSqliteBackend, pythonBackend, pythonCand
 import { prettyResult, renderHermesTranscript } from '../src/hermes/render';
 import { runHermesSync } from '../src/hermes/sync';
 import { followRename } from '../src/follow';
+import { readWrite } from './fake-vault';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -133,6 +134,7 @@ function fakeVault() {
 			files.set(p, d);
 		},
 		process: async (f: { path: string }, fn: (d: string) => string) => void files.set(f.path, fn(files.get(f.path) ?? '')),
+		...readWrite(files),
 	};
 	return { files, vault };
 }
@@ -209,17 +211,34 @@ async function main() {
 	expect('sync 1: files in <folder>/<profile>/', notes.every((p) => p.startsWith('30 Sources/AI Chats/Hermes/tester/')), notes.join(', '));
 	expect('sync 1: Private session not written', ![...files.values()].some((d) => d.includes('private question')));
 	expect('sync 1: log line', [...files.entries()].some(([p, d]) => p.includes('log') && d.includes('**Hermes:** 2 new')));
+	const garden = profile.index['s1-garden']!;
+	expect('sync 1: raw .json of the session in the raw files folder, linked', garden.json === `80 Archive/raw/${garden.md.replace(/\.md$/, '.json')}` && JSON.parse(files.get(garden.json!)!).format === 'hermes-session' && files.get(garden.md)!.includes(`raw: "[[${garden.json}]]"`), garden.json);
 
 	const r2 = await runHermesSync(plugin, undefined, undefined, node, NOW);
 	expect('sync 2: nothing new (stable)', r2.newCount === 0 && r2.changedCount === 0 && r2.unchanged === 2, JSON.stringify({ ...r2, written: r2.written.length }));
 
-	// A new message lands (still only in the -wal file): the session is saved again as "(updated …)".
+	// A new message lands (still only in the -wal file): the session's one note is rewritten.
+	const rawBefore = files.get(garden.json!)!;
 	msg('s1-garden', 'user', 'And in full sun?', t(60));
 	msg('s1-garden', 'assistant', 'Tomatoes.', t(59));
 	const r3 = await runHermesSync(plugin, undefined, undefined, node, NOW);
-	const updated = [...files.keys()].find((p) => p.includes('(updated '));
-	expect('sync 3: changed session -> new "(updated …)" file, old one kept', r3.changedCount === 1 && !!updated && notes.every((p) => files.has(p)), updated ?? 'none');
-	expect('sync 3: new turn is in it (read from -wal)', !!updated && files.get(updated)!.includes('Tomatoes.'));
+	const after = profile.index['s1-garden']!;
+	const nowNotes = [...files.keys()].filter((p) => p.endsWith('.md') && !p.includes('log'));
+	expect('sync 3: changed session -> same note, no second one', r3.changedCount === 1 && after.md === garden.md && nowNotes.length === notes.length && ![...files.keys()].some((p) => p.includes('(updated ')), nowNotes.join(', '));
+	expect('sync 3: new turn is in it (read from -wal)', files.get(after.md)!.includes('Tomatoes.'));
+	const kept = after.versions?.[0]?.files[0] ?? '';
+	expect('sync 3: earlier version kept as raw .json, named in the note', after.versions?.length === 1 && / \(version \d{4}-\d\d-\d\d \d{4}\)\.json$/.test(kept) && files.get(kept) === rawBefore && files.get(after.md)!.includes('earlier_versions: 1') && files.get(after.md)!.includes(`  - "[[${kept}]]"`), kept);
+
+	// A session saved before raw files existed: its old note text becomes the earlier version.
+	const qwen = profile.index['s2-qwen']!;
+	const oldNote = files.get(qwen.md)!;
+	files.delete(qwen.json!);
+	delete qwen.json;
+	delete qwen.noteHash;
+	msg('s2-qwen', 'user', 'One more for qwen', t(58));
+	const r3b = await runHermesSync(plugin, undefined, undefined, node, NOW);
+	const qwenKept = profile.index['s2-qwen']!.versions?.[0]?.files[0] ?? '';
+	expect('no raw file yet: old note text kept as JSON', r3b.changedCount === 1 && JSON.parse(files.get(qwenKept) ?? '{}').markdown === oldNote && !!profile.index['s2-qwen']!.json && files.get(qwen.md)!.includes('One more for qwen'), qwenKept);
 
 	// Deleted from the vault -> restored under the same name.
 	const gone = profile.index['s2-qwen']!.md;

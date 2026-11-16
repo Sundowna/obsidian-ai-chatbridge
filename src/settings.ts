@@ -13,6 +13,8 @@ import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import type { ProjectCatalog } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
 import type { LastAll, LastRun } from './last-run';
+import type { EditedPolicy } from './versions';
+import type { NoteState } from './types';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -60,7 +62,7 @@ export interface ClaudeWebSettings {
 }
 
 /** What we remember per Claude Code cloud session (no chat text). */
-export interface CloudIndexEntry {
+export interface CloudIndexEntry extends NoteState {
 	/** The session's last_event_at when it was saved. */
 	updated: string;
 	/** Empty for a session with no message from you (nothing written, not asked again until it changes). */
@@ -190,6 +192,8 @@ export interface Settings {
 	rawRootOn: boolean;
 	/** That folder; empty = next to the transcripts. */
 	rawRoot: string;
+	/** A chat continues and you edited its note: keep your version as a copy, leave the note, or overwrite. */
+	editedNotes: EditedPolicy;
 	/** Always at least one. The first account also receives desktop sessions no account claims. */
 	claude: ClaudeAccount[];
 	chatgpt: ChatgptAccount[];
@@ -284,6 +288,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	logPath: 'AI Chats/AI ChatBridge log.md',
 	rawRootOn: true,
 	rawRoot: '80 Archive/raw',
+	editedNotes: 'copy',
 	claude: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_CLAUDE_WEB, desktop: desktopApp(FIRST.claudeCodeLocal) }],
 	chatgpt: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GPT, desktop: desktopApp(FIRST.codexLocal) }],
 	lumo: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_LUMO }],
