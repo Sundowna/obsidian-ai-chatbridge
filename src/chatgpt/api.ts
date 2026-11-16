@@ -7,7 +7,7 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
-import { cookieHeader, cookieValue, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
+import { cookieHeader, cookieValue, hasLoginFetch, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
 import { isChatId, isFileId, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
@@ -56,7 +56,7 @@ export class GptApi {
 	workspaceId: string | undefined;
 	private constructor(
 		private readonly login: LoginRef,
-		private readonly cookie: string,
+		private cookie: string,
 		private readonly deviceId: string | null,
 		private readonly ua: string,
 		private token: string | null,
@@ -77,11 +77,20 @@ export class GptApi {
 			if (!cookie) throw new StopError('Not logged in to ChatGPT. Select "Log in" for this account in the plugin settings.');
 			api = new GptApi(login, cookie, null, loginUserAgent(login), null);
 		}
-		const page = await api.request('/', 'text/html', false, false);
-		const token = findAccessToken(page.text);
+		let html: string;
+		if (!pasted && hasLoginFetch(login)) {
+			// Through the login window's own storage, so the renewed login cookie chatgpt.com
+			// sends back is kept there. Before 0.33 it was dropped, and after some days the
+			// stored login no longer counted (seen 2026-11-16).
+			html = await api.loginPage();
+			api.cookie = await cookieHeader(login);
+		} else {
+			html = (await api.request('/', 'text/html', false, false)).text;
+		}
+		const token = findAccessToken(html);
 		if (!token) {
 			const fix = pasted ? 'the pasted session cookie may have expired – paste a fresh one or log in instead' : 'log in again in the plugin settings';
-			throw new StopError(`chatgpt.com did not hand out a login key – ${fix}. If that does not help, send this to Claude: ${api.redact(describePage(page.text))}`);
+			throw new StopError(`chatgpt.com did not hand out a login key – ${fix}. If that does not help, send this to Claude: ${api.redact(describePage(html))}`);
 		}
 		api.token = token;
 		// Use the workspace cookie from the same snapshot used for requests.
@@ -192,7 +201,7 @@ export class GptApi {
 		url.search = new URLSearchParams({ message_id: messageId, sandbox_path: path, download_intent: 'true' }).toString();
 		let res: Response;
 		try {
-			res = await loginFetch(this.login, url.href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual', signal: AbortSignal.timeout(120_000) });
+			res = await loginFetch(this.login, url.href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual' });
 		} catch {
 			throw new BlockedLinkError('generated-file request failed');
 		}
@@ -210,6 +219,27 @@ export class GptApi {
 			throw new BlockedLinkError(`generated-file download returned ${res.status} or a preview`);
 		}
 		return res.arrayBuffer();
+	}
+
+	/**
+	 * The chatgpt.com start page, fetched with the login window's storage: it sends that
+	 * window's cookies itself and saves the ones chatgpt.com sends back (the renewed login).
+	 */
+	private async loginPage(): Promise<string> {
+		const headers: Record<string, string> = { Accept: 'text/html', 'User-Agent': this.ua, 'OAI-Language': 'en-US' };
+		if (this.deviceId) headers['OAI-Device-Id'] = this.deviceId;
+		let res: Response;
+		try {
+			res = await loginFetch(this.login, ORIGIN + '/', { method: 'GET', headers, credentials: 'include', redirect: 'manual' }, 60_000);
+		} catch (e) {
+			throw new StopError(`Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`);
+		}
+		const s = res.status;
+		if (s === 401) throw new StopError('chatgpt.com answered 401 (not logged in). Log in to ChatGPT again in the plugin settings.');
+		if (s === 403) throw new StopError('chatgpt.com answered 403 (forbidden). Login expired, or Cloudflare blocked the request – log in again.');
+		if (s === 429) throw new GptRateLimitError(retryDeadline(res.headers.get('retry-after') ?? ''));
+		if (s !== 200) throw new StopError(`chatgpt.com answered ${s} – unexpected, so the sync stopped.`);
+		return res.text();
 	}
 
 	private headers(accept: string, auth: boolean): Record<string, string> {
