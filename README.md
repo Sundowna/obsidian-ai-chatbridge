@@ -249,8 +249,8 @@ Long arguments and results are shortened (600 and 1,200 characters), so notes st
 | Command | What it does |
 | --- | --- |
 | **Sync all chats** | Every account you're logged in to, then the desktop apps and Hermes profiles that are on |
-| **Sync Claude chats** | All claude.ai accounts you're logged in to |
-| **Sync ChatGPT chats** | All ChatGPT accounts you're logged in to |
+| **Sync Claude (claude.ai and Claude Code)** | All claude.ai accounts you're logged in to, then Claude Code on this computer for every account that has it on |
+| **Sync ChatGPT (chats and Codex)** | All ChatGPT accounts you're logged in to, then Codex on this computer for every account that has it on |
 | **Sync Gemini and AI Studio chats** | All Google accounts you're logged in to - Gemini chats, then AI Studio prompts |
 | **Sync Lumo chats** | All Proton Lumo accounts you're logged in to |
 | **Sync desktop app chats (Claude, Codex)** | Local Claude Code and Codex sessions |

@@ -35,6 +35,11 @@ export interface DesktopSyncResult {
 	active: number;
 	/** Files with no message from you (empty or helper-only sessions). */
 	empty: number;
+	/**
+	 * New or changed sessions left for another account in a one-account run (its Sync button),
+	 * by that account's label. Without this the run says "0 new" while sessions are waiting.
+	 */
+	elsewhere: Record<string, number>;
 	written: string[];
 	restored: string[];
 	/** Pasted images and files Claude made, copied into the vault. */
@@ -88,10 +93,21 @@ export function desktopOwner(accounts: DesktopAccount[], app: DesktopApp, path: 
 	return ownerId && ownerIdOf(app, first) && unidentified ? null : first;
 }
 
+/** "3 new sessions belong to B - Yearly" for a one-account run; empty when none are waiting. */
+export function elsewhereText(elsewhere: Record<string, number>): string {
+	const entries = Object.entries(elsewhere).filter(([, n]) => n > 0);
+	if (!entries.length) return '';
+	const total = entries.reduce((sum, [, n]) => sum + n, 0);
+	const what = `${total} new or changed session${total === 1 ? '' : 's'} belong${total === 1 ? 's' : ''}`;
+	if (entries.length === 1) return `${what} to ${entries[0]![0]}: sync that account or use Sync all.`;
+	return `${what} to other accounts (${entries.map(([label, n]) => `${n} ${label}`).join(', ')}): sync those accounts or use Sync all.`;
+}
+
 /** Limits a run to one account (its Sync button in the settings). */
 export interface DesktopOnly {
 	provider: Provider;
-	id: string;
+	/** One account; left out, every account of the provider (its toolbar button: Claude Code with claude.ai). */
+	id?: string;
 }
 
 interface Todo {
@@ -112,7 +128,7 @@ export async function runDesktopSync(
 	const app = plugin.app;
 	const s = plugin.settings;
 	const d = s.desktop;
-	const result: DesktopSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], filesSaved: 0, filesBackfilled: 0, edits: noEdits() };
+	const result: DesktopSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, elsewhere: {}, written: [], restored: [], filesSaved: 0, filesBackfilled: 0, edits: noEdits() };
 	const exists = (p: string | undefined): boolean => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
 	const quietMs = Math.max(0, d.quietMinutes) * 60_000;
 	const adapter = app.vault.adapter;
@@ -193,7 +209,7 @@ export async function runDesktopSync(
 
 		for (const which of APPS) {
 			const accounts = accountsFor(s, which);
-			const wanted = (a: DesktopAccount) => a.desktop.enabled && (!only || (only.provider === PROVIDER[which] && only.id === a.id));
+			const wanted = (a: DesktopAccount) => a.desktop.enabled && (!only || (only.provider === PROVIDER[which] && (only.id === undefined || only.id === a.id)));
 			if (!accounts.some(wanted)) continue;
 			for (const a of accounts.filter(wanted)) {
 				if (!cleanFolder(a.desktop.folder)) throw new Error(`The ${APP_LABEL[which]} folder setting of "${a.label}" is empty or invalid.`);
@@ -249,7 +265,11 @@ export async function runDesktopSync(
 				// A session already saved stays with its account, so nothing is ever saved twice.
 				const sessionId = session.id;
 				const owner = accounts.find((a) => a.desktop.index[sessionId]) ?? desktopOwner(accounts, which, file.path, session.ownerId, fs.home);
-				if (!owner || !wanted(owner)) continue;
+				if (!owner || !wanted(owner)) {
+					// Not this run's account. Only new or changed sessions get this far, so these are waiting.
+					if (owner?.desktop.enabled) result.elsewhere[owner.label] = (result.elsewhere[owner.label] ?? 0) + 1;
+					continue;
+				}
 				const conf = owner.desktop;
 				const entry = conf.index[session.id];
 				if (entry && entry.updated === session.updated) {

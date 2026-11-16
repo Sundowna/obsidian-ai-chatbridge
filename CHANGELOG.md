@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **The Claude and ChatGPT commands sync everything from that provider** - **Sync Claude** (was "Sync Claude chats") now syncs every claude.ai account and then Claude Code on this computer; **Sync ChatGPT** (was "Sync ChatGPT chats") syncs every ChatGPT account and then Codex. Before, they synced only the web chats, so a toolbar button named "Claude" never picked up Claude Code sessions. Command IDs are unchanged, so buttons and hotkeys bound to them keep working
+
+### Fixed
+- **Sync all no longer stops at the first source that fails** - before, an error in one source (for example ChatGPT asking you to log in again) ended Sync all there, so Claude Code, Codex and Hermes, which come last, were never synced. Now each source runs; a failing one shows its notice and the next one runs
+- **One error no longer pauses all automatic syncing** - before, any error paused the automatic sync for every source until you synced by hand. Now only the source that failed waits; the status bar names it (`next sync 11:30 · waiting for you: ChatGPT`). It joins the automatic sync again once it has synced without an error
+- **A one-account Claude Code or Codex sync says when another account has sessions waiting** - a session belongs to the account whose login made it. Syncing one account used to report "0 new" while new sessions of another account were waiting; the notice now names them (`3 new or changed sessions belong to B - Yearly: sync that account or use Sync all.`)
+
 ## 0.32.1 - 2026-11-16
 
 ### Fixed
