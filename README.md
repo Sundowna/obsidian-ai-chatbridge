@@ -7,7 +7,7 @@
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with, endorsed by, or supported by Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is ever changed or deleted on the provider's side. The plugin reads the same web endpoints your browser uses, which can change without notice.
 
-**New in 0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
+**New in 0.31:** better on [macOS and Linux](#windows-macos-and-linux) - the folder picker, `~` paths and where local sessions are found. **0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
 
 ## Contents
 
@@ -162,7 +162,7 @@ Some chats only live on your computer: Claude Code sessions from the Claude desk
 - Titles and folders match the apps' sidebars. Claude Code sessions go in one folder per sidebar group (otherwise per working folder), with forks and side sessions nested under the session they came from. Codex threads go in one folder per project, or `Recent`
 - Their files come along: images and files you attached go to `Attachments/`, and documents Claude or Codex wrote or sent you (Markdown, HTML, PDF, Office files, images) go to `Artifacts/`, next to the note. Each file is copied in its latest version. Source code and the assistants' own scratch files are left out, and notes already in your vault are linked, not copied. Artifacts and Claude Docs published on claude.ai are listed as links. Turn this off with General → **Save session files**
 - Sessions still running wait until they have been quiet for a while (15 minutes by default)
-- Session files somewhere else? Add the folder under **Extra session folders**
+- Session files somewhere else? Add the folder under **Extra session folders** (on macOS and Linux a leading `~` is your home folder)
 - Claude Cowork sessions are kept in the cloud, not on your computer, so they can't be read locally
 
 ## Claude Code cloud sessions
@@ -262,6 +262,19 @@ This plugin needs network access for the web providers. Please read this before 
 
 - Obsidian **1.11.4** or newer
 - **Desktop only** (Windows, macOS, Linux) - the login windows need Electron, and local sessions are read from your computer's disk
+
+### Windows, macOS and Linux
+
+The plugin works the same on all three. Where it looks for local sessions:
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Claude Code sessions | `~/.claude/projects` | `~/.claude/projects` | `~/.claude/projects` |
+| Codex threads | `~/.codex/sessions` | `~/.codex/sessions` | `~/.codex/sessions` |
+| Claude desktop titles and groups | `%LOCALAPPDATA%/Claude`, `%APPDATA%/Claude` | `~/Library/Application Support/Claude` | `$XDG_CONFIG_HOME/Claude`, else `~/.config/Claude` |
+| Hermes profiles | `HERMES_HOME`, `%LOCALAPPDATA%/hermes`, `~/.hermes` | `HERMES_HOME`, `~/.hermes` | `HERMES_HOME`, `~/.hermes` |
+
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are followed on every system. Folder names of local sessions use your computer's own name, without the network ending (`Walters-MacBook`, not `Walters-MacBook.local`). The macOS and Linux parts are covered by automatic tests on all three systems; if something is off on yours, please [open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues).
 
 ## Installation
 

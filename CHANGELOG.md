@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.31.0 - 2026-11-16
+
+Better on macOS and Linux. Nothing changes on Windows.
+
+### New
+- **`~` for your home folder** - on macOS and Linux you can type `~/…` in **Extra session folders**, in Hermes **Add by path** and in the Hermes **Python** setting
+
+### Fixes
+- **Browse… on macOS and Linux** - the folder dialog opened in the wrong place (the start folder was written the Windows way) and now opens at the current folder. On macOS the dialog also says what it is for. On Linux, where `Notes` and `notes` are two folders, the pick is compared exactly
+- **Claude desktop titles and groups on Linux** - also looked for in `$XDG_CONFIG_HOME/Claude`, not only `~/.config/Claude`
+- **Scratch files on macOS** - temporary files Claude wrote for itself under `/var/folders/…` and `/private/tmp` are no longer saved as artifacts, as on Windows and Linux
+- **Computer name on macOS and Linux** - the folder for local sessions was named after the full network name ("Walters-MacBook.fritz.box"), which changes with the network. New installs use the computer's own name ("Walters-MacBook"). Folders you already have keep their name
+
+### Changed
+- Example paths in the settings match the system you are on
+- The tests now also run on macOS and Linux for every change
+
 ## 0.30.0 - 2026-11-14
 
 ### New
