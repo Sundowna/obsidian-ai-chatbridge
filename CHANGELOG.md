@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.32.1 - 2026-11-16
+
+### Fixed
+- **ChatGPT login no longer goes stale** - chatgpt.com renews its login cookie as you use it, but the sync threw the renewed cookie away. After some days the stored login stopped counting and the sync stopped with "chatgpt.com did not hand out a login key". The sync now reads chatgpt.com through the login window's own storage, which keeps the renewed cookie
+- **ChatGPT generated files can download again** - files ChatGPT made in a chat (for example `.docx` or `.xlsx` from code) always failed with "generated-file request failed", because the request carried a timeout Obsidian's main process refuses. The timeout is now handled in the plugin
+
 ## 0.32.0 - 2026-11-16
 
 One note per chat. A chat that continues no longer gets a second `(updated …)` note.

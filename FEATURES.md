@@ -143,6 +143,8 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Google login presents as Firefox, client hints removed
 - [ ] Hidden windows for Lumo, Gemini, AI Studio; pasted Google cookies go to an in-memory session cleared after use
 - [ ] Split cookies (`name.0`, `name.1`) count as logged in
+- [ ] ChatGPT: each sync reads the chatgpt.com page through the login window's own storage, so the renewed login cookie is kept there (a pasted session still goes through `requestUrl`)
+- [ ] `loginFetch` never passes an AbortSignal to Electron (it cannot cross to the main process); it times out on its own
 - [ ] No secrets in `data.json`, notes or logs; pasted sessions live in Obsidian secret storage; login window wins over a pasted session
 
 ## 6. Claude web [code: sync.ts]
