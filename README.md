@@ -25,6 +25,7 @@
 - [Claude Code cloud sessions](#claude-code-cloud-sessions)
 - [Hermes Agent](#hermes-agent)
 - [AI memory](#ai-memory)
+- [Phone and tablet](#phone-and-tablet)
 - [Commands](#commands)
 - [Part of the Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite)
 - [Privacy and network use](#privacy-and-network-use)
@@ -405,10 +406,31 @@ Turn it off to save everything exactly as the AI keeps it; the next sync then wr
 - **Left out:** folders named `Private` (and Claude Code projects with `Private` as a part of their name) are never read, and the memory folder cannot be inside one. Files larger than 2 MB or not text are named, not copied. Codex's use counters and ChatGPT's per-memory status are left out, because they change without the memory changing and would cause a new snapshot each time
 - **If an answer looks different from what the plugin knows,** the read stops and nothing is saved for that account, so a snapshot is never half-written
 
+## Phone and tablet
+
+The plugin loads in Obsidian on Android and iOS, but a phone does not sync by itself yet: the login windows and the local sessions only exist on a computer. Instead the phone **asks your computer to sync**, through two small files in the vault. Whatever carries your vault between the devices (Syncthing, Obsidian Sync, …) carries them too; there is no other connection and no extra service.
+
+1. On the phone, select the sync icon in the ribbon menu, or run **Sync: here, or ask the computer** (you can add it to the mobile toolbar). The plugin writes `sync-request.json`.
+2. Your computer sees the request once your vault sync has delivered it, runs **Sync all**, and writes `sync-status.json` with what it did: the result and the counts per account, never a login.
+3. The phone tells you when the computer has started and when it is done, and the Overview shows "Last synced by Tower today 14:02 …".
+
+How long step 2 takes depends only on your vault sync: seconds when both devices are online, much longer when the phone's sync app is asleep.
+
+**Setting it up** (General tab, **Sync from another device**):
+
+- **Folder for sync requests** - must be the same on every device, and your vault sync must carry it in both directions. `.json` files need **Sync all other types** if you use Obsidian Sync. Don't use a folder starting with a dot
+- **This device** - a computer **syncs** (writer) by default, a phone or tablet **asks** (requester). A second computer can be set to ask too. The role and the device's name are saved on the device itself, not in the synced settings
+- **Ignore requests older than (hours)** - a request that took longer than this to arrive is not run (default 12)
+
+The computer runs each request once, at most one requested sync every two minutes, and never interrupts a sync that is already running: the request waits for it. Obsidian has to be open on the computer.
+
+**Test mobile connection** is a first step towards syncing on the phone itself: it checks whether the phone can reach claude.ai and ChatGPT with a session key or cookie pasted there, and shows the status, the content type and whether a Cloudflare check page came back. Nothing is saved and no key is shown.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
+| **Sync: here, or ask the computer** | The sync button as a command: a device that syncs runs **Sync all** (or stops the running sync), a device that asks writes a request for your computer. See [Phone and tablet](#phone-and-tablet) |
 | **Sync all chats** | Every account you're logged in to, then the desktop apps and Hermes profiles that are on |
 | **Sync Claude (claude.ai and Claude Code)** | All claude.ai accounts you're logged in to, then Claude Code on this computer for every account that has it on |
 | **Sync ChatGPT (chats and Codex)** | All ChatGPT accounts you're logged in to, then Codex on this computer for every account that has it on |
@@ -424,6 +446,7 @@ Turn it off to save everything exactly as the AI keeps it; the next sync then wr
 | **Merge chat copies into one note (preview first)** | For vaults from before one note per chat: merges each chat's `(updated …)` notes into its first note, keeps earlier versions as raw files and rewrites links. Shows a preview; nothing changes until you confirm |
 | **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |
 | **Diagnose: save claude.ai answers for the open chat** | Saves the raw answers of the open chat, for bug reports |
+| **Test mobile connection** | One request each to claude.ai and ChatGPT with the pasted logins; reports status, content type and whether a Cloudflare check page came back |
 
 ## Part of the Sundowna Second Brain Suite
 
@@ -461,7 +484,7 @@ This plugin needs network access for the web providers. Please read this before 
 ## Requirements
 
 - Obsidian **1.11.4** or newer
-- **Desktop only** (Windows, macOS, Linux) - the login windows need Electron, and local sessions are read from your computer's disk
+- **Syncing needs a computer** (Windows, macOS, Linux) - the login windows need Electron, and local sessions are read from your computer's disk. On Android and iOS the plugin can ask your computer to sync: see [Phone and tablet](#phone-and-tablet)
 
 ### Windows, macOS and Linux
 

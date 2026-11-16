@@ -3,6 +3,7 @@
 // keys (claude.ai, ChatGPT, Google) live in Obsidian's secret storage – we only store the *name*
 // of that secret (secretId).
 
+import { DEFAULT_MAX_AGE_HOURS } from './remote/protocol';
 import { normalizePath } from 'obsidian';
 import { layoutFolders } from './desktop/layout';
 import type { IndexEntry } from './types';
@@ -206,6 +207,8 @@ export interface Settings {
 	hermes: HermesSettings;
 	/** AI memory snapshots: what each AI keeps about you (desktop only for the local sources). */
 	memory: MemorySettings;
+	/** Asking another device to sync through files in the vault (see remote/protocol.ts). */
+	remote: RemoteSettings;
 	/** What the last sync of each account surface did (see last-run.ts). */
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
@@ -283,6 +286,18 @@ export const DEFAULT_MEMORY: MemorySettings = {
 	states: {},
 };
 
+export interface RemoteSettings {
+	/** Where sync-request.json and sync-status.json live. Both devices must name the same folder. */
+	folder: string;
+	/** A request older than this when the computer sees it is not run. */
+	maxAgeHours: number;
+}
+
+export const DEFAULT_REMOTE: RemoteSettings = {
+	folder: '00 Inbox/Mobile/ChatBridge',
+	maxAgeHours: DEFAULT_MAX_AGE_HOURS,
+};
+
 export const DEFAULT_DESKTOP: DesktopSettings = {
 	projectSubfolders: true,
 	keepRaw: false,
@@ -311,6 +326,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	desktop: DEFAULT_DESKTOP,
 	hermes: DEFAULT_HERMES,
 	memory: DEFAULT_MEMORY,
+	remote: DEFAULT_REMOTE,
 	lastRuns: {},
 };
 
