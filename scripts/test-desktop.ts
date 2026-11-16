@@ -17,7 +17,7 @@ import { findLatestJson, lastJsonObject, snappyDecompress } from '../src/desktop
 import { layoutMoves, layoutRoot, moveToAppLayout } from '../src/desktop/layout';
 import { mergeDesktop, normalizeSettings } from '../src/migrate';
 import { addAccount, nameProblem, removeAccount } from '../src/accounts';
-import { desktopOwner } from '../src/desktop/sync';
+import { desktopOwner, elsewhereText } from '../src/desktop/sync';
 import { claudeAuth } from '../src/claude-auth';
 import { followRename } from '../src/follow';
 import { desktopRawMoves } from '../src/raw-move';
@@ -499,13 +499,30 @@ async function accountsTest() {
 	work.desktop.enabled = false;
 	const r0 = await runDesktopSync(p, undefined, fs, NOW);
 	expect('sync: a turned-off account\'s sessions are not handed to another', r0.newCount === 5 && !Object.keys(s.claude[0]!.desktop.index).includes('theirs'), JSON.stringify(Object.keys(s.claude[0]!.desktop.index)));
+	expect('sync: a turned-off account\'s sessions are not reported as waiting', Object.keys(r0.elsewhere).length === 0, JSON.stringify(r0.elsewhere));
 	work.desktop.enabled = true;
+	// The other account's button: nothing of its own is new, but it says what waits for Work.
+	const rOther = await runDesktopSync(p, undefined, fs, NOW, { provider: 'claude', id: s.claude[0]!.id });
+	expect('sync: one account\'s button names sessions waiting for another account', rOther.newCount === 0 && rOther.elsewhere.Work === 1 && !work.desktop.index.theirs, JSON.stringify(rOther));
+	expect('sync: the waiting sessions are put in words', elsewhereText(rOther.elsewhere) === '1 new or changed session belongs to Work: sync that account or use Sync all.'
+		&& elsewhereText({ Work: 3, Side: 1 }) === '4 new or changed sessions belong to other accounts (3 Work, 1 Side): sync those accounts or use Sync all.'
+		&& elsewhereText({}) === '', elsewhereText(rOther.elsewhere));
 	const r1 = await runDesktopSync(p, undefined, fs, NOW, { provider: 'claude', id: work.id });
 	expect('sync: one account\'s button only saves that account', r1.newCount === 1 && !!work.desktop.index.theirs, JSON.stringify(r1));
 	const notesOf = (label: string) => [...written.entries()].filter(([k, v]) => k.endsWith('.md') && v.startsWith(`---\naccount: "${label}"\n`));
 	expect('sync: both accounts share one folder, each note names its account', notesOf('Work').length > 0 && notesOf('Main').length > 0 && [...written.keys()].filter((k) => k.startsWith('S/') && k.endsWith('.md')).every((k) => k.startsWith(`${c0.desktop.folder}/`) || k.startsWith(`${g0.desktop.folder}/`)), [...written.keys()].join(' | '));
 	expect('sync: unmatched CLI session goes to the first account', !!s.claude[0]!.desktop.index['cli-only'] && !!s.claude[0]!.desktop.index.mine);
 	expect('sync: Codex split by workspace and by folder', !!s.chatgpt[0]!.desktop.index['t-main'] && !!gptWork.desktop.index['t-work'] && !!gptWork.desktop.index['t-home']);
+	// A provider's button (no account given): its app for every account, and not the other app.
+	fs.put(`${P}/late-mine.jsonl`, session('late-mine'), old);
+	fs.put(`${P}/late-theirs.jsonl`, session('late-theirs'), old);
+	fs.put(`${META}/acct2/${ORG_B}/local_3.json`, JSON.stringify({ sessionId: 'local_3', cliSessionId: 'late-theirs', title: 'Late theirs' }), old);
+	fs.put('C:/Users/W/.codex/sessions/late.jsonl', codexThread('t-late', 'ws-main'), old);
+	const rProv = await runDesktopSync(p, undefined, fs, NOW, { provider: 'claude' });
+	expect('sync: a provider\'s run saves its app for every account', rProv.newCount === 2 && !!s.claude[0]!.desktop.index['late-mine'] && !!work.desktop.index['late-theirs'] && Object.keys(rProv.elsewhere).length === 0, JSON.stringify(rProv));
+	expect('sync: a provider\'s run leaves the other app alone', !s.chatgpt[0]!.desktop.index['t-late']);
+	const rGpt = await runDesktopSync(p, undefined, fs, NOW, { provider: 'chatgpt' });
+	expect('sync: ChatGPT\'s run saves Codex', rGpt.newCount === 1 && !!s.chatgpt[0]!.desktop.index['t-late'], JSON.stringify(rGpt));
 	expect('sync: titles read from the second Codex home', [...written.keys()].some((k) => k.includes('From second home')));
 	const before = written.size;
 	const r2 = await runDesktopSync(p, undefined, fs, NOW);

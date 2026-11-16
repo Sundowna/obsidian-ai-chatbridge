@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { TFile, TFolder } from 'obsidian';
+import { Notice, TFile, TFolder } from 'obsidian';
 import { GptApi } from '../src/chatgpt/api';
 import { runGptSync } from '../src/chatgpt/sync';
 import { GptRateLimitError, retryDeadline } from '../src/chatgpt/recovery';
@@ -8,6 +8,7 @@ import { checkGptChat, checkGptOlderPage } from '../src/chatgpt/schema';
 import { DEFAULT_SETTINGS, DEFAULT_GPT } from '../src/settings';
 import AIChatBridge, { formatClock } from '../src/main';
 import { StopError } from '../src/api';
+import { DESKTOP_ALL } from '../src/last-run';
 
 const id = '12345678-1234-1234-1234-123456789abc';
 const date = '2026-11-06T09:00:00Z';
@@ -146,10 +147,52 @@ async function testAutomaticResume() {
 		await flush(() => !persisted.chatgpt[0]!.web.resumeAfter429);
 		assert.equal(timers.size, 0);
 
-		// Automatic sync on and idle: the status bar says so, unless an error paused it.
+		// Automatic sync on and idle: the status bar says so, and names the source an error paused.
 		p.settings.intervalMinutes = 30;
 		p.restartTimer();
-		assert.equal(status, '', 'paused after the login error');
+		assert.equal(status, `AI ChatBridge: next sync ${formatClock(now + 30 * 60_000)} · waiting for you: ChatGPT`, 'paused after the login error');
+
+		// Sync all: ChatGPT's expired login must not keep the desktop apps (Claude Code) from syncing.
+		// (No computer here, so the desktop run itself reports an error; what counts is that it ran.)
+		p.canSyncWeb = async (provider) => provider === 'chatgpt';
+		p.settings.claude[0]!.desktop.enabled = true;
+		// A sync by hand shows a progress notice; give it stand-in elements.
+		const el: Record<string, unknown> = { style: {}, parentElement: null, setText: () => {}, toggleClass: () => {}, addEventListener: () => {} };
+		el.createDiv = el.createEl = () => el;
+		const realHide = (Notice.prototype as { hide?: () => void }).hide;
+		Object.assign(Notice.prototype, { hide: () => {} });
+		Object.assign(globalThis, { createFragment: (fn: (f: unknown) => void) => (fn(el), el) });
+		const before = calls;
+		now += 1000;
+		await p.syncAll('manual');
+		assert.equal(calls, before + 1, 'Sync all tried ChatGPT');
+		assert.equal(p.settings.lastRuns['web:chatgpt:default']?.outcome, 'error');
+		assert.equal(p.settings.lastRuns[DESKTOP_ALL]?.at, now, 'the desktop apps still ran after ChatGPT failed');
+		// The automatic Sync all leaves out only what stopped with an error, and still runs the rest.
+		const desktopBefore = p.settings.lastRuns[DESKTOP_ALL]!.at;
+		outcome = 'success';
+		now += 1000;
+		p.settings.lastRuns[DESKTOP_ALL]!.at = 0;
+		await p.syncAll('auto');
+		assert.equal(calls, before + 1, 'the paused ChatGPT is skipped by the automatic sync');
+		assert.equal(p.settings.lastRuns[DESKTOP_ALL]?.at, 0, 'the desktop apps failed too, so they are paused as well');
+		p.settings.lastRuns[DESKTOP_ALL]!.at = desktopBefore;
+		// A sync by hand that works clears the pause for that source.
+		// The ChatGPT button syncs everything from ChatGPT: its chats, then Codex on this computer.
+		now += 1000;
+		await p.syncGpt('manual');
+		assert.equal(calls, before + 2);
+		assert.equal(p.settings.lastRuns['desktop:chatgpt:*']?.at, now, 'the ChatGPT button ran Codex too');
+		assert.equal(p.settings.lastRuns['desktop:claude:*'], undefined, 'and not Claude Code');
+		p.restartTimer();
+		assert.equal(status, `AI ChatBridge: next sync ${formatClock(now + 30 * 60_000)} · waiting for you: Desktop apps, Codex`, 'ChatGPT no longer waits');
+		// The Claude button: claude.ai, then Claude Code, even though claude.ai fails here (no network in tests).
+		now += 1000;
+		await p.sync('manual');
+		assert.equal(p.settings.lastRuns['desktop:claude:*']?.at, now, 'the Claude button ran Claude Code too');
+		assert.equal(p.settings.lastRuns['desktop:claude:*']?.label, 'Claude Code');
+		Object.assign(Notice.prototype, { hide: realHide });
+		delete (globalThis as { createFragment?: unknown }).createFragment;
 		p.onunload();
 		p = await load();
 		p.settings.intervalMinutes = 30;

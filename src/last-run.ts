@@ -34,6 +34,8 @@ export type RunSurface = 'web' | 'desktop' | 'studio';
 /** Where a run is filed: one account's surface, all desktop apps at once, or Hermes. */
 export const runKey = (surface: RunSurface, provider: string, id: string): string => `${surface}:${provider}:${id}`;
 export const DESKTOP_ALL = 'desktop:all';
+/** Account part of the key for one provider's desktop app over all its accounts (its toolbar button). */
+export const DESKTOP_EVERY_ACCOUNT = '*';
 export const HERMES = 'hermes';
 
 /** The newer of two runs (either may be missing). */
@@ -43,9 +45,9 @@ export function newer(a: LastRun | undefined, b: LastRun | undefined): LastRun |
 	return b.at > a.at ? b : a;
 }
 
-/** A desktop surface's last run: its own, or the "all desktop apps" run if that came later. */
+/** A desktop surface's last run: its own, its provider's (all accounts), or the "all desktop apps" run, whichever came last. */
 export function desktopRun(runs: Record<string, LastRun>, provider: string, id: string): LastRun | undefined {
-	return newer(runs[runKey('desktop', provider, id)], runs[DESKTOP_ALL]);
+	return newer(newer(runs[runKey('desktop', provider, id)], runs[runKey('desktop', provider, DESKTOP_EVERY_ACCOUNT)]), runs[DESKTOP_ALL]);
 }
 
 /** "today 14:02", "yesterday 09:10" or "12 Nov, 14:02". */
