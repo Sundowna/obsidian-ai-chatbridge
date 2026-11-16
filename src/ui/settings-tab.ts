@@ -7,12 +7,13 @@ import type AIChatBridge from '../main';
 import type { PanelContext } from './fields';
 import { generalTab } from './general-tab';
 import { hermesTab } from './hermes-tab';
+import { memoryTab } from './memory-tab';
 import { hermesIcon, providerIcon } from './icons';
 import { overviewTab } from './overview-tab';
 import { forgetProjectLists } from './project-picker';
 import { providerTab, type ProviderState } from './provider-tab';
 
-type Tab = 'overview' | Provider | 'hermes' | 'general';
+type Tab = 'overview' | Provider | 'hermes' | 'memory' | 'general';
 
 export class AIChatBridgeSettingTab extends PluginSettingTab {
 	/** Where you are; kept while the settings window is open. */
@@ -46,7 +47,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		b.toggleClass('is-active', active);
 		if (id === 'claude' || id === 'chatgpt' || id === 'lumo' || id === 'gemini') providerIcon(b, id);
 		else if (id === 'hermes') hermesIcon(b);
-		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : 'sliders-horizontal');
+		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : id === 'memory' ? 'brain' : 'sliders-horizontal');
 		b.createSpan({ text: label });
 		b.addEventListener('click', () => this.go(id));
 	}
@@ -64,6 +65,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		this.tabButton(bar, 'lumo', 'Lumo');
 		this.tabButton(bar, 'gemini', 'Gemini');
 		this.tabButton(bar, 'hermes', 'Hermes');
+		this.tabButton(bar, 'memory', 'Memory');
 		this.tabButton(bar, 'general', 'General');
 
 		const ctx: PanelContext = {
@@ -81,6 +83,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		if (this.tab === 'overview') overviewTab(ctx, body);
 		else if (this.tab === 'general') generalTab(ctx, body);
 		else if (this.tab === 'hermes') hermesTab(ctx, body);
+		else if (this.tab === 'memory') memoryTab(ctx, body);
 		else providerTab(ctx, body, this.tab, this.providers[this.tab]);
 		containerEl.scrollTop = scroll;
 	}

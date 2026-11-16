@@ -12,6 +12,7 @@ import type { ChatCounts } from './progress';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import type { ProjectCatalog } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
+import type { MemorySettings } from './memory/types';
 import type { LastAll, LastRun } from './last-run';
 import type { EditedPolicy } from './versions';
 import type { NoteState } from './types';
@@ -203,6 +204,8 @@ export interface Settings {
 	desktop: DesktopSettings;
 	/** Hermes Agent chats, read from each profile's state.db (desktop only). */
 	hermes: HermesSettings;
+	/** AI memory snapshots: what each AI keeps about you (desktop only for the local sources). */
+	memory: MemorySettings;
 	/** What the last sync of each account surface did (see last-run.ts). */
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
@@ -268,6 +271,16 @@ export const DEFAULT_HERMES: HermesSettings = {
 	pythonPath: '',
 };
 
+/** Every source is off until you turn it on. */
+export const DEFAULT_MEMORY: MemorySettings = {
+	folder: 'AI Memory',
+	intervalMinutes: 0,
+	redact: true,
+	codexLocal: false,
+	claudeCodeLocal: false,
+	states: {},
+};
+
 export const DEFAULT_DESKTOP: DesktopSettings = {
 	projectSubfolders: true,
 	keepRaw: false,
@@ -295,6 +308,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	gemini: [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: DEFAULT_GEMINI, studio: DEFAULT_STUDIO }],
 	desktop: DEFAULT_DESKTOP,
 	hermes: DEFAULT_HERMES,
+	memory: DEFAULT_MEMORY,
 	lastRuns: {},
 };
 

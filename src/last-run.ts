@@ -37,6 +37,7 @@ export const DESKTOP_ALL = 'desktop:all';
 /** Account part of the key for one provider's desktop app over all its accounts (its toolbar button). */
 export const DESKTOP_EVERY_ACCOUNT = '*';
 export const HERMES = 'hermes';
+export const MEMORY = 'memory';
 
 /** The newer of two runs (either may be missing). */
 export function newer(a: LastRun | undefined, b: LastRun | undefined): LastRun | undefined {

@@ -21,8 +21,9 @@ import { runLumoSync } from './lumo/sync';
 import { runGeminiSync } from './gemini/sync';
 import { runStudioSync } from './studio/sync';
 import { anyHermesEnabled, runHermesSync } from './hermes/sync';
+import { anyMemoryEnabled, runMemorySync } from './memory/sync';
 import { chatCountStatus, SyncProgress } from './progress';
-import { DESKTOP_ALL, DESKTOP_EVERY_ACCOUNT, HERMES, runKey, type LastRun, type RunOutcome } from './last-run';
+import { DESKTOP_ALL, DESKTOP_EVERY_ACCOUNT, HERMES, MEMORY, runKey, type LastRun, type RunOutcome } from './last-run';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
 
@@ -34,7 +35,8 @@ type Target =
 	| { kind: 'gemini'; account: GeminiAccount }
 	| { kind: 'studio'; account: GeminiAccount }
 	| { kind: 'desktop'; only?: DesktopOnly; label?: string }
-	| { kind: 'hermes'; profileId?: string; label?: string };
+	| { kind: 'hermes'; profileId?: string; label?: string }
+	| { kind: 'memory' };
 
 /** web = the provider's chat website; studio = Google AI Studio, which shares the Google login. */
 export type Surface = 'web' | 'desktop' | 'studio';
@@ -47,6 +49,8 @@ export default class AIChatBridge extends Plugin {
 	private timer: number | null = null;
 	/** When the automatic sync timer fires next (ms), or null when it is off. */
 	private nextAutoAt: number | null = null;
+	/** The AI memory sync's own timer (Memory tab), apart from the chat sync's. */
+	private memoryTimer: number | null = null;
 	private gptResumeTimer: number | null = null;
 	private showingGptCooldown = false;
 	private unloaded = false;
@@ -62,7 +66,7 @@ export default class AIChatBridge extends Plugin {
 	/** Stop was asked for: the running sync ends after its current chat. */
 	private stopRequested = false;
 	/** Which account (or desktop app) is syncing right now. */
-	private current: { provider?: Provider; id?: string; hermes?: boolean } | null = null;
+	private current: { provider?: Provider; id?: string; hermes?: boolean; memory?: boolean } | null = null;
 	private progress: SyncProgress | null = null;
 	private readonly busyListeners = new Set<() => void>();
 	/** The last "Refresh index" result, shown in the settings. */
@@ -145,6 +149,12 @@ export default class AIChatBridge extends Plugin {
 		});
 
 		this.addCommand({
+			id: 'sync-ai-memory',
+			name: 'Sync AI memory',
+			callback: () => void this.syncMemory('manual'),
+		});
+
+		this.addCommand({
 			id: 'move-to-app-layout',
 			name: 'Move synced chats into the new folder layout',
 			callback: () => void this.moveToAppLayout(),
@@ -187,6 +197,7 @@ export default class AIChatBridge extends Plugin {
 		this.addSettingTab(new AIChatBridgeSettingTab(this.app, this));
 		this.app.workspace.onLayoutReady(() => {
 			this.restartTimer();
+			this.restartMemoryTimer();
 			this.scheduleGptResume();
 			if (this.settings.syncOnStartup) this.scheduleStartupSync();
 			// Moves/renames in Obsidian update the index (registered after load, so the
@@ -224,6 +235,7 @@ export default class AIChatBridge extends Plugin {
 		this.statusEl?.setText('');
 		closeLoginWindows();
 		if (this.timer !== null) window.clearInterval(this.timer);
+		if (this.memoryTimer !== null) window.clearInterval(this.memoryTimer);
 	}
 
 	private clearGptResumeTimer(): void {
@@ -331,6 +343,16 @@ export default class AIChatBridge extends Plugin {
 		this.refreshIdleStatus();
 	}
 
+	/** The AI memory sync on its own interval (0 = off). Quiet, and skipped while another sync runs. */
+	restartMemoryTimer() {
+		if (this.memoryTimer !== null) window.clearInterval(this.memoryTimer);
+		this.memoryTimer = null;
+		const m = this.settings.memory.intervalMinutes;
+		if (m < MIN_INTERVAL_MINUTES) return;
+		this.memoryTimer = window.setInterval(() => void this.syncMemory('auto'), m * 60_000);
+		this.registerInterval(this.memoryTimer);
+	}
+
 	/** Can this account's website be synced right now? */
 	async canSyncWeb(provider: Provider, account: AnyAccount): Promise<boolean> {
 		if (await isLoggedIn(loginRef(provider, account))) return true;
@@ -423,6 +445,21 @@ export default class AIChatBridge extends Plugin {
 			const profile = profileId ? this.settings.hermes.profiles.find((p) => p.id === profileId) : undefined;
 			await this.runOne({ kind: 'hermes', profileId, label: profile ? `Hermes ${profile.label}` : undefined }, trigger);
 		});
+	}
+
+	/** AI memory snapshots: every source turned on in the Memory tab. Not part of "Sync all". */
+	async syncMemory(trigger: 'manual' | 'auto') {
+		await this.guarded(trigger, async () => {
+			if (!anyMemoryEnabled(this)) {
+				if (trigger === 'manual') new Notice('AI memory: no source is turned on. Turn one on in the plugin settings (memory tab).');
+				return;
+			}
+			await this.runOne({ kind: 'memory' }, trigger);
+		});
+	}
+
+	isSyncingMemory(): boolean {
+		return this.syncing && this.current?.memory === true;
 	}
 
 	/** The Hermes profile (by ID) or all of Hermes is syncing right now. */
@@ -699,6 +736,7 @@ export default class AIChatBridge extends Plugin {
 		if (target.kind === 'gemini') return withAccount('Gemini', this.settings.gemini, target.account);
 		if (target.kind === 'studio') return withAccount('AI Studio', this.settings.gemini, target.account);
 		if (target.kind === 'hermes') return target.label ?? 'Hermes';
+		if (target.kind === 'memory') return 'AI memory';
 		return target.label ?? 'Desktop apps';
 	}
 
@@ -715,7 +753,9 @@ export default class AIChatBridge extends Plugin {
 			target.kind === 'chatgpt' ? () => chatCountStatus(target.account.web.chatProgress, label) : undefined,
 			() => this.requestStop());
 		this.progress = progress;
-		this.current = target.kind === 'hermes'
+		this.current = target.kind === 'memory'
+			? { memory: true }
+			: target.kind === 'hermes'
 			? { hermes: true, id: target.profileId }
 			: target.kind === 'desktop'
 			? { provider: target.only?.provider, id: target.only?.id }
@@ -734,6 +774,7 @@ export default class AIChatBridge extends Plugin {
 				: target.kind === 'gemini' ? await runGeminiSync(this, target.account, update)
 				: target.kind === 'studio' ? await runStudioSync(this, target.account, update)
 				: target.kind === 'hermes' ? await runHermesSync(this, update, target.profileId)
+				: target.kind === 'memory' ? await runMemorySync(this, update)
 				: await runDesktopSync(this, update, undefined, undefined, target.only);
 		} catch (e) {
 			this.paused.set(key, label);
@@ -749,7 +790,7 @@ export default class AIChatBridge extends Plugin {
 				: r.stopped ? ('resumeAt' in r && typeof r.resumeAt === 'number' ? 'waiting' : 'error')
 				: 'ok',
 			r,
-			this.stopRequested ? undefined : r.stopped ?? ('missing' in r && r.missing.length ? `Skipped, not found: ${r.missing.join(', ')}.` : undefined));
+			this.stopRequested ? undefined : r.stopped ?? ('missing' in r && r.missing.length ? `Skipped, not found: ${r.missing.join(', ')}.` : 'nothing' in r && r.nothing.length ? `Nothing to read for: ${r.nothing.join(', ')}.` : undefined));
 		if (this.stopRequested) {
 			const saved = r.newCount + r.changedCount;
 			new Notice(`${label}: stopped. ${saved ? `${saved} saved before stopping` : 'Nothing new was saved'}; the next sync carries on from there.`, 8000);
@@ -774,7 +815,7 @@ export default class AIChatBridge extends Plugin {
 			const more = (r.leftForLater ? `, ${r.leftForLater} left for next run` : '') + active;
 			const restored = r.restored.length ? `, ${r.restored.length} restored` : '';
 			// Hermes profiles whose state.db is gone were skipped; say so, so a quiet result isn't a surprise.
-			const gone = 'missing' in r && r.missing.length ? ` Skipped, not found: ${r.missing.join(', ')}.` : '';
+			const gone = 'missing' in r && r.missing.length ? ` Skipped, not found: ${r.missing.join(', ')}.` : 'nothing' in r && r.nothing.length ? ` Nothing to read for: ${r.nothing.join(', ')}.` : '';
 			// A one-account desktop run: say so when another account has sessions waiting.
 			const others = 'elsewhere' in r ? elsewhereText(r.elsewhere) : '';
 			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.${gone}${others ? ` ${others}` : ''}`, others ? 15_000 : undefined);
@@ -785,6 +826,7 @@ export default class AIChatBridge extends Plugin {
 	/** Where a run's result is filed, so the settings can show it (see last-run.ts). */
 	private runKeyOf(target: Target): string {
 		if (target.kind === 'hermes') return HERMES;
+		if (target.kind === 'memory') return MEMORY;
 		if (target.kind === 'desktop') return target.only ? runKey('desktop', target.only.provider, target.only.id ?? DESKTOP_EVERY_ACCOUNT) : DESKTOP_ALL;
 		if (target.kind === 'studio') return runKey('studio', 'gemini', target.account.id);
 		return runKey('web', target.kind, target.account.id);
