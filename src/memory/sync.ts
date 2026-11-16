@@ -13,6 +13,7 @@ import { dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
 import { createNew, ensureFolder, writeOver } from '../vaultio';
+import { describeHits, redact } from './redact';
 import { hashOfNote, renderBody, renderNote, sha256 } from './render';
 import { captureClaudeCode, captureCodex } from './sources';
 import type { MemoryCapture } from './types';
@@ -29,6 +30,8 @@ export interface MemorySyncResult {
 	leftForLater: number;
 	/** Sources turned on with nothing to read (the AI has no home folder here). */
 	nothing: string[];
+	/** What the privacy filter replaced in the snapshots written: "1 password in Codex /memories/x.md". Never a value. */
+	redactions: string[];
 	stopped?: string;
 }
 
@@ -50,7 +53,7 @@ export interface MemoryRunOptions {
 
 export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn = () => undefined, o: MemoryRunOptions = {}): Promise<MemorySyncResult> {
 	const m = plugin.settings.memory;
-	const result: MemorySyncResult = { newCount: 0, changedCount: 0, unchanged: 0, written: [], restored: [], leftForLater: 0, nothing: [] };
+	const result: MemorySyncResult = { newCount: 0, changedCount: 0, unchanged: 0, written: [], restored: [], leftForLater: 0, nothing: [], redactions: [] };
 	const now = o.now ?? new Date();
 	try {
 		const fs = o.fs === undefined ? nodeDesktopFs() : o.fs;
@@ -90,6 +93,23 @@ async function save(plugin: AIChatBridge, c: MemoryCapture, base: string, now: D
 	const key = `${c.provider}/${c.account}`;
 	const folder = `${base}/${safeTitle(c.provider)}/${safeTitle(c.account)}`;
 	const latestPath = `${folder}/${LATEST}`;
+	// The privacy filter runs before anything is fingerprinted or written, so a replaced value never reaches the vault.
+	const found: string[] = [];
+	if (plugin.settings.memory.redact) {
+		let total = 0;
+		c = {
+			...c,
+			files: c.files.map((f) => {
+				if (!f.text) return f;
+				const r = redact(f.text);
+				if (!r.total) return f;
+				total += r.total;
+				found.push(`${describeHits(r.hits)} in ${c.provider} ${f.path}`);
+				return { ...f, text: r.text };
+			}),
+		};
+		if (total) c.redacted = total;
+	}
 	const body = renderBody(c);
 	const hash = await sha256(body);
 
@@ -120,6 +140,7 @@ async function save(plugin: AIChatBridge, c: MemoryCapture, base: string, now: D
 	states[key] = { hash, snapshot: `${stem}.md`, synced: now.toISOString(), files: c.files.length };
 	await plugin.saveSettings();
 	result.written.push(stem);
+	result.redactions.push(...found);
 	if (before) result.changedCount++;
 	else result.newCount++;
 }
@@ -129,6 +150,7 @@ async function writeLog(plugin: AIChatBridge, r: MemorySyncResult, now: Date): P
 	const parts = [`**AI memory:** ${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
 	let line = `- [[${dailyNoteName(now)}]] ${pad(now.getHours())}:${pad(now.getMinutes())} – ${parts.join(', ')}`;
 	if (r.written.length) line += `: ${r.written.map((w) => `[[${w}|${w.split('/').slice(-3).join(' / ')}]]`).join(', ')}`;
+	if (r.redactions.length) line += ` – replaced by [REDACTED]: ${r.redactions.join('; ')}`;
 	if (r.nothing.length) line += ` – nothing to read for: ${r.nothing.join(', ')}`;
 	if (r.stopped) line += ` – **stopped:** ${r.stopped}`;
 	try {

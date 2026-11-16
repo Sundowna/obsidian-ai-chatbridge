@@ -129,6 +129,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Memory folder (folder field with suggestions and **Browse…**)
 - [ ] "On this computer" heading naming the account (computer name); one row each for Codex and Claude Code: the folder it reads, last snapshot time and file count, toggle (off by default; redraws the tab)
 - [ ] Automatic memory sync (minutes): 0 off, minimum 30, bad input ignored; own timer, restarted on change
+- [ ] "Privacy" heading with the **Privacy filter** toggle (on by default)
 - [ ] "What is saved" note
 
 **General tab**
@@ -191,7 +192,9 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Output `<memory folder>/<provider>/<account>/YYYY-MM-DD.md` plus `_latest.md`; local account = computer name
 - [ ] Properties: `provider`, `account`, `source`, `synced`, `hash`, `files`, `unread: true`; `_latest.md` also `snapshot:` link
 - [ ] Body: places read with what was found, then one H2 per memory file (its path below the AI's home) with the text in a code block whose fence is longer than any backtick run inside
-- [ ] Text is never filtered, translated or corrected (user decision, 2026-11-16: no redaction)
+- [ ] Text is never translated or corrected
+- [ ] Privacy filter [code: memory/redact.ts], on by default, switch in the Memory tab (user decision, 2026-11-16 afternoon; replaces the morning's "no redaction"): passwords, PINs, secret keys (by label, EN/DE/AF), 2FA seeds (`otpauth://`, labelled seeds), recovery codes (label line and the list below), ID numbers (by label, Swiss AHV by shape), card numbers (Luhn) and IBANs (mod 97) become `[REDACTED]`; only the value is replaced; runs before hashing and writing
+- [ ] With a hit: intro sentence says how many values were replaced, property `redacted: N`, log line adds "replaced by [REDACTED]: <kind> in <provider> <file>" (never the value). Without a hit the note is identical with the filter on or off
 - [ ] Snapshot only when the SHA-256 of the body differs from the last one (sync history in `data.json`, else the hash in `_latest.md`); unchanged writes nothing, not even `_latest.md`
 - [ ] A dated snapshot is never written over: a second change that day is `YYYY-MM-DD (HHmm).md`; only `_latest.md` is replaced
 - [ ] All snapshots of a source deleted = saved again on the next sync

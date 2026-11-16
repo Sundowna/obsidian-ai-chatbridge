@@ -22,6 +22,8 @@ export interface MemorySettings {
 	codexLocal: boolean;
 	/** Claude Code on this computer (~/.claude, or CLAUDE_CONFIG_DIR). */
 	claudeCodeLocal: boolean;
+	/** The privacy filter: passwords, recovery codes, 2FA seeds, ID and card numbers become [REDACTED]. */
+	redact: boolean;
 	/** "<provider>/<account>" -> its last snapshot. */
 	states: Record<string, MemoryState>;
 }
@@ -55,6 +57,8 @@ export interface MemoryCapture {
 	home: string;
 	places: MemoryPlace[];
 	files: MemoryFile[];
+	/** Set by the privacy filter when it replaced something: how many values in all. */
+	redacted?: number;
 	/** False when none of the places exists: nothing is written then. */
 	found: boolean;
 }

@@ -275,6 +275,7 @@ export const DEFAULT_HERMES: HermesSettings = {
 export const DEFAULT_MEMORY: MemorySettings = {
 	folder: 'AI Memory',
 	intervalMinutes: 0,
+	redact: true,
 	codexLocal: false,
 	claudeCodeLocal: false,
 	states: {},

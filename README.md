@@ -274,7 +274,7 @@ AI Memory/
       _latest.md           <- always the current state
 ```
 
-A snapshot is written only when something changed since the last one; a sync with no change writes nothing. A second change on the same day is saved as `2026-11-17 (1432).md`. The properties are `provider`, `account`, `source` (`local`), `synced`, `hash` (SHA-256 of the text below the properties) and `files`. Below them is a list of the places that were read and what was found, then one heading per memory file with its text in a code block:
+A snapshot is written only when something changed since the last one; a sync with no change writes nothing. A second change on the same day is saved as `2026-11-17 (1432).md`. The properties are `provider`, `account`, `source` (`local`), `synced`, `hash` (SHA-256 of the text below the properties) and `files`, plus `redacted` when the privacy filter replaced something. Below them is a list of the places that were read and what was found, then one heading per memory file with its text in a code block:
 
 ````markdown
 ## /projects/D--Work-garden/memory/beds.md
@@ -290,7 +290,19 @@ Drei Beete.
 
 The code block is there so nothing is reformatted: a memory file's own headings and `---` lines stay exactly as they are.
 
-**Nothing is filtered, translated or corrected.** You see what the AI keeps, in whatever language it keeps it. If a memory holds something sensitive, the snapshot holds it too.
+**Nothing is translated or corrected.** You see what the AI keeps, in whatever language it keeps it.
+
+**Privacy filter** (Memory tab, on by default): before a snapshot is written, these are replaced with `[REDACTED]`:
+
+| Kind | How it is found |
+| --- | --- |
+| Passwords, PINs, secret keys and tokens | By their label, in English, German and Afrikaans: `Passwort: …`, `wagwoord is …`, `API key: …` |
+| 2FA seeds | `otpauth://` links, and seeds after a label such as `2FA secret:` |
+| Recovery and backup codes | The codes on the line that names them and in the list directly below |
+| ID numbers | By label (`Reisepass Nr.: …`, `ID number: …`), and Swiss AHV numbers by their shape |
+| Card numbers and IBANs | By shape plus checksum, so phone and order numbers are left alone |
+
+Only the value is replaced; the label and the rest of the line stay (`Passwort: [REDACTED] (für den Router)`). The sync log names the kind and the memory file, never the value. The note says how many values were replaced. The filter works from labels and checksums, so it can miss something written in an unusual way, and it can replace a harmless word after `password:`. Do not rely on it alone. Turn it off to save everything exactly as the AI keeps it; the next sync then writes a new snapshot if that changes the text.
 
 **Left out:** folders named `Private` (and Claude Code projects with `Private` as a part of their name) are never read, and the memory folder cannot be inside one. Files larger than 2 MB or not text are named, not copied. Codex's use counters are left out, because they change every time Codex uses a memory and would cause a new snapshot each time.
 
@@ -344,7 +356,7 @@ This plugin needs network access for the web providers. Please read this before 
 - **ChatGPT's visual answers:** turned into plain HTML and pictures in your notes - nothing from a chat is ever run, and drawings can't load anything from other websites
 - **What is written:** transcripts, raw JSON, downloaded files and a sync log - only in the vault folders you choose. The sync index in `data.json` holds chat IDs and paths, no chat content and no secrets
 - **Files outside the vault (desktop apps and Hermes only):** the plugin *reads* local files only for what you turn on - for Claude Code and Codex: `~/.claude/projects`, the Claude desktop app's session list and Local Storage (for titles and sidebar groups), `~/.codex/.codex-global-state.json`, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl` and any extra folders you add; for Hermes: the `state.db` of each profile that is on. It never changes them and sends nothing over the network. Hermes snapshots are written to your system's temporary folder and deleted right after reading; if Obsidian has no built-in SQLite, a Python on your computer is started to make them. Hermes tool results can contain file contents, so they are shortened in the notes and steps mentioning a `Private` folder are left out
-- **AI memory (only for the sources you turn on):** reads `~/.codex/AGENTS.md`, `~/.codex/memories`, `~/.codex/memories_v2` and `~/.codex/memories_*.sqlite` for Codex, and `~/.claude/CLAUDE.md` and `~/.claude/projects/*/memory` for Claude Code. It never changes them and sends nothing over the network. The text is saved in your vault unfiltered, so anything that can read your vault can read it
+- **AI memory (only for the sources you turn on):** reads `~/.codex/AGENTS.md`, `~/.codex/memories`, `~/.codex/memories_v2` and `~/.codex/memories_*.sqlite` for Codex, and `~/.claude/CLAUDE.md` and `~/.claude/projects/*/memory` for Claude Code. It never changes them and sends nothing over the network. The text is saved readable in your vault, so anything that can read your vault can read it. The privacy filter replaces passwords, recovery codes, 2FA seeds, ID numbers and card numbers it recognises with `[REDACTED]`, but it can miss some
 - **Terms of service:** automated access may be limited by the providers' terms. Keep a reasonable delay between requests and use your own judgment
 
 ## Requirements

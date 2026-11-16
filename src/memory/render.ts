@@ -3,6 +3,7 @@
 // a memory file's own headings and "---" lines cannot break the note, and Obsidian does not
 // reformat what is inside. Pure code, no Obsidian.
 
+import { REDACTED } from './redact';
 import type { MemoryCapture, MemoryFile } from './types';
 
 /** A fence longer than any run of backticks in the text, so the text cannot close it early. */
@@ -21,8 +22,12 @@ function fileSection(f: MemoryFile): string {
 
 /** Everything below the properties. It holds no date, so the same memories give the same text. */
 export function renderBody(c: MemoryCapture): string {
+	// Without a hit the sentence is the same with the filter on or off, so the switch alone makes no new snapshot.
+	const kept = c.redacted
+		? `Saved as the AI keeps it, except for ${c.redacted} sensitive ${c.redacted === 1 ? 'value' : 'values'} (password, recovery code, 2FA seed, ID or card number) replaced by ${REDACTED}. Nothing is translated or corrected.`
+		: 'Saved as the AI keeps it: nothing is filtered, translated or corrected.';
 	const intro = [
-		`Read from \`${c.home}\` on ${c.account}. Saved as the AI keeps it: nothing is filtered, translated or corrected.`,
+		`Read from \`${c.home}\` on ${c.account}. ${kept}`,
 		'',
 		...c.places.map((p) => `- \`${p.name}\`: ${p.status}`),
 	].join('\n');
@@ -52,6 +57,7 @@ export function renderNote(c: MemoryCapture, body: string, meta: NoteMeta): stri
 		`hash: ${meta.hash}`,
 		`files: ${c.files.length}`,
 	];
+	if (c.redacted) props.push(`redacted: ${c.redacted}`);
 	if (meta.snapshot) props.push(`snapshot: ${JSON.stringify(`[[${meta.snapshot}|${meta.snapshot.split('/').pop() ?? ''}]]`)}`);
 	props.push('unread: true');
 	return `---\n${props.join('\n')}\n---\n\n${body}`;

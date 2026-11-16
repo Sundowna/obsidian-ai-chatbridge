@@ -10,6 +10,7 @@ import { join } from 'path';
 import { TFile } from 'obsidian';
 import type { DesktopFs } from '../src/desktop/scan';
 import { nodeSqliteBackend } from '../src/hermes/reader';
+import { describeHits, redact } from '../src/memory/redact';
 import { fenceFor, hashOfNote, renderBody, sha256 } from '../src/memory/render';
 import { captureClaudeCode, captureCodex, rowText } from '../src/memory/sources';
 import { runMemorySync } from '../src/memory/sync';
@@ -111,8 +112,39 @@ async function main() {
 	expect('row text: short values as lines, long text under its name, counters left out',
 		rowText({ thread_id: 't', usage_count: 9, last_usage: 5, raw_memory: 'a\nb', n: 2, gone: null }) === 'thread_id: t\nn: 2\n\n--- raw_memory ---\na\nb');
 
+	// ---- Privacy filter ----
+	const R = '[REDACTED]';
+	const same = (label: string, text: string) => expect(`filter leaves alone: ${label}`, redact(text).text === text && redact(text).total === 0, redact(text).text);
+	const gone = (label: string, text: string, want: string, kinds: string) => {
+		const r = redact(text);
+		expect(`filter: ${label}`, r.text === want && describeHits(r.hits) === kinds, `${r.text} | ${describeHits(r.hits)}`);
+	};
+	gone('German password, rest of the line stays', 'Passwort: hunter2 (bleibt)', `Passwort: ${R} (bleibt)`, '1 password');
+	gone('Afrikaans password in a sentence', 'Die wagwoord is Boerewors#99.', `Die wagwoord is ${R}.`, '1 password');
+	gone('password with a "for" part and bold label', '**WiFi password for the farm:** `k4lahari-Sand`', `**WiFi password for the farm:** \`${R}\``, '1 password');
+	gone('quoted password with spaces', 'password = "correct horse battery"', `password = ${R}`, '1 password');
+	gone('API key', 'API key: sk-live-9f8e7d6c5b4a3210', `API key: ${R}`, '1 secret key');
+	gone('2FA seed', '2FA secret: JBSW Y3DP EHPK 3PXP', `2FA secret: ${R}`, '1 2FA seed');
+	gone('otpauth link', 'scan otpauth://totp/Proton:w?secret=JBSWY3DPEHPK3PXP&issuer=Proton now', `scan ${R} now`, '1 2FA seed');
+	gone('recovery codes on the line and in the list below', 'Backup codes: 1a2b-3c4d\n- 5e6f-7g8h\n- 9i0j-1k2l\n\nNext note 2026.', `Backup codes: ${R}\n- ${R}\n- ${R}\n\nNext note 2026.`, '3 recovery codes');
+	gone('German recovery codes', 'Wiederherstellungscodes:\n1. 83920174\n2. 55501928\nDanach kommt Text mit 12345678.', `Wiederherstellungscodes:\n1. ${R}\n2. ${R}\nDanach kommt Text mit 12345678.`, '2 recovery codes');
+	gone('card number (checksum fits)', 'Karte 4111 1111 1111 1111 läuft ab', `Karte ${R} läuft ab`, '1 card number');
+	gone('IBAN (checksum fits)', 'IBAN CH93 0076 2011 6238 5295 7', `IBAN ${R}`, '1 bank account number');
+	gone('Swiss AHV number', 'AHV 756.1234.5678.97', `AHV ${R}`, '1 ID number');
+	gone('passport number by label', 'Reisepass Nr.: C01X00T47, gültig', `Reisepass Nr.: ${R}, gültig`, '1 ID number');
+	gone('South African ID number (checksum fits)', 'ID 8001015009087', `ID ${R}`, '1 card number');
+	same('a rule about passwords', 'Never store passwords: use the manager. Password: stored in Proton Pass.');
+	same('German and Afrikaans prose', 'Das Passwort ist nicht im Vault. Die wagwoord is geen geheim nie.');
+	same('a long number that is no card', 'Order 4111 1111 1111 1112, phone +41 79 123 45 67, 2026-11-16 09:05:00');
+	same('a token that is a plain word', 'token: expired\nsecret: none');
+	same('an IBAN-like text with a wrong checksum', 'CH93 0076 2011 6238 5295 8');
+	same('2FA note without a seed', '2FA: this code will work fine okay');
+	same('a recovery note without codes', 'Recovery codes are in the safe.\nMore text follows here.');
+	const twice = redact(redact('Passwort: hunter2').text);
+	expect('filter: running it again changes nothing', twice.total === 0 && twice.text === `Passwort: ${R}`);
+
 	// ---- Codex ----
-	const cx = await captureCodex(fs, 'Tower', backend);
+	const cx= await captureCodex(fs, 'Tower', backend);
 	const paths = cx.files.map((f) => f.path);
 	expect('Codex: CODEX_HOME is used', cx.home === codex, cx.home);
 	expect('Codex: AGENTS.md, memory files and database rows, in a stable order',
@@ -151,6 +183,7 @@ async function main() {
 	// ---- Full sync on a fake vault ----
 	const { settings } = normalizeSettings({});
 	expect('settings: every source is off by default', !settings.memory.codexLocal && !settings.memory.claudeCodeLocal && settings.memory.intervalMinutes === 0 && settings.memory.folder === 'AI Memory');
+	expect('settings: the privacy filter is on by default', settings.memory.redact === true);
 	settings.memory.folder = '30 Sources/AI Memory';
 	const { files, vault } = fakeVault();
 	const plugin = { app: { vault, fileManager: { processFrontMatter: async () => undefined } }, settings, saveSettings: async () => undefined } as never;
@@ -169,10 +202,14 @@ async function main() {
 	expect('sync 1: a snapshot and _latest.md per source', r1.newCount === 2 && !r1.stopped && memoryFiles().join(' | ') === `${L}/2026-11-16.md | ${L}/_latest.md | ${C}/2026-11-16.md | ${C}/_latest.md`, `${r1.stopped ?? ''} ${memoryFiles().join(' | ')}`);
 	const snap = files.get(`${C}/2026-11-16.md`) ?? '';
 	const hash = hashOfNote(snap) ?? '';
-	expect('sync 1: properties', snap.startsWith(`---\nprovider: "Codex"\naccount: "Tower"\nsource: local\nsynced: 2026-11-16\nhash: ${hash}\nfiles: 7\nunread: true\n---\n\n`) && hash.length === 64, snap.slice(0, 200));
+	expect('sync 1: properties', snap.startsWith(`---\nprovider: "Codex"\naccount: "Tower"\nsource: local\nsynced: 2026-11-16\nhash: ${hash}\nfiles: 7\nredacted: 1\nunread: true\n---\n\n`) && hash.length === 64, snap.slice(0, 200));
 	expect('sync 1: the hash is the fingerprint of the text below the properties', hash === (await sha256(snap.slice(snap.indexOf('\n---\n\n') + 6))));
 	expect('sync 1: _latest.md has the same text and links its snapshot', (files.get(`${C}/_latest.md`) ?? '').includes(`snapshot: "[[${C}/2026-11-16|2026-11-16]]"`) && hashOfNote(files.get(`${C}/_latest.md`) ?? '') === hash);
+	expect('sync 1: the password is replaced, the rest of its line is kept', snap.includes('- Passwort: [REDACTED] (bleibt drin, es wird nichts gefiltert)') && snap.includes('except for 1 sensitive value'));
+	expect('sync 1: the password is nowhere in the vault, log included', ![...files.values()].some((d) => d.includes('hunter2')));
+	expect('sync 1: a source without a hit says nothing is filtered and has no redacted property', (files.get(`${L}/2026-11-16.md`) ?? '').includes('nothing is filtered') && !(files.get(`${L}/2026-11-16.md`) ?? '').includes('redacted:'));
 	const log = files.get(settings.logPath) ?? '';
+	expect('sync 1: the log names the kind and the file', log.includes('replaced by [REDACTED]: 1 password in Codex /memories/memory_summary.md'), log);
 	expect('sync 1: one log line', /\*\*AI memory:\*\* 2 new, 0 changed, 0 unchanged/.test(log), log);
 
 	const before = new Map(files);
@@ -214,6 +251,14 @@ async function main() {
 	const count = files.size;
 	const r9 = await runMemorySync(plugin, undefined, { fs: realFs({ CODEX_HOME: `${dir}/nowhere` }), backend, now: new Date(2026, 10, 19, 10, 0, 0), account: 'Tower' });
 	expect('sync 9: Codex not installed = nothing written, and it says so', r9.nothing.join() === 'Codex' && files.size === count);
+
+	// Filter off: the text is saved exactly as the AI keeps it.
+	settings.memory.redact = false;
+	settings.memory.codexLocal = true;
+	const r10 = await run(new Date(2026, 10, 20, 9, 0, 0));
+	const plain = files.get(`${C}/2026-11-20.md`) ?? '';
+	expect('sync 10: filter off = a new snapshot with the text unchanged', r10.changedCount === 1 && !r10.redactions.length && plain.includes('Passwort: hunter2') && plain.includes('nothing is filtered') && !plain.includes('redacted:'), `${r10.changedCount} ${r10.stopped ?? ''}`);
+	settings.memory.redact = true;
 
 	const mobile = await runMemorySync(plugin, undefined, { fs: null, backend, account: 'Tower' });
 	expect('sync: no file access (mobile) stops with a clear message', /desktop/.test(mobile.stopped ?? ''));

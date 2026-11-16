@@ -67,7 +67,18 @@ export function memoryTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 
+	new Setting(el).setName('Privacy').setHeading();
+	new Setting(el)
+		.setName('Privacy filter')
+		.setDesc('Replaces passwords, recovery codes, two-factor seeds, ID numbers, card numbers and bank account numbers with a redaction mark before a snapshot is written. Only the value is replaced; the rest of the line stays. The sync log names the kind and the memory file, never the value. It works from labels and checksums, so it can miss something: do not rely on it alone. Off saves everything exactly as the AI keeps it.')
+		.addToggle((t) =>
+			t.setValue(m.redact).onChange(async (v) => {
+				m.redact = v;
+				await save();
+			}),
+		);
+
 	new Setting(el)
 		.setName('What is saved')
-		.setDesc('Each memory file becomes a heading with its text in a code block below, so nothing in it is reformatted. Nothing is filtered, translated or corrected: if a memory holds something sensitive, the snapshot holds it too. Folders named Private are never read. Codex\'s use counters are left out, because they change every time a memory is used.');
+		.setDesc('Each memory file becomes a heading with its text in a code block below, so nothing in it is reformatted. Nothing is translated or corrected. Folders named Private are never read. Codex\'s use counters are left out, because they change every time a memory is used.');
 }
