@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.34.0 - 2026-11-18
 
 ### New
 - **Codex cloud tasks** - tasks that Codex ran in OpenAI's cloud can now be saved with the ChatGPT sync, into the new **Codex Cloud folder**: `ChatGPT/Codex-Cloud/Tasks/` for those started on chatgpt.com/codex, `Work/` for those started from ChatGPT on the web, the phone or a schedule. Each note holds every prompt and Codex's answers with the steps counted, the error of a failed turn and the files changed as a folded diff, and links back to the task; the raw `.json` holds the conversation, and with the new **Keep Codex's steps** toggle every step too (very long command output cut at 50,000 characters). Scheduled runs are named after their schedule. A running task is saved once it is done, and a follow-up updates its one note while the version before stays as raw `.json`. The plugin reads Codex over the same live connection the Codex page uses, and only reads. Off until you turn it on per account with **Codex cloud tasks** in the ChatGPT tab. The ChatGPT log line always says how many Codex cloud tasks it found
