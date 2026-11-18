@@ -2,7 +2,10 @@
 // stays, which merge into it, which raw files become earlier versions, and how links are rewritten.
 // Run: npm run test:merge
 
-import { copyKind, planMerge, plainStem, relink, rewriteLinks, type FoundNote, type KnownChat } from '../src/merge';
+import { TFile, type App } from 'obsidian';
+import { copyKind, planMerge, plainStem, relink, rewriteLinks, type FoundNote, type KnownChat, type LinkRef } from '../src/merge';
+import { canvasLinks, linksInText, rewriteCanvas } from '../src/merge-canvas';
+import { canvasesLinking, fixLinks } from '../src/merge-run';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -117,5 +120,108 @@ expect('plain: a bracket in the title stays', plainStem('Trip notes (A) - Lisbon
 	expect('rewrite: a form not understood is reported', out.failed.length === 1 && out.failed[0]!.original === '<odd>');
 }
 
-console.log(failures ? `\n${failures} FAILED` : '\nAll merge tests passed.');
-process.exit(failures ? 1 : 0);
+// --- canvases ----------------------------------------------------------------------------------
+const canvasTests = (async () => {
+	const OLD = `${C}/Old (updated 2026-11-08 2349).md`;
+	const NEW = `${C}/Old.md`;
+	const OTHER = `${C}/Other.md`;
+	const canvasJson = (nodes: unknown[], edges: unknown[] = []): string => JSON.stringify({ nodes, edges }, null, '\t');
+	const board = canvasJson(
+		[
+			{ id: 'a1', type: 'file', file: OLD, x: 0, y: 0, width: 400, height: 400, color: '4' },
+			{ id: 'a2', type: 'file', file: OLD, subpath: '#Human · 2026-11-06 10:00', x: 500, y: 0, width: 400, height: 400 },
+			{ id: 'a3', type: 'text', text: 'See [[Old (updated 2026-11-08 2349)|that chat]] and ![[Old (updated 2026-11-08 2349)#H]], not [[Other]] nor [web](https://x.y/Old).', x: 0, y: 500, width: 300, height: 200, styleAttributes: {} },
+			{ id: 'a4', type: 'file', file: OTHER, x: 900, y: 0, width: 400, height: 400 },
+			{ id: 'a5', type: 'group', label: 'Chats', x: -50, y: -50, width: 1500, height: 900 },
+			{ id: 'a6', type: 'link', url: 'https://example.org', x: 0, y: 900, width: 400, height: 200 },
+		],
+		[{ id: 'e1', fromNode: 'a1', fromSide: 'right', toNode: 'a2', toSide: 'left', label: 'then' }],
+	);
+	const resolve = (lp: string): string | null => (lp === 'Old (updated 2026-11-08 2349)' ? OLD : lp === 'Other' ? OTHER : null);
+	const targets = new Set([OLD]);
+
+	expect('canvas: links in text, web links skipped', linksInText('[[A|x]] ![[B#h]] [c](C%20d.md#t) [w](https://x) [o](obsidian://open)').map((l) => l.linkpath).join() === 'A,B,C d.md');
+	const refs = canvasLinks(board, targets, resolve)!;
+	expect('canvas: file nodes (with and without subpath) and text links found', refs.filter((x) => x.kind === 'file').length === 2 && refs.filter((x) => x.kind === 'text').length === 2 && refs.every((x) => x.from === OLD), JSON.stringify(refs));
+	expect('canvas: no link to a merged note -> nothing found', canvasLinks(board, new Set([`${C}/Unrelated.md`]), resolve)!.length === 0);
+	expect('canvas: broken JSON or not JSON Canvas -> null', canvasLinks('{"nodes": [', targets, resolve) === null && canvasLinks('[1,2]', targets, resolve) === null && canvasLinks('{"nodes": {}}', targets, resolve) === null && rewriteCanvas('{"nodes": [', refs, () => NEW, () => 'Old') === null);
+
+	const out = rewriteCanvas(board, refs, (from) => (from === OLD ? NEW : null), (from) => (from === OLD ? 'Old' : null))!;
+	const parsed = JSON.parse(out.text) as { nodes: Record<string, unknown>[]; edges: unknown[] };
+	const before = JSON.parse(board) as { nodes: Record<string, unknown>[]; edges: unknown[] };
+	expect('canvas: file node points at the note that stays', parsed.nodes[0]!.file === NEW && parsed.nodes[0]!.color === '4');
+	expect('canvas: file node keeps its subpath', parsed.nodes[1]!.file === NEW && parsed.nodes[1]!.subpath === '#Human · 2026-11-06 10:00');
+	expect('canvas: text node: alias and embed heading kept, other links untouched', parsed.nodes[2]!.text === 'See [[Old|that chat]] and ![[Old#H]], not [[Other]] nor [web](https://x.y/Old).', String(parsed.nodes[2]!.text));
+	expect('canvas: 4 links counted', out.changed === 4 && out.failed.length === 0, String(out.changed));
+	const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+	expect('canvas: everything else unchanged (other nodes, ids, order, keys, edges)', same(parsed.nodes.slice(3), before.nodes.slice(3)) && same(parsed.edges, before.edges) && parsed.nodes.map((x) => x.id).join() === 'a1,a2,a3,a4,a5,a6' && same(Object.keys(parsed.nodes[2]!), Object.keys(before.nodes[2]!)));
+	expect('canvas: written with tabs, as before', out.text === JSON.stringify(parsed, null, '\t'));
+	const unchanged = rewriteCanvas(board, [], () => NEW, () => 'Old')!;
+	expect('canvas: nothing to change -> same text back, byte for byte', unchanged.text === board && unchanged.changed === 0);
+	const missing = rewriteCanvas(board, refs, () => null, () => null)!;
+	expect('canvas: a link whose new file is missing is reported, not changed', missing.changed === 0 && missing.text === board && missing.failed.length === 3, String(missing.failed.length));
+	const spaced = '{\n  "nodes": [{"id":"b","type":"file","file":"' + OLD + '"}]\n}\n';
+	expect('canvas: two-space indentation and the last line break kept', rewriteCanvas(spaced, canvasLinks(spaced, targets, resolve)!, () => NEW, () => 'Old')!.text === JSON.stringify({ nodes: [{ id: 'b', type: 'file', file: NEW }] }, null, 2) + '\n');
+
+	// The merge run itself (step 4), against a fake vault.
+	const ART = `${C}/Artifacts/Old (updated 2026-11-08 2349)/board.canvas`;
+	const ART_TO = `${C}/Artifacts/Old/board.canvas`;
+	const files = new Map<string, string>([
+		[NEW, 'note'],
+		[OTHER, 'other'],
+		[`${C}/board.canvas`, board],
+		[ART_TO, board], // a canvas saved with the chat, already moved by step 2
+		[`${C}/unrelated.canvas`, canvasJson([{ id: 'u', type: 'file', file: OTHER, x: 0, y: 0, width: 1, height: 1 }])],
+		[`${C}/broken.canvas`, '{"nodes": [ {"id": "x", "type": "file", "file": "' + OLD + '"'],
+		[`${C}/drawing.excalidraw`, '{"type":"excalidraw"}'],
+		[`${C}/changed since.canvas`, '{"nodes": oops'],
+	]);
+	let writes = 0;
+	const app = {
+		vault: {
+			getAbstractFileByPath: (p: string) => (files.has(p) ? new TFile(p, { size: files.get(p)!.length }) : null),
+			read: async (f: TFile) => files.get(f.path)!,
+			process: async (f: TFile, fn: (t: string) => string) => {
+				const next = fn(files.get(f.path)!);
+				if (next !== files.get(f.path)) writes++;
+				files.set(f.path, next);
+				return next;
+			},
+		},
+		metadataCache: {
+			resolvedLinks: {} as Record<string, Record<string, number>>,
+			getFirstLinkpathDest: (lp: string) => {
+				const p = resolve(lp);
+				return p ? new TFile(p, { size: 0 }) : null;
+			},
+			fileToLinktext: (f: TFile) => f.path.split('/').pop()!.replace(/\.md$/, ''),
+		},
+	} as unknown as App;
+
+	const canvases = [...files].filter(([p]) => p.endsWith('.canvas') && p !== ART_TO).map(([path, text]) => ({ path, text }));
+	canvases.push({ path: ART, text: board });
+	const found = canvasesLinking(app, targets, canvases);
+	expect('canvas preview: linking canvases found, the unrelated one not, the broken one naming the note listed to report', found.get(`${C}/board.canvas`)?.length === 4 && found.get(ART)?.length === 4 && !found.has(`${C}/unrelated.canvas`) && found.get(`${C}/broken.canvas`)?.length === 0 && !found.has(`${C}/changed since.canvas`), [...found.keys()].join(' | '));
+
+	const unrelatedBefore = files.get(`${C}/unrelated.canvas`);
+	const links = new Map<string, LinkRef[]>([
+		[`${C}/board.canvas`, found.get(`${C}/board.canvas`)!],
+		[ART, found.get(ART)!],
+		[`${C}/broken.canvas`, []],
+		[`${C}/drawing.excalidraw`, []],
+		[`${C}/changed since.canvas`, found.get(`${C}/board.canvas`)!], // read fine for the preview, broken by now
+	]);
+	const r = { linksFixed: 0, linksLeft: [] as string[] };
+	await fixLinks(app, links, new Map([[ART, ART_TO]]), (from) => (from === OLD ? NEW : from), [OLD], r);
+	const fixed = (p: string) => JSON.parse(files.get(p)!) as { nodes: Record<string, unknown>[] };
+	expect('merge: canvas file nodes and text links rewritten', fixed(`${C}/board.canvas`).nodes[0]!.file === NEW && fixed(`${C}/board.canvas`).nodes[1]!.subpath === '#Human · 2026-11-06 10:00' && String(fixed(`${C}/board.canvas`).nodes[2]!.text).startsWith('See [[Old|that chat]] and ![[Old#H]]'));
+	expect('merge: a canvas that moved with the chat is rewritten at its new place', fixed(ART_TO).nodes[0]!.file === NEW && !files.has(ART));
+	expect('merge: links counted, two canvases written', r.linksFixed === 8 && writes === 2, `${r.linksFixed} fixed, ${writes} writes`);
+	expect('merge: a canvas with no matching link stays byte for byte', files.get(`${C}/unrelated.canvas`) === unrelatedBefore);
+	expect('merge: broken canvases and other non-note files reported, unchanged', r.linksLeft.length === 3 && r.linksLeft.some((l) => l.startsWith(`${C}/broken.canvas`) && l.includes('a canvas that could not be read')) && r.linksLeft.some((l) => l.startsWith(`${C}/drawing.excalidraw`) && l.includes('not a note')) && r.linksLeft.some((l) => l.startsWith(`${C}/changed since.canvas`)) && files.get(`${C}/changed since.canvas`) === '{"nodes": oops', r.linksLeft.join(' | '));
+})();
+
+void canvasTests.then(() => {
+	console.log(failures ? `\n${failures} FAILED` : '\nAll merge tests passed.');
+	process.exit(failures ? 1 : 0);
+});
