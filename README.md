@@ -9,7 +9,7 @@
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with, endorsed by, or supported by Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is ever changed or deleted on the provider's side. The plugin reads the same web endpoints your browser uses, which can change without notice.
 
-**New in 0.33: [AI memory](#ai-memory)** - what Claude, ChatGPT, Claude Code and Codex keep about you, saved as dated snapshots with a privacy filter. **0.31:** better on [macOS and Linux](#windows-macos-and-linux) - the folder picker, `~` paths and where local sessions are found. **0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
+**New in 0.34: [Codex cloud tasks](#codex-cloud-tasks)** - the tasks Codex ran in OpenAI's cloud, started on chatgpt.com/codex or from ChatGPT, saved as notes. And the plugin now loads on your phone: its sync button [asks your computer to sync](#phone-and-tablet). **0.33:** [AI memory](#ai-memory) - what Claude, ChatGPT, Claude Code and Codex keep about you, saved as dated snapshots with a privacy filter. **0.31:** better on [macOS and Linux](#windows-macos-and-linux) - the folder picker, `~` paths and where local sessions are found. **0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
 
 ## Contents
 
