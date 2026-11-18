@@ -19,6 +19,7 @@ import { normalizePath, TFile, TFolder, type App, type TAbstractFile } from 'obs
 import { computerName } from '../computer';
 import { followRename } from '../follow';
 import type { Settings } from '../settings';
+import { findFile } from '../vaultio';
 
 /** The 0.17–0.24 layout's app folders ("Claude Desktop/Chat", "Claude Desktop (Work)/Code"). */
 export const CLAUDE_APP = 'Claude Desktop';
@@ -131,7 +132,7 @@ export function layoutMoves(s: Settings, exists: (path: string) => boolean = () 
 	return out;
 }
 
-export const folderExists = (app: App) => (path: string): boolean => app.vault.getAbstractFileByPath(normalizePath(path)) instanceof TFolder;
+export const folderExists = (app: App) => (path: string): boolean => findFile(app, normalizePath(path)) instanceof TFolder;
 
 export interface MoveResult {
 	moved: number;
@@ -142,17 +143,17 @@ export interface MoveResult {
 
 /** Removes empty folders at and below `path`, deepest first. Never touches a folder with a file in it. */
 export async function pruneEmpty(app: App, path: string): Promise<void> {
-	const folder = app.vault.getAbstractFileByPath(normalizePath(path));
+	const folder = findFile(app, normalizePath(path));
 	if (!(folder instanceof TFolder)) return;
 	for (const child of [...folder.children]) if (child instanceof TFolder) await pruneEmpty(app, child.path);
 	if (folder.children.length === 0) await app.fileManager.trashFile(folder);
 }
 
 async function moveInto(app: App, s: Settings, src: TAbstractFile, destPath: string, r: MoveResult): Promise<void> {
-	const dest = app.vault.getAbstractFileByPath(destPath);
+	const dest = findFile(app, destPath);
 	if (!dest) {
 		const parent = parentOf(destPath);
-		if (parent && !app.vault.getAbstractFileByPath(parent)) await app.vault.createFolder(parent);
+		if (parent && !findFile(app, parent)) await app.vault.createFolder(parent);
 		const oldPath = src.path;
 		await app.fileManager.renameFile(src, destPath);
 		followRename(s, oldPath, destPath); // also done by the rename event; repeating it changes nothing
@@ -173,7 +174,7 @@ export async function moveToAppLayout(app: App, s: Settings, save: () => Promise
 	const r: MoveResult = { moved: 0, conflicts: [], from: [] };
 	const root = layoutRoot(s.claude[0]!.web.chatFolder);
 	for (const m of layoutMoves(s, folderExists(app), computer)) {
-		const src = app.vault.getAbstractFileByPath(normalizePath(m.from));
+		const src = findFile(app, normalizePath(m.from));
 		// Nested: the old folder is inside the new one (or the other way round) – only switch the setting.
 		const nested = m.to.startsWith(`${m.from}/`) || m.from.startsWith(`${m.to}/`);
 		try {

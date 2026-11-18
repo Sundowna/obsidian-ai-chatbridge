@@ -9,7 +9,7 @@ import { appendLog } from '../log';
 import { baseName, dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
-import { createNew, ensureFolder, freeStem } from '../vaultio';
+import { createNew, ensureFolder, findFile, freeStem } from '../vaultio';
 import { dirOf, masterRaw, mirrorRaw, rawLink } from '../raw-folders';
 import { addVersion, editsLog, keepNoteAsVersion, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { buildSession, columns, messagesSql, revisionOf, sessionsSql, toMessageRow, toSessionRow } from './parse';
@@ -77,7 +77,7 @@ export async function runHermesSync(
 	const s = plugin.settings;
 	const h = s.hermes;
 	const result: HermesSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, written: [], restored: [], missing: [], edits: noEdits() };
-	const exists = (p: string | undefined): boolean => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
+	const exists = (p: string | undefined): boolean => !!p && findFile(app, p) instanceof TFile;
 	const quietMs = Math.max(0, s.desktop.quietMinutes) * 60_000;
 	let budget = s.maxChatsPerRun > 0 ? s.maxChatsPerRun : Infinity;
 

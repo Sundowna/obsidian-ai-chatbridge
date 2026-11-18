@@ -11,7 +11,7 @@ import { baseName, dailyNoteName, tagAccount } from './naming';
 import { renderTranscript } from './transcript';
 import { chatFolders, dirOf, masterRaw, rawLink } from './raw-folders';
 import type { Chat } from './types';
-import { createNew, ensureFolder, freeFileName, freeStem } from './vaultio';
+import { createNew, ensureFolder, findFile, freeFileName, freeStem } from './vaultio';
 import { appendLog } from './log';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
@@ -137,7 +137,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const auth = await claudeAuth(plugin, account);
 	const getKey = auth.getKey;
 
-	const exists = (path: string): boolean => app.vault.getAbstractFileByPath(path) instanceof TFile;
+	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
 
 	/** Files not saved yet – or saved once and since deleted from the vault. */
 	const isMissing = (f: FileTask): boolean => {
@@ -197,7 +197,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	 */
 	const sameContent = async (bytes: ArrayBuffer, folder: string, stem: string): Promise<string | null> => {
 		for (const kindFolder of Object.values(KIND_FOLDER)) {
-			const dir = app.vault.getAbstractFileByPath(`${folder}/${kindFolder}/${stem}`);
+			const dir = findFile(app, `${folder}/${kindFolder}/${stem}`);
 			if (!(dir instanceof TFolder)) continue;
 			for (const f of dir.children) {
 				if (!(f instanceof TFile) || f.stat.size !== bytes.byteLength) continue;
@@ -266,7 +266,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			await ensureFolder(app, base);
 			for (const name of projectNames) {
 				const path = `${base}/${name}`;
-				if (!app.vault.getAbstractFileByPath(path)) {
+				if (!findFile(app, path)) {
 					await ensureFolder(app, path);
 					result.foldersCreated.push(path);
 				}
@@ -284,7 +284,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			const folder = before ? dirOf(before.md) : today.md;
 			const rawFolder = before ? dirOf(before.json) : today.raw;
 			for (const f of new Set([folder, rawFolder])) {
-				if (!app.vault.getAbstractFileByPath(f) && !result.foldersCreated.includes(f)) result.foldersCreated.push(f);
+				if (!findFile(app, f) && !result.foldersCreated.includes(f)) result.foldersCreated.push(f);
 			}
 			if (target === 'code') result.otherPlatforms.add(item.platform ?? '?');
 			await ensureFolder(app, folder);

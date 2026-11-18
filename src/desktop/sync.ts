@@ -10,7 +10,7 @@ import { appendLog } from '../log';
 import { baseName, dailyNoteName, safeTitle, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
-import { createNew, ensureFolder } from '../vaultio';
+import { createNew, ensureFolder, findFile } from '../vaultio';
 import { dirOf, masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { parseClaudeSession } from './claude-code';
@@ -129,7 +129,7 @@ export async function runDesktopSync(
 	const s = plugin.settings;
 	const d = s.desktop;
 	const result: DesktopSyncResult = { listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, active: 0, empty: 0, elsewhere: {}, written: [], restored: [], filesSaved: 0, filesBackfilled: 0, edits: noEdits() };
-	const exists = (p: string | undefined): boolean => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
+	const exists = (p: string | undefined): boolean => !!p && findFile(app, p) instanceof TFile;
 	const quietMs = Math.max(0, d.quietMinutes) * 60_000;
 	const adapter = app.vault.adapter;
 	const fileCtx: FileSaveContext | null = fs ? { app, fs, vaultBase: adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined } : null;
@@ -139,7 +139,7 @@ export async function runDesktopSync(
 	const savedFiles = (e: DesktopIndexEntry | undefined) => new Map(Object.entries(e?.files ?? {}).filter(([, p]) => exists(p)));
 
 	const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.md$/, '');
-	const pathTaken = (p: string) => app.vault.getAbstractFileByPath(p) !== null;
+	const pathTaken = (p: string) => findFile(app, p) !== null;
 	/** A stem free for both the .md and the raw .jsonl. */
 	const freeStem = (folder: string, stem: string, id: string, rawFolder = folder): string => {
 		const free = (x: string) => !pathTaken(`${folder}/${x}.md`) && !pathTaken(`${rawFolder}/${x}.jsonl`);
@@ -329,7 +329,7 @@ export async function runDesktopSync(
 			if (d.keepRaw && rawPath) {
 				// A session file only grows, so the copy saved before is normally the start of this one
 				// and nothing of it is lost. Only a file that was rewritten is kept as an earlier version.
-				const oldFile = before?.raw ? app.vault.getAbstractFileByPath(before.raw) : null;
+				const oldFile = before?.raw ? findFile(app, before.raw) : null;
 				const old = oldFile instanceof TFile ? await app.vault.read(oldFile) : null;
 				if (old !== null && !text.startsWith(old)) versions = addVersion(before, await keepVersion(app, [before!.raw!], before!.updated, text));
 				await writeRaw(app, rawPath, text);

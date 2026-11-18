@@ -10,7 +10,7 @@ import { baseName, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
 import { cleanFolder, type ClaudeAccount, type CloudIndexEntry, type Settings } from '../settings';
-import { createNew, ensureFolder, freeStem } from '../vaultio';
+import { createNew, ensureFolder, findFile, freeStem } from '../vaultio';
 import { addVersion, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { renderDesktopTranscript } from '../desktop/render';
 import type { DesktopFs } from '../desktop/scan';
@@ -129,7 +129,7 @@ export async function syncClaudeCloud(c: CloudSyncContext, r: CloudSyncResult): 
 	const { app, account } = c;
 	const w = account.web;
 	const index = (w.cloudIndex ??= {});
-	const exists = (p: string) => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
+	const exists = (p: string) => !!p && findFile(app, p) instanceof TFile;
 	const saveFiles = c.settings.desktop.saveFiles;
 
 	const sessions = (await listSessions(c)).filter(isCloudSession);

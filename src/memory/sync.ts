@@ -17,7 +17,7 @@ import { appendLog } from '../log';
 import { dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder, type ChatgptAccount, type ClaudeAccount } from '../settings';
-import { createNew, ensureFolder, writeOver } from '../vaultio';
+import { createNew, ensureFolder, findFile, writeOver } from '../vaultio';
 import { captureChatgpt, type MemoryGptApi } from './chatgpt-web';
 import { captureClaude, type MemoryClaudeApi } from './claude-web';
 import { describeHits, redact } from './redact';
@@ -129,7 +129,7 @@ async function save(plugin: AIChatBridge, c: MemoryCapture, base: string, now: D
 		return;
 	}
 	const fileAt = (p: string): TFile | null => {
-		const f = app.vault.getAbstractFileByPath(p);
+		const f = findFile(app, p);
 		return f instanceof TFile ? f : null;
 	};
 	const key = `${c.provider}/${c.account}`;
@@ -174,7 +174,7 @@ async function save(plugin: AIChatBridge, c: MemoryCapture, base: string, now: D
 	const date = dateOf(now);
 	// A second change on the same day gets the time in its name: a snapshot is never written over.
 	const names = [date, `${date} (${pad(now.getHours())}${pad(now.getMinutes())})`, `${date} (${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())})`];
-	const name = names.find((n) => !app.vault.getAbstractFileByPath(`${folder}/${n}.md`));
+	const name = names.find((n) => !findFile(app, `${folder}/${n}.md`));
 	if (!name) throw new Error(`No free file name for a ${c.provider} snapshot in ${folder}.`);
 	const stem = `${folder}/${name}`;
 	await createNew(app, `${stem}.md`, renderNote(c, body, { synced: date, hash }));

@@ -8,6 +8,7 @@
 import { TFile, type App } from 'obsidian';
 import type { Settings } from './settings';
 import type { NoteState } from './types';
+import { findFile } from './vaultio';
 
 /** One saved item's paths, as the indexes keep them. Updated in place. */
 export interface IndexedPaths {
@@ -139,10 +140,10 @@ export function vaultLookup(app: App): VaultLookup {
 		if (typeof id === 'string' && id && !byId.has(id)) byId.set(id, f.path);
 	}
 	return {
-		exists: (p) => app.vault.getAbstractFileByPath(p) instanceof TFile,
+		exists: (p) => findFile(app, p) instanceof TFile,
 		transcriptOf: (id) => byId.get(id) ?? null,
 		rawLinkOf: (md) => {
-			const file = app.vault.getAbstractFileByPath(md);
+			const file = findFile(app, md);
 			if (!(file instanceof TFile)) return null;
 			const fm: Record<string, unknown> | undefined = app.metadataCache.getFileCache(file)?.frontmatter;
 			const raw: unknown = fm?.raw;

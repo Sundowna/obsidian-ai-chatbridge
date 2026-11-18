@@ -16,6 +16,9 @@ import { renderGeminiTranscript } from './transcript';
 import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
 
+/** Chats in one run that may fail verification and be skipped before the sync stops. */
+const MAX_ODD_CHATS = 2;
+
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
 export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount, progress: ProgressFn = () => undefined): Promise<GoogleSyncResult> {
@@ -32,6 +35,7 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 		api = a;
 		const items = await a.listChats(wait, (page) => progress(`reading Gemini chat list… page ${page}`));
 		const byId = new Map<string, GeminiListItem>(items.map((it) => [it.uuid, it]));
+		let oddChats = 0;
 		await saveChats(plugin, items, g.index, folder, masterRaw(plugin.settings) !== undefined ? mirrorRaw(folder, masterRaw(plugin.settings)) : rawBase(g.rawFolder) ?? folder, async (item) => {
 			let chat;
 			try {
@@ -39,6 +43,12 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 			} catch (e) {
 				// A chat Google will not open (e.g. deleted meanwhile) is skipped; anything else stops.
 				if (e instanceof GeminiError) return null;
+				// One chat Google sends in an odd shape is skipped (and tried again next run); several
+				// in one run look like a format change, so the sync stops rather than guess.
+				if (e instanceof ShapeError && ++oddChats <= MAX_ODD_CHATS) {
+					console.warn('AI ChatBridge: Gemini chat skipped', item.uuid, e.message);
+					return null;
+				}
 				throw e;
 			}
 			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
