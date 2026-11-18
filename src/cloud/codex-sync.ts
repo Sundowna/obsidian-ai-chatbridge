@@ -14,29 +14,31 @@ import { createNew, ensureFolder, freeStem } from '../vaultio';
 import { addVersion, keepVersion, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw } from '../versions';
 import { renderDesktopTranscript } from '../desktop/render';
 import {
-	checkCodexList, checkCodexTask, codexChangesSection, codexFolderName, codexRaw, codexTaskUrl, isRunning, parseCodexRaw, parseCodexTask, versionOf,
+	checkCodexItems, checkCodexList, checkCodexTurns, codexChangesSection, codexFolderName, codexRaw, codexTaskUrl, interactionsOnly, isRunning, joinTurns, parseCodexRaw, parseCodexTask, turnsRunning, versionOf,
 	type CodexCloudTranscript, type CodexTask, type CodexTaskDetails,
 } from './codex-cloud';
+import type { CodexCloudClient } from './codex-app-server';
 import type { CloudSyncResult } from './sync';
 
 const MAX_LIST_PAGES = 50;
+const MAX_TURN_PAGES = 50;
+const MAX_ITEM_PAGES = 200;
+const LIST_PAGE = 50;
+const TURN_PAGE = 50;
+// Steps carry their full output: 50 of a long run are about 1.4 MB and 1 s. The Codex page asks
+// for 500; 200 keeps an answer near 5 MB while a run of 11,500 steps needs 58 pages, not 230.
+const ITEM_PAGE = 200;
 const NO_FOLDER = 'Other';
 const dirOf = (p: string) => p.split('/').slice(0, -1).join('/');
 const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.md$/, '');
 export const CODEX_CLOUD_APP_LABEL = 'Codex (cloud)';
 
-/** The parts of GptApi this needs (a fake in the tests). */
-export interface CodexCloudApi {
-	get(path: string): Promise<{ json: unknown }>;
-	codexTasksPath(cursor?: string): string;
-	codexTaskPath(id: string): string;
-}
-
 export interface CodexCloudContext {
 	app: App;
 	settings: Settings;
 	account: ChatgptAccount;
-	api: CodexCloudApi;
+	/** Opened when the sync gets to Codex; closed by the caller. */
+	client: () => Promise<CodexCloudClient>;
 	delayMs: number;
 	progress: ProgressFn;
 	save: () => Promise<void>;
@@ -49,8 +51,7 @@ async function listTasks(c: CodexCloudContext): Promise<CodexTask[]> {
 	for (let page = 0; ; page++) {
 		if (page >= MAX_LIST_PAGES) throw new StopError('Codex task list did not end after 50 pages – stopped.');
 		await c.sleep(c.delayMs);
-		const { json } = await c.api.get(c.api.codexTasksPath(cursor));
-		const p = checkCodexList(json);
+		const p = checkCodexList(await (await c.client()).call('thread/list', cursor ? { limit: LIST_PAGE, cursor } : { limit: LIST_PAGE }));
 		out.push(...p.tasks);
 		c.progress(`reading Codex cloud tasks… ${out.length}`);
 		if (!p.cursor || p.tasks.length === 0 || p.cursor === cursor) break;
@@ -61,9 +62,33 @@ async function listTasks(c: CodexCloudContext): Promise<CodexTask[]> {
 }
 
 async function fetchTask(c: CodexCloudContext, id: string): Promise<CodexTaskDetails> {
-	await c.sleep(c.delayMs);
-	const { json } = await c.api.get(c.api.codexTaskPath(id));
-	return checkCodexTask(json, id);
+	const client = await c.client();
+	// The turns' status and times, without their steps (small).
+	const turns: Record<string, unknown>[] = [];
+	let cursor: string | undefined;
+	for (let page = 0; ; page++) {
+		if (page >= MAX_TURN_PAGES) throw new StopError('The turns of a Codex task did not end after 50 pages – stopped.');
+		await c.sleep(c.delayMs);
+		const p = checkCodexTurns(await client.call('thread/turns/list', cursor ? { threadId: id, limit: TURN_PAGE, cursor } : { threadId: id, limit: TURN_PAGE }));
+		turns.push(...p.turns);
+		if (!p.cursor || p.turns.length === 0 || p.cursor === cursor) break;
+		cursor = p.cursor;
+	}
+	// The steps, oldest first, as the Codex page reads them.
+	const items: { turnId: string; item: Record<string, unknown> }[] = [];
+	cursor = undefined;
+	for (let page = 0; ; page++) {
+		if (page >= MAX_ITEM_PAGES) throw new StopError(`A Codex task had more than ${MAX_ITEM_PAGES * ITEM_PAGE} steps – stopped.`);
+		await c.sleep(c.delayMs);
+		const p = checkCodexItems(await client.call('thread/items/list', { threadId: id, cursor: cursor ?? null, limit: ITEM_PAGE, sortDirection: 'asc' }));
+		items.push(...p.items);
+		if (page > 0) c.progress(`reading a long Codex task… ${items.length} steps`);
+		if (!p.cursor || p.items.length === 0 || p.cursor === cursor) break;
+		cursor = p.cursor;
+	}
+	const all = joinTurns(turns, items);
+	// Off by default: the conversation only, steps counted (long runs carry tens of MB of output).
+	return { turns: c.account.web.codexCloudSteps ? all : interactionsOnly(all) };
 }
 
 /** Transcript and raw folders for a task, as the settings say today. */
@@ -82,10 +107,7 @@ export function codexCloudFolders(settings: Settings, account: ChatgptAccount, t
 
 function transcript(account: ChatgptAccount, task: CodexTask, t: CodexCloudTranscript, mdFolder: string, jsonPath: string): string {
 	const extra: [string, string][] = [];
-	if (task.environment) extra.push(['environment', task.environment]);
-	if (task.status) extra.push(['status', task.status]);
-	const pr = t.pullRequests[0];
-	if (pr) extra.push(['pull_request', pr.url]);
+	if (task.originator) extra.push(['started_from', task.originator]);
 	const md = renderDesktopTranscript(t.session, {
 		source: codexTaskUrl(task.id),
 		rawFileName: rawLink(mdFolder, jsonPath),
@@ -133,8 +155,13 @@ export async function syncCodexCloud(c: CodexCloudContext, r: CloudSyncResult): 
 	for (const [i, { task, entry }] of todo.entries()) {
 		c.progress(`${i + 1} of ${todo.length} Codex cloud tasks: ${task.title ?? task.id}`, i, todo.length);
 		const details = await fetchTask(c, task.id);
-		const parsed = parseCodexTask(task, details);
 		done.add(task.id);
+		if (turnsRunning(details)) {
+			// The list said done, the turns say still working: saved next time.
+			r.running++;
+			continue;
+		}
+		const parsed = parseCodexTask(task, details);
 		if (!parsed) {
 			// No message from you: remember the version so it is not fetched again until it changes.
 			index[task.id] = { ...(entry ?? { md: '', json: '' }), updated: versionOf(task), synced: new Date().toISOString() };
@@ -145,7 +172,7 @@ export async function syncCodexCloud(c: CodexCloudContext, r: CloudSyncResult): 
 		const before = entry?.md ? entry : undefined;
 		const today = codexCloudFolders(c.settings, account, task);
 		const folder = before ? dirOf(before.md) : today.md;
-		const stem = before ? stemOf(before.md) : freeStem(app, folder, baseName(parsed.session.created, parsed.session.title), task.id.replace(/^task_(?:e_)?/, ''), today.raw);
+		const stem = before ? stemOf(before.md) : freeStem(app, folder, baseName(parsed.session.created, parsed.session.title), task.id.replace(/-/g, '').slice(-8), today.raw);
 		const mdPath = before?.md ?? `${folder}/${stem}.md`;
 		const jsonPath = before?.json || `${today.raw}/${stem}.json`;
 		await ensureFolder(app, folder);

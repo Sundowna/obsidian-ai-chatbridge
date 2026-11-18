@@ -4,7 +4,7 @@
 //   <root>/Claude/Code-Cloud                   Claude Code sessions listed on claude.ai
 //   <root>/Claude/Code-Local/<computer>/<repo> Claude Code sessions on this computer
 //   <root>/ChatGPT/Chat/<project>              ChatGPT chats
-//   <root>/ChatGPT/Codex-Cloud/<repo>          Codex tasks run in the cloud (chatgpt.com/codex)
+//   <root>/ChatGPT/Codex-Cloud/<Tasks|Work>    Codex tasks run in the cloud (chatgpt.com/codex)
 //   <root>/ChatGPT/Codex-Local/<computer>      Codex threads on this computer
 //   <root>/Lumo/Chat, <root>/Gemini/Chat, <root>/Gemini/AI Studio
 //

@@ -13,7 +13,7 @@ import { cookieHeader, cookieValue, hasLoginFetch, isLoggedIn, loginFetch, login
 import { isChatId, isFileId, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
-import { isTaskId } from '../cloud/codex-cloud';
+import { CodexAppServer } from '../cloud/codex-app-server';
 import { describePage, fallbackCookie, findAccessToken, inventoryIdentity, maskSecrets } from './token';
 
 const ORIGIN = 'https://chatgpt.com';
@@ -29,10 +29,6 @@ const ALLOWED = [
 	/^\/backend-api\/estuary\/content$/,
 	/^\/backend-api\/memories$/,
 	/^\/backend-api\/user_system_messages$/,
-	// Codex cloud tasks: the addresses OpenAI's own Codex CLI uses for `codex cloud`
-	// (codex-rs/backend-client). Not yet confirmed in DevTools on chatgpt.com/codex.
-	/^\/backend-api\/wham\/tasks\/list$/,
-	/^\/backend-api\/wham\/tasks\/task_[A-Za-z0-9_-]{4,120}$/,
 ];
 
 /** The one path that is read with POST, always without a body (see the rules above). */
@@ -173,15 +169,10 @@ export class GptApi {
 		return `/backend-api/conversations/${id}/messages?before=${beforeMessageId}&num_turns=${NUM_TURNS}&include_has_versions=true`;
 	}
 
-	/** One page of the Codex cloud task list (as `codex cloud` asks for it). */
-	codexTasksPath(cursor?: string): string {
-		return `/backend-api/wham/tasks/list?limit=20&task_filter=current${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-	}
-
-	/** A Codex cloud task with its current turns. */
-	codexTaskPath(id: string): string {
-		if (!isTaskId(id)) throw new StopError('Refusing to fetch: Codex task ID has an odd format.');
-		return `/backend-api/wham/tasks/${id}`;
+	/** Codex's cloud connection (chatgpt.com/codex), with the same login key. Read only. */
+	async codexAppServer(pluginVersion: string): Promise<CodexAppServer> {
+		if (!this.token) throw new StopError('Not connected to ChatGPT yet.');
+		return CodexAppServer.open(this.token, pluginVersion, undefined, 180_000);
 	}
 
 	fileInfoPath(fileId: string, chatId: string): string {
@@ -320,8 +311,6 @@ export class GptApi {
 			throw new StopError('Blocked a request to a chatgpt.com address the plugin does not use.');
 		}
 		const headers = this.headers(accept, auth);
-		// Codex's own client names the workspace in a header; the chat addresses read it from the cookie.
-		if (url.pathname.startsWith('/backend-api/wham/') && this.workspaceId) headers['ChatGPT-Account-Id'] = this.workspaceId;
 		let res;
 		try {
 			res = await requestUrl({ url: url.toString(), method, headers, throw: false });

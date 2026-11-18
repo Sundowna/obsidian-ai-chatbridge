@@ -57,7 +57,7 @@
 | **Claude** (claude.ai) | Chats per project | Artifacts and uploads |
 | **Claude Code cloud** (claude.ai/code) | Sessions that ran in Anthropic's cloud, one folder per GitHub repository | Pasted images and files Claude wrote |
 | **ChatGPT** | Chats per project, archived chats optional; custom GPT chats go to `Recent` | Generated files and uploads |
-| **Codex cloud** (chatgpt.com/codex) | Tasks that ran in OpenAI's cloud, one folder per environment; off until you turn it on | The changes as a diff, the pull request as a link |
+| **Codex cloud** (chatgpt.com/codex) | Tasks that ran in OpenAI's cloud, started on chatgpt.com/codex or from ChatGPT; off until you turn it on | Every prompt and answer, steps counted, file changes as a diff |
 | **Gemini** | Chats | Pictures as links |
 | **Google AI Studio** | Chats and prompts | - |
 | **Proton Lumo** | Chats and projects, decrypted on your computer | Coming |
@@ -108,7 +108,7 @@ AI Chats/
 │               └── Attachments/…      ← images and files you attached
 ├── ChatGPT/
 │   ├── Chat/
-│   ├── Codex-Cloud/<repo>/            ← Codex tasks from chatgpt.com/codex (cloud)
+│   ├── Codex-Cloud/Tasks|Work/        ← Codex tasks run in the cloud
 │   └── Codex-Local/
 │       └── Tower/
 ├── Gemini/
@@ -230,13 +230,14 @@ Sessions that ran in Anthropic's cloud - on claude.ai/code, or started from the 
 
 ## Codex cloud tasks
 
-Tasks that Codex ran in OpenAI's cloud - on chatgpt.com/codex, or started from the ChatGPT app, GitHub or `codex cloud` - are saved with the ChatGPT sync, into the **Codex Cloud folder** (`ChatGPT/Codex-Cloud/<repo>/`), one subfolder per Codex environment (usually named after its GitHub repository).
+Tasks that Codex ran in OpenAI's cloud are saved with the ChatGPT sync, into the **Codex Cloud folder**: those started on chatgpt.com/codex in `ChatGPT/Codex-Cloud/Tasks/`, those started from ChatGPT (on the web, the phone, or a schedule) in `ChatGPT/Codex-Cloud/Work/`.
 
 - **Off until you turn it on**: ChatGPT tab → **Codex cloud tasks**. It uses the ChatGPT login the chat sync already has
-- The note says `app: "Codex (cloud)"`, names the `environment:`, the task's `status:` and its `pull_request:`, and links back to the task on chatgpt.com. Below your prompt and Codex's answer (tool steps counted, like local Codex threads) come the error if the task failed, the pull requests, and the changes as a folded diff. A diff over 200,000 characters stays in the raw `.json` only
-- A task that is still running is saved once it is done. A follow-up updates its one note; the version before stays as raw `.json`, so earlier turns are kept there
-- chatgpt.com sends a task's latest prompt and answer only, and of several attempts only the one shown. Earlier turns of a task you followed up before you turned this on are not saved
-- The plugin reads the same two chatgpt.com addresses that OpenAI's own Codex command-line tool uses for `codex cloud` (the task list and one task); it changes nothing on chatgpt.com
+- The note says `app: "Codex (cloud)"`, names the `model:` and where the task was `started_from:`, and links back to it on chatgpt.com. It holds every prompt and Codex's answers, with the steps in between counted (like local Codex threads). Then comes the error if the last turn failed, and - with **Keep Codex's steps** on - the files Codex changed with a folded diff. A diff over 200,000 characters stays in the raw `.json` only
+- A scheduled run is named after its schedule ("Agriland Market Watch"), not after its instructions
+- The raw `.json` keeps the conversation: your messages and Codex's answers, with each run of steps in between counted ("7 commands, 2 tool calls"). Scheduled runs can take thousands of steps with megabytes of output; turn on **Keep Codex's steps** to keep them all anyway (command output and tool results over 50,000 characters are then cut, marked "[cut N characters]"), and to get the changed files as a diff in the note
+- A task that is still running is saved once it is done. A follow-up updates its one note; the version before stays as raw `.json`
+- How it works: Codex on chatgpt.com keeps a live connection to `codex-cloud-backend.chatgpt.com`. The plugin opens the same connection with your ChatGPT login and only reads: the task list, each task's turns and its steps. It refuses to send anything that would start or change a task
 
 ## Hermes Agent
 

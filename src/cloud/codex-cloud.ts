@@ -1,262 +1,359 @@
 // Codex cloud tasks (chatgpt.com/codex). Pure code, no Obsidian.
 //
-// Shapes NOT yet seen in DevTools. They are taken from the client that OpenAI's own Codex CLI
-// uses for `codex cloud` (github.com/openai/codex, codex-rs/backend-client and
-// codex-rs/cloud-tasks-client, read 2026-11-18). That client calls the same chatgpt.com
-// addresses with the same login key as the website:
-//   GET chatgpt.com/backend-api/wham/tasks/list?limit=…&task_filter=current&cursor=…
-//     -> { items: [task], cursor? }  task: { id, title, has_generated_title, created_at, updated_at
-//        (seconds since 1970, with fractions), archived, has_unread_turn, pull_requests?,
-//        task_status_display: { environment_label?, latest_turn_status_display: { turn_status,
-//        diff_stats: { files_modified, lines_added, lines_removed }, sibling_turn_ids } } }
-//   GET chatgpt.com/backend-api/wham/tasks/<id>
-//     -> { task: { id, title, created_at, current_turn_id, archived, external_pull_requests: [
-//          { pull_request: { number, url, state, merged, title, base, head } }] },
-//          current_user_turn, current_assistant_turn, current_diff_task_turn }
-//     turn: { id, created_at?, turn_status, input_items: [item], output_items: [item],
-//             worklog: { messages: [{ author: { role }, content: { parts: [text | { content_type, text }] } }] },
-//             error?: { code, message } }
-//     item: { type: "message", role, content: [text | { content_type: "text", text }] }
-//         | { type: "output_diff", diff } | { type: "pr", output_diff: { diff } }
-// Only the task's current turns are sent. When a task goes on (a follow-up), its note is
-// rewritten and the version before stays as raw .json (see versions.ts), so nothing is lost.
+// Shapes seen in DevTools on 2026-11-18, over the Codex app-server connection (codex-app-server.ts):
+//   thread/list { limit, cursor? }
+//     -> { data: [thread], nextCursor }   newest first
+//     thread: { id (UUID), name (the first prompt, cut, or null), createdAt, updatedAt (seconds since
+//               1970), status: { type: "idle" | "active" … }, originator ("codex_cloud" = started on
+//               chatgpt.com/codex, "codex_work_web" / "codex_work_mobile" = started from ChatGPT),
+//               model, reasoningEffort, environments: [{ environmentId, cwd }], turns: [] }
+//   thread/turns/list { threadId, limit, cursor? }
+//     -> { data: [turn], nextCursor }      newest first; nextCursor goes back in time
+//     turn: { id, status ("completed", "interrupted", "failed", "inProgress"), error, startedAt,
+//             completedAt, items: [], itemsView: "notLoaded" }
+//     (itemsView "full" would bring the items too, but hangs on long tasks – seen with 10 MB.)
+//   thread/items/list { threadId, cursor, limit, sortDirection: "asc" }
+//     -> { data: [{ turnId, item, startedAtMs, completedAtMs }], nextCursor, backwardsCursor }
+//     This is how the Codex page itself reads a task's steps.
+//     item: { type: "userMessage", content: [{ type: "text", text }] }
+//         | { type: "agentMessage", text, phase: "commentary" | "final_answer" }
+//         | { type: "commandExecution", command, exitCode, aggregatedOutput }
+//         | { type: "mcpToolCall", server, tool, arguments, result }
+//         | { type: "reasoning" } (empty) | { type: "fileChange", changes: [{ path, kind, diff }] }
+//     every item has startedAtMs / completedAtMs.
+// thread/read does not take includeTurns.
+// When a task goes on (a follow-up turn), its note is rewritten and the version before stays as
+// raw .json (see versions.ts), so nothing is lost.
 
 import { obj, str, TurnBuilder } from '../desktop/turns';
 import type { DesktopSession } from '../desktop/types';
-import { safeTitle } from '../naming';
 
 export class CodexCloudShapeError extends Error {}
 
-/** Task IDs as the Codex CLI shows them ("task_e_…"). Anything else is refused before a request. */
-export const isTaskId = (id: string): boolean => /^task_[A-Za-z0-9_-]{4,120}$/.test(id);
+/** Thread IDs are UUIDs ("6afdb9e6-40c4-8191-a1c1-04b03bf000fe"). Anything else is refused. */
+export const isThreadId = (id: string): boolean => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
 export interface CodexTask {
 	id: string;
+	/** Codex's name for it: usually the first prompt, cut off. */
 	title?: string;
 	/** ISO times. */
 	created_at?: string;
 	updated_at?: string;
-	/** "completed", "failed", "cancelled", "pending", "in_progress" (latest turn). */
+	/** status.type: "idle" when nothing runs, "active" while Codex works. */
 	status?: string;
-	/** The environment the task ran in, usually named after its repository ("me/notes-app"). */
-	environment?: string;
-	archived: boolean;
+	/** Where it was started: codex_cloud, codex_work_web, codex_work_mobile … */
+	originator?: string;
+	model?: string;
 	/** The list entry exactly as chatgpt.com sent it, saved in the raw file. */
 	raw: Record<string, unknown>;
 }
 
 export interface CodexTaskDetails {
-	/** The answer exactly as chatgpt.com sent it, saved in the raw file. */
-	raw: Record<string, unknown>;
+	/** All turns, oldest first, exactly as chatgpt.com sent them. */
+	turns: Record<string, unknown>[];
 }
 
-/** Seconds since 1970 (as the task list sends them) or an ISO string -> ISO string. */
+/** Seconds since 1970 or milliseconds or an ISO string -> ISO string. */
 function isoOf(v: unknown): string | undefined {
-	if (typeof v === 'number' && Number.isFinite(v) && v > 0) return new Date(v * 1000).toISOString();
+	if (typeof v === 'number' && Number.isFinite(v) && v > 0) return new Date(v > 1e12 ? v : v * 1000).toISOString();
 	if (typeof v === 'string' && v && !Number.isNaN(Date.parse(v))) return new Date(v).toISOString();
 	return undefined;
 }
 
-function latestTurn(display: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-	return obj(display?.latest_turn_status_display);
-}
-
-/** One page of the task list. Throws CodexCloudShapeError if it does not look as expected. */
-export function checkCodexList(json: unknown): { tasks: CodexTask[]; cursor?: string } {
+const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const page = (json: unknown, what: string): { data: unknown[]; cursor?: string } => {
 	const o = obj(json);
-	if (!o || !Array.isArray(o.items)) throw new CodexCloudShapeError('Codex task list: no "items" list');
-	const tasks = o.items.map((x, i) => {
+	if (!o || !Array.isArray(o.data)) throw new CodexCloudShapeError(`${what}: no "data" list`);
+	return { data: o.data, cursor: str(o.nextCursor) || undefined };
+};
+
+/** One page of thread/list. Throws CodexCloudShapeError if it does not look as expected. */
+export function checkCodexList(json: unknown): { tasks: CodexTask[]; cursor?: string } {
+	const p = page(json, 'Codex task list');
+	const tasks = p.data.map((x, i) => {
 		const r = obj(x);
 		const id = str(r?.id);
 		if (!r || !id) throw new CodexCloudShapeError(`Codex task list: entry ${i} has no id`);
-		if (!isTaskId(id)) throw new CodexCloudShapeError(`Codex task list: entry ${i} has an odd id`);
-		const display = obj(r.task_status_display);
+		if (!isThreadId(id)) throw new CodexCloudShapeError(`Codex task list: entry ${i} has an odd id`);
 		return {
 			id,
-			title: str(r.title),
-			created_at: isoOf(r.created_at),
-			updated_at: isoOf(r.updated_at),
-			status: str(latestTurn(display)?.turn_status) ?? str(display?.state),
-			environment: str(display?.environment_label),
-			archived: r.archived === true,
+			title: str(r.name)?.trim() || undefined,
+			created_at: isoOf(r.createdAt),
+			updated_at: isoOf(r.updatedAt),
+			status: str(obj(r.status)?.type),
+			originator: str(r.originator),
+			model: str(r.model),
 			raw: r,
 		};
 	});
-	return { tasks, cursor: str(o.cursor) || undefined };
+	return { tasks, cursor: p.cursor };
 }
 
-/** A task's details. Throws CodexCloudShapeError if it does not look as expected. */
-export function checkCodexTask(json: unknown, id: string): CodexTaskDetails {
-	const o = obj(json);
-	const task = obj(o?.task);
-	if (!o || !task) throw new CodexCloudShapeError('Codex task: no "task"');
-	if (str(task.id) !== id) throw new CodexCloudShapeError('Codex task: answer is for another task');
-	for (const k of ['current_user_turn', 'current_assistant_turn', 'current_diff_task_turn']) {
-		if (o[k] !== undefined && o[k] !== null && !obj(o[k])) throw new CodexCloudShapeError(`Codex task: "${k}" is not an object`);
+/** One page of thread/turns/list: the turns' status and times (their items may be left out). */
+export function checkCodexTurns(json: unknown): { turns: Record<string, unknown>[]; cursor?: string } {
+	const p = page(json, 'Codex task turns');
+	const turns = p.data.map((x, i) => {
+		const t = obj(x);
+		if (!t || !str(t.id)) throw new CodexCloudShapeError(`Codex task turns: turn ${i} has no id`);
+		if (t.items !== undefined && !Array.isArray(t.items)) throw new CodexCloudShapeError(`Codex task turns: turn ${i} has odd items`);
+		return t;
+	});
+	return { turns, cursor: p.cursor };
+}
+
+/** Longest text kept per field of a step (command output, tool results). Words are never cut. */
+export const MAX_STEP_TEXT = 50_000;
+
+/**
+ * A step with its long texts cut to `max` characters, marked "…[cut N characters]".
+ * Long scheduled runs carry megabytes of command output per step – whole, the raw file of one
+ * task outgrew what JavaScript can hold as one text (seen 2026-11-18). Your messages and
+ * Codex's answers are kept whole.
+ */
+export function trimStep(item: Record<string, unknown>, max = MAX_STEP_TEXT): Record<string, unknown> {
+	if (item.type === 'userMessage' || item.type === 'agentMessage') return item;
+	const cut = (v: unknown): unknown => {
+		if (typeof v === 'string') return v.length > max ? `${v.slice(0, max)}…[cut ${v.length - max} characters]` : v;
+		if (Array.isArray(v)) return v.map(cut);
+		if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cut(x)]));
+		return v;
+	};
+	return cut(item) as Record<string, unknown>;
+}
+
+/**
+ * Only the conversation: your messages and Codex's answers. Each run of other steps between them
+ * becomes one placeholder { type: "stepsSkipped", count, kinds: { commandExecution: 7, … } }, so the note still counts them
+ * where they happened. Reasoning (empty anyway) is dropped. A long scheduled run shrinks from
+ * tens of MB to a few KB this way.
+ */
+export function interactionsOnly(turns: Record<string, unknown>[]): Record<string, unknown>[] {
+	return turns.map((turn) => {
+		const out: Record<string, unknown>[] = [];
+		let run: { type: 'stepsSkipped'; count: number; kinds: Record<string, number>; startedAtMs?: unknown } | null = null;
+		for (const x of list(turn.items)) {
+			const item = obj(x);
+			const type = str(item?.type);
+			if (!item || !type || type === 'reasoning') continue;
+			if (type === 'userMessage' || type === 'agentMessage') {
+				run = null;
+				out.push(item);
+			} else if (type === 'stepsSkipped') {
+				run = null;
+				out.push(item); // already filtered before
+			} else {
+				if (!run) {
+					run = { type: 'stepsSkipped', count: 0, kinds: {}, startedAtMs: item.startedAtMs };
+					out.push(run);
+				}
+				run.count++;
+				run.kinds[type] = (run.kinds[type] ?? 0) + 1;
+			}
+		}
+		return { ...turn, items: out };
+	});
+}
+
+/** One page of thread/items/list: { turnId, item } entries, oldest first. */
+export function checkCodexItems(json: unknown): { items: { turnId: string; item: Record<string, unknown> }[]; cursor?: string } {
+	const p = page(json, 'Codex task steps');
+	const items = p.data.map((x, i) => {
+		const e = obj(x);
+		const turnId = str(e?.turnId);
+		const item = obj(e?.item);
+		if (!turnId || !item || !str(item.type)) throw new CodexCloudShapeError(`Codex task steps: entry ${i} has no turn or no item`);
+		return { turnId, item: trimStep(item) };
+	});
+	return { items, cursor: p.cursor };
+}
+
+/**
+ * The turns (oldest first) with their items filled in from thread/items/list, as one list.
+ * Items of a turn the turn list did not name get a turn of their own, so nothing is dropped.
+ */
+export function joinTurns(turns: Record<string, unknown>[], items: { turnId: string; item: Record<string, unknown> }[]): Record<string, unknown>[] {
+	const byTurn = new Map<string, Record<string, unknown>[]>();
+	for (const { turnId, item } of items) {
+		const seen = byTurn.get(turnId);
+		if (seen) {
+			if (!seen.some((x) => x.id !== undefined && x.id === item.id)) seen.push(item);
+		} else byTurn.set(turnId, [item]);
 	}
-	return { raw: o };
-}
-
-/** Still working: wait, like Code Local waits for a quiet session. */
-export const isRunning = (t: CodexTask): boolean => t.status === 'pending' || t.status === 'in_progress';
-
-/** The version of a task: changes when it goes on. */
-export const versionOf = (t: CodexTask): string => t.updated_at ?? t.created_at ?? '';
-
-/** Text of one content fragment: a plain string or { content_type: "text", text }. */
-function fragmentText(f: unknown): string | undefined {
-	if (typeof f === 'string') return f.trim() ? f : undefined;
-	const o = obj(f);
-	if (!o) return undefined;
-	const type = str(o.content_type);
-	if (type && type.toLowerCase() !== 'text') return undefined;
-	const t = str(o.text);
-	return t?.trim() ? t : undefined;
-}
-
-const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-const texts = (content: unknown): string[] => list(content).flatMap((f) => fragmentText(f) ?? []);
-
-/** The unified diff of a turn, if it made changes. */
-function turnDiff(turn: Record<string, unknown> | undefined): string | undefined {
-	for (const x of list(turn?.output_items)) {
-		const item = obj(x);
-		if (!item) continue;
-		if (item.type === 'output_diff' && str(item.diff)) return str(item.diff);
-		if (item.type === 'pr' && str(obj(item.output_diff)?.diff)) return str(obj(item.output_diff)?.diff);
-	}
-	return undefined;
-}
-
-export interface CodexPullRequest {
-	number?: number;
-	url: string;
-	title?: string;
-	state?: string;
-	merged?: boolean;
-}
-
-function pullRequests(details: CodexTaskDetails): CodexPullRequest[] {
-	const out: CodexPullRequest[] = [];
-	for (const x of list(obj(details.raw.task)?.external_pull_requests)) {
-		const pr = obj(obj(x)?.pull_request);
-		const url = str(pr?.url);
-		if (!pr || !url || !/^https:\/\//.test(url)) continue;
-		out.push({ number: typeof pr.number === 'number' ? pr.number : undefined, url, title: str(pr.title), state: str(pr.state), merged: pr.merged === true });
+	const out: Record<string, unknown>[] = orderTurns(turns).map((t) => ({ ...t, items: byTurn.get(str(t.id)!) ?? [], itemsView: 'full' }));
+	for (const [turnId, its] of byTurn) {
+		if (!out.some((t) => t.id === turnId)) out.push({ id: turnId, items: its, itemsView: 'full' });
 	}
 	return out;
 }
 
+/** Turns gathered from all pages, oldest first, each once. */
+export function orderTurns(turns: Record<string, unknown>[]): Record<string, unknown>[] {
+	const seen = new Set<string>();
+	const once = turns.filter((t) => {
+		const id = str(t.id)!;
+		return !seen.has(id) && seen.add(id);
+	});
+	const at = (t: Record<string, unknown>) => (typeof t.startedAt === 'number' ? t.startedAt : 0);
+	return once.sort((a, b) => at(a) - at(b));
+}
+
+/** Codex is still working on it: wait, like Code Local waits for a quiet session. */
+export const isRunning = (t: CodexTask): boolean => t.status === 'active';
+
+/** The last turn is still running (seen after fetching, when the list said idle). */
+export const turnsRunning = (d: CodexTaskDetails): boolean => {
+	const last = d.turns[d.turns.length - 1];
+	return !!last && /^(inProgress|in_progress|running|pending)$/.test(str(last.status) ?? '');
+};
+
+/** The version of a task: changes when it goes on. */
+export const versionOf = (t: CodexTask): string => t.updated_at ?? t.created_at ?? '';
+
+function userText(item: Record<string, unknown>): string {
+	return list(item.content)
+		.map(obj)
+		.filter((c) => c && (c.type === undefined || c.type === 'text'))
+		.map((c) => str(c!.text) ?? '')
+		.filter((t) => t.trim())
+		.join('\n\n');
+}
+
+export interface CodexFileChange {
+	path: string;
+	kind?: string;
+	diff?: string;
+}
+
 export interface CodexCloudTranscript {
 	session: DesktopSession;
-	diff?: string;
-	pullRequests: CodexPullRequest[];
+	/** Files changed in fileChange steps, with their diffs. */
+	changes: CodexFileChange[];
 	error?: string;
 }
 
+/** Steps that are not words: commands, tool calls, file edits, searches … */
+const TOOL_ITEMS = /^(commandExecution|mcpToolCall|fileChange|webSearch|imageView|dynamicToolCall|collabAgentToolCall|toolCall|functionCall)$/;
+
 /**
  * The task as a session (like a local Codex thread), or null if it has no message from you.
- * Assistant messages and the steps in its work log come in the order the turn lists them;
- * work-log entries that are not the assistant's own words (commands, tool output) are counted
- * as tool steps, like the local sessions.
+ * Messages come in the order the turns list them; steps that are not words are counted as
+ * tool steps, like the local sessions. Reasoning is left out (it is empty anyway).
  */
 export function parseCodexTask(task: CodexTask, details: CodexTaskDetails): CodexCloudTranscript | null {
-	const d = details.raw;
-	const user = obj(d.current_user_turn);
-	const assistant = obj(d.current_assistant_turn);
-	const diffTurn = obj(d.current_diff_task_turn);
 	const t = new TurnBuilder();
-
-	const prompt = list(user?.input_items)
-		.map(obj)
-		.filter((i) => i?.type === 'message' && (str(i.role) ?? 'user').toLowerCase() === 'user')
-		.flatMap((i) => texts(i?.content))
-		.join('\n\n');
-	if (!prompt.trim()) return null;
-	const created = isoOf(user?.created_at) ?? task.created_at ?? versionOf(task);
-	t.user(prompt, created);
-
-	const answerTime = isoOf(assistant?.created_at) ?? isoOf(diffTurn?.created_at);
-	for (const turn of [diffTurn, assistant]) {
-		if (!turn) continue;
-		for (const x of list(obj(turn.worklog)?.messages)) {
-			const m = obj(x);
-			const role = str(obj(m?.author)?.role)?.toLowerCase();
-			const words = list(obj(m?.content)?.parts).flatMap((f) => fragmentText(f) ?? []);
-			if (role === 'assistant' && words.length) t.assistant(words.join('\n\n'), answerTime);
-			else if (role && role !== 'user' && role !== 'system') t.tool(answerTime);
-		}
-		for (const x of list(turn.output_items)) {
+	const changes: CodexFileChange[] = [];
+	let first: string | undefined;
+	let created: string | undefined;
+	for (const turn of details.turns) {
+		for (const x of list(turn.items)) {
 			const item = obj(x);
-			if (item?.type === 'message') {
-				const words = texts(item.content);
-				if (words.length) t.assistant(words.join('\n\n'), answerTime);
+			const type = str(item?.type);
+			if (!item || !type) continue;
+			const time = isoOf(item.startedAtMs) ?? isoOf(turn.startedAt);
+			if (type === 'userMessage') {
+				const text = userText(item);
+				if (!text.trim()) continue;
+				first ??= text;
+				created ??= time;
+				t.user(text, time);
+			} else if (type === 'agentMessage') {
+				t.assistant(str(item.text) ?? '', time);
+			} else if (type === 'stepsSkipped') {
+				const n = typeof item.count === 'number' && item.count > 0 ? item.count : 0;
+				if (n) t.tool(time, n);
+			} else if (TOOL_ITEMS.test(type)) {
+				t.tool(time);
+				if (type === 'fileChange') {
+					for (const c of list(item.changes)) {
+						const ch = obj(c);
+						const path = str(ch?.path);
+						if (path) changes.push({ path, kind: str(obj(ch!.kind)?.type) ?? str(ch!.kind), diff: str(ch!.diff) });
+					}
+				}
 			}
 		}
 	}
+	if (!first) return null;
 
-	const err = obj(assistant?.error);
-	const error = [str(err?.code), str(err?.message)].filter(Boolean).join(': ') || undefined;
+	const last = details.turns[details.turns.length - 1];
+	const err = obj(last?.error);
+	const lastStatus = str(last?.status);
+	const error = str(err?.message) ?? (lastStatus === 'failed' ? 'The last turn failed.' : undefined);
+	const created0 = created ?? task.created_at ?? versionOf(task);
 	const session: DesktopSession = {
 		app: 'codex',
 		id: task.id,
-		title: task.title?.trim() || str(obj(d.task)?.title)?.trim() || prompt.split('\n')[0]!.slice(0, 80),
-		created,
-		updated: versionOf(task) || created,
+		title: titleOf(task, first),
+		created: created0,
+		updated: versionOf(task) || created0,
+		model: task.model,
 		isSubagent: false,
-		turns: t.turns,
+		turns: t.result(),
 	};
-	return { session, diff: turnDiff(diffTurn) ?? turnDiff(assistant), pullRequests: pullRequests(details), error };
+	return { session, changes, error };
 }
 
-/** Subfolder for a task: its environment's repository name. */
+/** Codex's name, unless it is just the prompt cut off: then the prompt's first line. */
+function titleOf(task: CodexTask, prompt: string): string {
+	// A scheduled run from ChatGPT starts with its instructions; they name the schedule.
+	if (/^System instruction \(automation runtime/.test(prompt.trim())) {
+		const scheduled = /^- Title: (.+)$/m.exec(prompt)?.[1]?.trim();
+		if (scheduled) return scheduled;
+	}
+	const line = prompt.trim().split('\n')[0]!.trim();
+	const name = task.title?.replace(/…$/, '').trim();
+	if (name && !line.startsWith(name)) return name;
+	return line.length > 80 ? `${line.slice(0, 80).trim()}…` : line;
+}
+
+/** Subfolder for a task: where it was started. */
 export function codexFolderName(task: CodexTask, fallback: string): string {
-	const name = task.environment?.trim().split('/').pop();
-	return name ? safeTitle(name) : fallback;
+	const o = task.originator ?? '';
+	if (o === 'codex_cloud') return 'Tasks';
+	if (o.startsWith('codex_work')) return 'Work';
+	return fallback;
 }
 
 /** Where the task can be opened on chatgpt.com. */
-export const codexTaskUrl = (id: string): string => `https://chatgpt.com/codex/tasks/${id}`;
+export const codexTaskUrl = (id: string): string => `https://chatgpt.com/local/${id}`;
 
 /** Diffs above this are left in the raw file only, so a note stays readable. */
 export const MAX_NOTE_DIFF = 200_000;
 
-/** The "Changes" part of the note: pull requests, error and the diff in a folded callout. */
+/** The end of the note: the error of the last turn and the files changed, diff folded. */
 export function codexChangesSection(t: CodexCloudTranscript): string {
 	const out: string[] = [];
 	if (t.error) out.push('## Error', '', t.error, '');
-	if (t.pullRequests.length) {
-		out.push('## Pull requests', '');
-		for (const pr of t.pullRequests) {
-			const state = pr.merged ? 'merged' : pr.state;
-			out.push(`- [${pr.number ? `#${pr.number} ` : ''}${(pr.title ?? pr.url).replace(/[[\]]/g, '')}](${pr.url})${state ? ` (${state})` : ''}`);
-		}
-		out.push('');
-	}
-	if (t.diff) {
-		const files = new Set([...t.diff.matchAll(/^diff --git a\/(\S+)/gm)].map((m) => m[1]));
-		const added = (t.diff.match(/^\+(?!\+\+)/gm) ?? []).length;
-		const removed = (t.diff.match(/^-(?!--)/gm) ?? []).length;
+	if (t.changes.length) {
+		const diff = t.changes.map((c) => c.diff ?? '').filter(Boolean).join('\n');
+		const files = new Set(t.changes.map((c) => c.path));
+		const added = (diff.match(/^\+(?!\+\+)/gm) ?? []).length;
+		const removed = (diff.match(/^-(?!--)/gm) ?? []).length;
 		out.push('## Changes', '', `${files.size} file${files.size === 1 ? '' : 's'}, +${added} −${removed}`, '');
-		if (t.diff.length > MAX_NOTE_DIFF) out.push('*The diff is too long for the note; it is in the raw file.*', '');
-		else {
-			const longest = Math.max(2, ...[...t.diff.matchAll(/`+/g)].map((m) => m[0].length));
+		for (const f of files) out.push(`- \`${f.replace(/`/g, '')}\``);
+		out.push('');
+		if (diff.length > MAX_NOTE_DIFF) out.push('*The diff is too long for the note; it is in the raw file.*', '');
+		else if (diff) {
+			const longest = Math.max(2, ...[...diff.matchAll(/`+/g)].map((m) => m[0].length));
 			const fence = '`'.repeat(longest + 1);
-			out.push('> [!diff]- Diff', ...`${fence}diff\n${t.diff.replace(/\n$/, '')}\n${fence}`.split('\n').map((l) => `> ${l}`), '');
+			out.push('> [!diff]- Diff', ...`${fence}diff\n${diff.replace(/\n$/, '')}\n${fence}`.split('\n').map((l) => `> ${l}`), '');
 		}
 	}
 	return out.join('\n');
 }
 
-/** What is saved as the raw file: the list entry and the task's details. */
+/** What is saved as the raw file: the list entry and all turns. */
 export function codexRaw(task: CodexTask, details: CodexTaskDetails): string {
-	return JSON.stringify({ task: task.raw, details: details.raw }, null, 1);
+	// No indentation: long tasks are big enough as it is.
+	return JSON.stringify({ thread: task.raw, turns: details.turns });
 }
 
 /** Reads a raw file written by codexRaw back. */
 export function parseCodexRaw(text: string): { task: CodexTask; details: CodexTaskDetails } {
 	const o = obj(JSON.parse(text) as unknown);
 	if (!o) throw new CodexCloudShapeError('saved Codex task: not an object');
-	const { tasks } = checkCodexList({ items: [o.task] });
-	return { task: tasks[0]!, details: checkCodexTask(o.details, tasks[0]!.id) };
+	const { tasks } = checkCodexList({ data: [o.thread] });
+	const { turns } = checkCodexTurns({ data: o.turns });
+	return { task: tasks[0]!, details: { turns: orderTurns(turns) } };
 }

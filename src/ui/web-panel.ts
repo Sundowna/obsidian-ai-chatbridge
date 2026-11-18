@@ -196,10 +196,19 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 		);
 	new Setting(el)
 		.setName('Codex cloud tasks')
-		.setDesc('Also save the Codex tasks that ran in the cloud (Codex on the ChatGPT website), in the folder set above, one subfolder per environment: your prompt, Codex\'s answer, the pull request and the changes as a diff. A task still running is saved once it is done. Off until you turn it on.')
+		.setDesc('Also save the Codex tasks that ran in the cloud – started on chatgpt.com/codex or from ChatGPT – in the folder set above (subfolders Tasks and Work): your prompts and Codex\'s answers, with its steps counted. A task still running is saved once it is done. Off until you turn it on.')
 		.addToggle((t) =>
 			t.setValue(g.codexCloud).onChange(async (v) => {
 				g.codexCloud = v;
+				await save();
+			}),
+		);
+	new Setting(el)
+		.setName('Keep Codex\'s steps')
+		.setDesc('Also keep every command, tool call and file edit of a Codex cloud task in its raw .json, with the changed files as a diff in the note. Long scheduled runs make raw files of 50 MB and more. Off: only the conversation is kept, and the steps are counted.')
+		.addToggle((t) =>
+			t.setValue(g.codexCloudSteps === true).onChange(async (v) => {
+				g.codexCloudSteps = v;
 				await save();
 			}),
 		);

@@ -528,9 +528,12 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			requestStage = 'reading Codex cloud tasks';
 			requestChat = undefined;
 			const cloud = (result.codexCloud = emptyCloudResult());
+			let codex: Awaited<ReturnType<GptApi['codexAppServer']>> | undefined;
+			const client = async () => (codex ??= await a.codexAppServer(plugin.manifest.version));
 			try {
-				await syncCodexCloud({ app, settings: s, account, api: a, delayMs, progress, save: () => plugin.saveSettings(), sleep }, cloud);
+				await syncCodexCloud({ app, settings: s, account, client, delayMs, progress, save: () => plugin.saveSettings(), sleep }, cloud);
 			} finally {
+				codex?.close();
 				addCodexCloud(result, cloud);
 			}
 		}
@@ -602,8 +605,13 @@ async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyn
 	if (r.tooLong.length) parts.push(`too long to load in one piece, skipped: ${r.tooLong.join(', ')}`);
 	if (r.projectsCut) parts.push('more projects exist than chatgpt.com listed – chats in unlisted projects use the project ID as folder name');
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
-	if (r.codexCloud && (r.codexCloud.written.length || r.codexCloud.restored.length)) parts.push(`incl. ${r.codexCloud.written.length + r.codexCloud.restored.length} Codex cloud tasks`);
-	if (r.codexCloud?.running) parts.push(`${r.codexCloud.running} Codex cloud tasks still running (saved when done)`);
+	// Suggested by a Codex cloud task (2026-11-18): always say that Codex was looked at.
+	if (r.codexCloud) {
+		const { listed, written, restored, running } = r.codexCloud;
+		const saved = written.length + restored.length;
+		parts.push(`${listed} Codex cloud ${listed === 1 ? 'task' : 'tasks'}${listed ? ' listed' : ''}${saved ? `, ${saved} saved` : ''}`);
+		if (running) parts.push(`${running} Codex cloud tasks still running (saved when done)`);
+	}
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount('ChatGPT', plugin.settings.chatgpt, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');

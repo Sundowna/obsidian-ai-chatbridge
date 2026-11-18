@@ -108,11 +108,13 @@ export interface GptSettings {
 	chatProgress?: ChatCounts & { inventoryKey: string; scope: string };
 	/** Also save the Codex tasks run in the cloud (chatgpt.com/codex) into the Codex Cloud folder. */
 	codexCloud: boolean;
-	/** Folder for Codex cloud tasks (one subfolder per environment). */
+	/** Folder for Codex cloud tasks (subfolders Tasks = started on chatgpt.com/codex, Work = started from ChatGPT). */
 	codexCloudFolder: string;
 	/** Folder for their raw .json. Empty = next to the transcripts. */
 	codexCloudRawFolder?: string;
-	/** Codex cloud task ID ("task_…") -> what was saved. */
+	/** Keep every step (commands, tool calls, file edits) in the raw .json. Off = the conversation only. */
+	codexCloudSteps?: boolean;
+	/** Codex cloud thread ID (a UUID) -> what was saved. */
 	codexCloudIndex?: Record<string, CloudIndexEntry>;
 }
 
@@ -251,7 +253,7 @@ export const DEFAULT_GPT: GptSettings = {
 	projects: [],
 	index: {},
 	fileIndex: {},
-	// Off until you turn it on: the Codex addresses come from Codex's own client, not yet from DevTools.
+	// Off until you turn it on: it opens a second connection to chatgpt.com (Codex's own).
 	codexCloud: false,
 	codexCloudFolder: FIRST.codexCloud,
 };

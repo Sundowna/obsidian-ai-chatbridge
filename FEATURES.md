@@ -114,7 +114,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Project picker: Fetch projects / Refresh list / Fetching… (cta only before first fetch), status with indeterminate bar, error text, "N of M selected · K with own folder", "Fetched … ago", filter box from 9 rows, Select all/Clear become Select shown/Clear shown while filtering, tags **New** and **Not found**, chat counts, warnings (nothing selected, catalog note), per-row transcript and JSON folder lines with greyed default, reset, invalid state; only the picker redraws on a tick
 - [ ] Lumo: project list fetched once per settings opening, full list in memory only, only selected names saved
 - [ ] Claude: Claude Code cloud sessions toggle; Advanced: Session key (secret storage), Organization ID (UUID check)
-- [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
+- [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Keep Codex's steps toggle (off by default); Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
 - [ ] Gemini: "What is saved" note; Advanced: Google cookies. AI Studio: Sync AI Studio toggle, own folder
 - [ ] Lumo: Encryption note
 - [ ] Desktop app panel: Sync desktop sessions toggle (rest hidden while off), **Sync now**, Code Local / Codex Local folder, Raw session folder (only with Keep the raw session file), Reads from (roots and account matching text), Advanced: Extra session folders
@@ -172,14 +172,19 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Backfill of missing or deleted files for older chats, transcripts untouched
 - [ ] Cloud sessions (claude.ai/code): per repo folder, saved when done, counted in totals
 
-## 6a. Codex cloud [code: cloud/codex-cloud.ts, cloud/codex-sync.ts, covered by `npm run test:codex-cloud`]
+## 6a. Codex cloud [code: cloud/codex-app-server.ts, cloud/codex-cloud.ts, cloud/codex-sync.ts, covered by `npm run test:codex-cloud`]
 
-- [ ] Off by default per ChatGPT account (`codexCloud`); runs after the chats inside the ChatGPT sync, same login, delay, per-run limit, Stop and 429 cooldown; counted in the run's totals and named in the log ("incl. N Codex cloud tasks", "N still running")
-- [ ] Reads only `GET /backend-api/wham/tasks/list?limit=20&task_filter=current&cursor=…` and `GET /backend-api/wham/tasks/<task_…>` (addresses from OpenAI's Codex CLI, not yet confirmed in DevTools); `ChatGPT-Account-Id` header with the workspace ID on these two only; task ID shape checked before a request
-- [ ] Unexpected shape stops with "Unexpected Codex cloud task data", nothing more written
-- [ ] Folder `<Codex Cloud folder>/<environment's repo name>` (with project subfolders on; `Other` without an environment); raw `.json` (`{ task, details }`) mirrored under the raw files folder or the Codex Cloud JSON folder; older vaults get the folder beside their own `ChatGPT/Chat`
-- [ ] Note: `app: "Codex (cloud)"`, `session`, `environment`, `status`, `pull_request`, `source` (chatgpt.com/codex/tasks/<id>), `account`; You / Codex turns, work-log entries that are not the assistant's words counted as tool steps; then Error, Pull requests, Changes (file count, +/−, diff in a folded `[!diff]-` callout, fence longer than any backtick run; over 200,000 characters only in the raw file)
-- [ ] Running (`pending`, `in_progress`) waits; no prompt = remembered, nothing written; unchanged `updated_at` = not fetched
+- [ ] Off by default per ChatGPT account (`codexCloud`); runs after the chats inside the ChatGPT sync, same login key, delay, per-run limit and Stop; counted in the run's totals; the log always names it when on ("0 Codex cloud tasks" or "N Codex cloud tasks listed, M saved", plus "N still running")
+- [ ] Connection: websocket `wss://codex-cloud-backend.chatgpt.com/`, sub-protocols `codex-app-server`, `codex-client.browser`, `openai-bearer.<access token>`; `initialize` (client name `obsidian-ai-chatbridge`, plugin version) then `initialized`; opened only when the sync reaches Codex, closed after it; 180 s per answer
+- [ ] Read only: the client refuses any method but `thread/list`, `thread/turns/list` (without items) and `thread/items/list` (`sortDirection: "asc"`, 200 per page) before sending; thread IDs must be UUIDs; the login key never appears in an error
+- [ ] Refused connection says to log in again; an error answer stops with its message; unexpected shape stops with "Unexpected Codex cloud task data", nothing more written
+- [ ] Turns (newest first, paged back) and steps joined: turns oldest first, steps back in their turn, steps of an unnamed turn kept as a turn of their own
+- [ ] **Keep Codex's steps** toggle (`codexCloudSteps`, off by default): off = raw keeps only `userMessage` and `agentMessage` items; each run of other steps between them becomes one `{ type: "stepsSkipped", count, kinds }` placeholder (reasoning dropped), so the note counts the same tool steps; no Changes section then. Long scheduled runs: 474 MB → a few MB for 21 tasks
+- [ ] With steps kept: step texts other than your messages and Codex's answers cut to 50,000 characters each in the raw file, marked "…[cut N characters]" (long scheduled runs carry megabytes of command output); raw `.json` (`{ thread, turns }`) without indentation
+- [ ] Folder `<Codex Cloud folder>/Tasks` (started on chatgpt.com/codex, `codex_cloud`) or `/Work` (started from ChatGPT, `codex_work_web` / `codex_work_mobile`), `Other` otherwise (with project subfolders on); name suffix = last 8 characters of the thread ID; raw mirrored under the raw files folder or the Codex Cloud JSON folder; older vaults get the folder beside their own `ChatGPT/Chat`
+- [ ] Title: Codex's name unless it is just the first prompt cut off (then the prompt's first line, 80 characters); a scheduled run ("System instruction (automation runtime…") is named after its schedule's `- Title:`
+- [ ] Note: `app: "Codex (cloud)"`, `session`, `model`, `started_from`, `source` (chatgpt.com/local/<id>), `account`; You / Codex turns, commands, tool calls and file edits counted as tool steps, reasoning left out; then Error (last turn's error, or "The last turn failed."; interrupted is no error) and Changes from file-edit steps (files, +/−, diff in a folded `[!diff]-` callout, fence longer than any backtick run; over 200,000 characters only in the raw file)
+- [ ] Running (`status.type` "active" in the list, or newest turn in progress) waits and is counted; no prompt = remembered, nothing written; unchanged `updatedAt` = not fetched
 - [ ] One note per task (follow-up rewrites it, earlier raw kept as version), restore from raw or by fetching, missing-guard, renames followed, Refresh index, raw-file move row, merge
 
 ## 6b. Merging copies from before one note per chat [code: merge.ts, merge-run.ts]
