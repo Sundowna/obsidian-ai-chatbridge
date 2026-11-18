@@ -23,6 +23,7 @@
 - [See how the last sync went](#see-how-the-last-sync-went)
 - [Desktop app sessions](#desktop-app-sessions)
 - [Claude Code cloud sessions](#claude-code-cloud-sessions)
+- [Codex cloud tasks](#codex-cloud-tasks)
 - [Hermes Agent](#hermes-agent)
 - [AI memory](#ai-memory)
 - [Commands](#commands)
@@ -55,6 +56,7 @@
 | **Claude** (claude.ai) | Chats per project | Artifacts and uploads |
 | **Claude Code cloud** (claude.ai/code) | Sessions that ran in Anthropic's cloud, one folder per GitHub repository | Pasted images and files Claude wrote |
 | **ChatGPT** | Chats per project, archived chats optional; custom GPT chats go to `Recent` | Generated files and uploads |
+| **Codex cloud** (chatgpt.com/codex) | Tasks that ran in OpenAI's cloud, one folder per environment; off until you turn it on | The changes as a diff, the pull request as a link |
 | **Gemini** | Chats | Pictures as links |
 | **Google AI Studio** | Chats and prompts | - |
 | **Proton Lumo** | Chats and projects, decrypted on your computer | Coming |
@@ -105,6 +107,7 @@ AI Chats/
 │               └── Attachments/…      ← images and files you attached
 ├── ChatGPT/
 │   ├── Chat/
+│   ├── Codex-Cloud/<repo>/            ← Codex tasks from chatgpt.com/codex (cloud)
 │   └── Codex-Local/
 │       └── Tower/
 ├── Gemini/
@@ -223,7 +226,16 @@ Sessions that ran in Anthropic's cloud - on claude.ai/code, or started from the 
 - A session that is still running is saved once it's done. A session that goes on later updates its one note; the version before stays as raw `.json`
 - Sessions you steered from claude.ai but that ran on your computer (Remote Control) are left to **Code Local**, so nothing is saved twice
 - On by default. Turn it off per account with **Claude Code cloud sessions** in the Claude tab
-- Codex cloud tasks are not synced yet
+
+## Codex cloud tasks
+
+Tasks that Codex ran in OpenAI's cloud - on chatgpt.com/codex, or started from the ChatGPT app, GitHub or `codex cloud` - are saved with the ChatGPT sync, into the **Codex Cloud folder** (`ChatGPT/Codex-Cloud/<repo>/`), one subfolder per Codex environment (usually named after its GitHub repository).
+
+- **Off until you turn it on**: ChatGPT tab → **Codex cloud tasks**. It uses the ChatGPT login the chat sync already has
+- The note says `app: "Codex (cloud)"`, names the `environment:`, the task's `status:` and its `pull_request:`, and links back to the task on chatgpt.com. Below your prompt and Codex's answer (tool steps counted, like local Codex threads) come the error if the task failed, the pull requests, and the changes as a folded diff. A diff over 200,000 characters stays in the raw `.json` only
+- A task that is still running is saved once it is done. A follow-up updates its one note; the version before stays as raw `.json`, so earlier turns are kept there
+- chatgpt.com sends a task's latest prompt and answer only, and of several attempts only the one shown. Earlier turns of a task you followed up before you turned this on are not saved
+- The plugin reads the same two chatgpt.com addresses that OpenAI's own Codex command-line tool uses for `codex cloud` (the task list and one task); it changes nothing on chatgpt.com
 
 ## Hermes Agent
 

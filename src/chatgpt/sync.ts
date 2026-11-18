@@ -28,6 +28,9 @@ import { renderGptTranscript } from './transcript';
 import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
+import { CodexCloudShapeError } from '../cloud/codex-cloud';
+import { syncCodexCloud } from '../cloud/codex-sync';
+import { emptyCloudResult, type CloudSyncResult } from '../cloud/sync';
 
 const MAX_PAGES = 300; // 6000 chats per list; a guard against an endless paging loop
 const MAX_OLDER = 200; // older parts per chat (10 turns each)
@@ -64,6 +67,8 @@ export interface GptSyncResult {
 	stopped?: string;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
+	/** Codex cloud tasks (chatgpt.com/codex); also counted in the totals above. */
+	codexCloud?: CloudSyncResult;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -518,6 +523,17 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			await refreshView(chat, item, entry);
 		}
 
+		// Codex tasks run in the cloud (chatgpt.com/codex), into the Codex Cloud folder.
+		if (g.codexCloud) {
+			requestStage = 'reading Codex cloud tasks';
+			requestChat = undefined;
+			const cloud = (result.codexCloud = emptyCloudResult());
+			try {
+				await syncCodexCloud({ app, settings: s, account, api: a, delayMs, progress, save: () => plugin.saveSettings(), sleep }, cloud);
+			} finally {
+				addCodexCloud(result, cloud);
+			}
+		}
 	} catch (e) {
 		if (e instanceof GptRateLimitError) {
 			const consecutive = (g.resumeAfter429?.consecutive ?? 0) + 1;
@@ -533,6 +549,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			await plugin.saveSettings();
 		} else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `ChatGPT response could not be verified (${e.message}). Saved captures are available for the next run.`;
+		else if (e instanceof CodexCloudShapeError) result.stopped = `Unexpected Codex cloud task data (${e.message}). chatgpt.com may have changed its internal API – nothing more was written.`;
 		else {
 			const msg = e instanceof Error ? e.message : String(e);
 			result.stopped = api ? api.redact(msg) : msg.replace(/Bearer\s+\S+/gi, 'Bearer [hidden]');
@@ -554,6 +571,19 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	return result;
 }
 
+/** Codex cloud tasks count in the run's totals (notices, log); the log names them too. */
+function addCodexCloud(r: GptSyncResult, c: CloudSyncResult): void {
+	r.listed += c.listed;
+	r.unchanged += c.unchanged;
+	r.newCount += c.newCount;
+	r.changedCount += c.changedCount;
+	r.leftForLater += c.leftForLater;
+	r.written.push(...c.written);
+	r.restored.push(...c.restored);
+	r.edits.copies.push(...c.edits.copies);
+	r.edits.kept.push(...c.edits.kept);
+}
+
 async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyncResult): Promise<void> {
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -572,6 +602,8 @@ async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyn
 	if (r.tooLong.length) parts.push(`too long to load in one piece, skipped: ${r.tooLong.join(', ')}`);
 	if (r.projectsCut) parts.push('more projects exist than chatgpt.com listed – chats in unlisted projects use the project ID as folder name');
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
+	if (r.codexCloud && (r.codexCloud.written.length || r.codexCloud.restored.length)) parts.push(`incl. ${r.codexCloud.written.length + r.codexCloud.restored.length} Codex cloud tasks`);
+	if (r.codexCloud?.running) parts.push(`${r.codexCloud.running} Codex cloud tasks still running (saved when done)`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount('ChatGPT', plugin.settings.chatgpt, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');

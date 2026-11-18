@@ -111,7 +111,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Project picker: Fetch projects / Refresh list / Fetching… (cta only before first fetch), status with indeterminate bar, error text, "N of M selected · K with own folder", "Fetched … ago", filter box from 9 rows, Select all/Clear become Select shown/Clear shown while filtering, tags **New** and **Not found**, chat counts, warnings (nothing selected, catalog note), per-row transcript and JSON folder lines with greyed default, reset, invalid state; only the picker redraws on a tick
 - [ ] Lumo: project list fetched once per settings opening, full list in memory only, only selected names saved
 - [ ] Claude: Claude Code cloud sessions toggle; Advanced: Session key (secret storage), Organization ID (UUID check)
-- [ ] ChatGPT: Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
+- [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
 - [ ] Gemini: "What is saved" note; Advanced: Google cookies. AI Studio: Sync AI Studio toggle, own folder
 - [ ] Lumo: Encryption note
 - [ ] Desktop app panel: Sync desktop sessions toggle (rest hidden while off), **Sync now**, Code Local / Codex Local folder, Raw session folder (only with Keep the raw session file), Reads from (roots and account matching text), Advanced: Extra session folders
@@ -167,6 +167,16 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Files: `Artifacts/` and `Attachments/` per chat; chat-view files read too; size mismatch and 404 skipped and remembered; identical file under another ID not copied; all files fetched before anything is written
 - [ ] Backfill of missing or deleted files for older chats, transcripts untouched
 - [ ] Cloud sessions (claude.ai/code): per repo folder, saved when done, counted in totals
+
+## 6a. Codex cloud [code: cloud/codex-cloud.ts, cloud/codex-sync.ts, covered by `npm run test:codex-cloud`]
+
+- [ ] Off by default per ChatGPT account (`codexCloud`); runs after the chats inside the ChatGPT sync, same login, delay, per-run limit, Stop and 429 cooldown; counted in the run's totals and named in the log ("incl. N Codex cloud tasks", "N still running")
+- [ ] Reads only `GET /backend-api/wham/tasks/list?limit=20&task_filter=current&cursor=…` and `GET /backend-api/wham/tasks/<task_…>` (addresses from OpenAI's Codex CLI, not yet confirmed in DevTools); `ChatGPT-Account-Id` header with the workspace ID on these two only; task ID shape checked before a request
+- [ ] Unexpected shape stops with "Unexpected Codex cloud task data", nothing more written
+- [ ] Folder `<Codex Cloud folder>/<environment's repo name>` (with project subfolders on; `Other` without an environment); raw `.json` (`{ task, details }`) mirrored under the raw files folder or the Codex Cloud JSON folder; older vaults get the folder beside their own `ChatGPT/Chat`
+- [ ] Note: `app: "Codex (cloud)"`, `session`, `environment`, `status`, `pull_request`, `source` (chatgpt.com/codex/tasks/<id>), `account`; You / Codex turns, work-log entries that are not the assistant's words counted as tool steps; then Error, Pull requests, Changes (file count, +/−, diff in a folded `[!diff]-` callout, fence longer than any backtick run; over 200,000 characters only in the raw file)
+- [ ] Running (`pending`, `in_progress`) waits; no prompt = remembered, nothing written; unchanged `updated_at` = not fetched
+- [ ] One note per task (follow-up rewrites it, earlier raw kept as version), restore from raw or by fetching, missing-guard, renames followed, Refresh index, raw-file move row, merge
 
 ## 6b. Merging copies from before one note per chat [code: merge.ts, merge-run.ts]
 

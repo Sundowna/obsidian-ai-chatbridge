@@ -62,9 +62,9 @@ export interface ClaudeWebSettings {
 	cloudIndex?: Record<string, CloudIndexEntry>;
 }
 
-/** What we remember per Claude Code cloud session (no chat text). */
+/** What we remember per cloud session: Claude Code (claude.ai/code) or Codex (chatgpt.com/codex). No chat text. */
 export interface CloudIndexEntry extends NoteState {
-	/** The session's last_event_at when it was saved. */
+	/** The session's last_event_at (Codex: the task's updated_at) when it was saved. */
 	updated: string;
 	/** Empty for a session with no message from you (nothing written, not asked again until it changes). */
 	md: string;
@@ -105,6 +105,14 @@ export interface GptSettings {
 	inventories?: Inventories;
 	overlapMinutes?: number;
 	chatProgress?: ChatCounts & { inventoryKey: string; scope: string };
+	/** Also save the Codex tasks run in the cloud (chatgpt.com/codex) into the Codex Cloud folder. */
+	codexCloud: boolean;
+	/** Folder for Codex cloud tasks (one subfolder per environment). */
+	codexCloudFolder: string;
+	/** Folder for their raw .json. Empty = next to the transcripts. */
+	codexCloudRawFolder?: string;
+	/** Codex cloud task ID ("task_…") -> what was saved. */
+	codexCloudIndex?: Record<string, CloudIndexEntry>;
 }
 
 /** One Lumo login: its folders and what has been synced. No keys: those exist only during a sync. */
@@ -240,6 +248,9 @@ export const DEFAULT_GPT: GptSettings = {
 	projects: [],
 	index: {},
 	fileIndex: {},
+	// Off until you turn it on: the Codex addresses come from Codex's own client, not yet from DevTools.
+	codexCloud: false,
+	codexCloudFolder: FIRST.codexCloud,
 };
 
 export const DEFAULT_LUMO: LumoSettings = {

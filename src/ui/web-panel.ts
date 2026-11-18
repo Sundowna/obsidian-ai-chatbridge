@@ -178,6 +178,8 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'Chat folder', 'Where ChatGPT chats are saved.', () => g.folder, (p) => (g.folder = p));
 	rawFolderSetting(ctx, el, { name: 'JSON folder', what: 'the raw .json of each chat (and the older parts of long chats)', partner: 'chat folder', mirrors: true, get: () => g.rawFolder, set: (p) => (g.rawFolder = p) });
+	folderSetting(ctx, el, 'Codex Cloud folder', 'Where Codex tasks that ran in the cloud (Codex on the ChatGPT website) are saved.', () => g.codexCloudFolder, (p) => (g.codexCloudFolder = p));
+	rawFolderSetting(ctx, el, { name: 'Codex Cloud JSON folder', what: 'the raw .json of each task', partner: 'Codex Cloud folder', mirrors: true, get: () => g.codexCloudRawFolder, set: (p) => (g.codexCloudRawFolder = p) });
 	rawMoveRow(ctx, el, () => webRawMoves(ctx.app, 'chatgpt', account, masterRaw(ctx.plugin.settings)));
 	filingOptions(ctx, el, 'ChatGPT', g);
 
@@ -189,6 +191,15 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 		.addToggle((t) =>
 			t.setValue(g.includeArchived ?? false).onChange(async (v) => {
 				g.includeArchived = v;
+				await save();
+			}),
+		);
+	new Setting(el)
+		.setName('Codex cloud tasks')
+		.setDesc('Also save the Codex tasks that ran in the cloud (Codex on the ChatGPT website), in the folder set above, one subfolder per environment: your prompt, Codex\'s answer, the pull request and the changes as a diff. A task still running is saved once it is done. Off until you turn it on.')
+		.addToggle((t) =>
+			t.setValue(g.codexCloud).onChange(async (v) => {
+				g.codexCloud = v;
 				await save();
 			}),
 		);

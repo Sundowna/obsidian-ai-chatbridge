@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- **Codex cloud tasks** - tasks that Codex ran in OpenAI's cloud (chatgpt.com/codex) can now be saved with the ChatGPT sync, into the new **Codex Cloud folder** (`ChatGPT/Codex-Cloud/<repo>/`), one subfolder per environment. Each note holds your prompt, Codex's answer, the pull request and the changes as a folded diff, and links back to the task; the raw `.json` holds the whole answer. A running task is saved once it is done, and a follow-up updates its one note while the version before stays as raw `.json`. Off until you turn it on per account with **Codex cloud tasks** in the ChatGPT tab
+
 ## 0.33.0 - 2026-11-16
 
 ### New

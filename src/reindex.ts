@@ -107,9 +107,9 @@ export function allEntries(s: Settings): IndexedPaths[] {
 			});
 		}
 	}
-	// Claude Code cloud sessions ("session:" in the front matter is their ID). Empty ones wrote nothing.
-	for (const a of s.claude) {
-		for (const [id, e] of Object.entries(a.web.cloudIndex ?? {})) {
+	// Cloud sessions: Claude Code and Codex ("session:" in the front matter is their ID). Empty ones wrote nothing.
+	for (const idx of [...s.claude.map((a) => a.web.cloudIndex), ...s.chatgpt.map((a) => a.web.codexCloudIndex)]) {
+		for (const [id, e] of Object.entries(idx ?? {})) {
 			if (!e.md) continue;
 			out.push({ id, md: e.md, setMd: (p) => (e.md = p), ...withVersions([e.json], e, (_i, p) => (e.json = p)) });
 		}

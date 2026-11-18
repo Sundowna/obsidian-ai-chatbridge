@@ -88,7 +88,7 @@ export function addAccount(s: Settings, provider: Provider, label: string): AnyA
 	const account: ChatgptAccount = {
 		id: newId(),
 		label: name,
-		web: { ...DEFAULT_GPT, projects: [], index: {}, fileIndex: {}, folder: first.web.folder, rawFolder: first.web.rawFolder },
+		web: { ...DEFAULT_GPT, projects: [], index: {}, fileIndex: {}, folder: first.web.folder, rawFolder: first.web.rawFolder, codexCloudFolder: first.web.codexCloudFolder, codexCloudRawFolder: first.web.codexCloudRawFolder },
 		desktop: { ...desktopApp(first.desktop.folder), rawFolder: first.desktop.rawFolder },
 	};
 	s.chatgpt.push(account);

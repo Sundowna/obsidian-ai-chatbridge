@@ -73,9 +73,9 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 		}
 	}
 
-	// Claude Code cloud sessions: transcript, raw file and saved files.
-	for (const { web } of s.claude) {
-		for (const entry of Object.values(web.cloudIndex ?? {})) {
+	// Cloud sessions (Claude Code, Codex): transcript, raw file and saved files.
+	for (const idx of [...s.claude.map((a) => a.web.cloudIndex), ...s.chatgpt.map((a) => a.web.codexCloudIndex)]) {
+		for (const entry of Object.values(idx ?? {})) {
 			for (const key of ['md', 'json'] as const) {
 				const previous = entry[key];
 				if (!previous) continue;

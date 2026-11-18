@@ -100,8 +100,16 @@ const hydrateClaude = (a: Partial<ClaudeAccount>): ClaudeAccount => ({
 	desktop: hydrateDesktop(a.desktop, DEFAULT_SETTINGS.claude[0]!.desktop.folder),
 });
 
+/** ".../ChatGPT/Chat" -> ".../ChatGPT/Codex-Cloud"; otherwise the layout's place below the chat folder's root. */
+export function codexCloudBeside(chatFolder: string): string {
+	const m = /^(.*\/)?ChatGPT\/Chat$/.exec(chatFolder.replace(/\/+$/, ''));
+	return m ? `${m[1] ?? ''}ChatGPT/Codex-Cloud` : layoutFolders(layoutRoot(chatFolder)).codexCloud;
+}
+
 const hydrateGpt = (a: Partial<ChatgptAccount>): ChatgptAccount => {
 	const web: GptSettings = { ...DEFAULT_GPT, ...a.web, projects: [...(a.web?.projects ?? [])], index: { ...(a.web?.index ?? {}) }, fileIndex: { ...(a.web?.fileIndex ?? {}) } };
+	// Codex Cloud (0.34) starts next to the account's own ChatGPT folders, wherever they are.
+	if (!a.web?.codexCloudFolder) web.codexCloudFolder = codexCloudBeside(web.folder);
 	seedChatProgress(web);
 	return {
 		id: a.id ?? DEFAULT_ACCOUNT_ID,
