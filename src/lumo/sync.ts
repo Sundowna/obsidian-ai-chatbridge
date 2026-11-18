@@ -13,7 +13,7 @@ import { ShapeError } from '../schema';
 import { DEFAULT_RECENT, filterByProjects, newestFirst, nothingSelected, pickTodo, type Todo } from '../select';
 import { cleanFolder, MIN_DELAY_SECONDS, type LumoAccount } from '../settings';
 import type { ListItem } from '../types';
-import { ensureFolder, freeStem } from '../vaultio';
+import { ensureFolder, findFile, freeStem } from '../vaultio';
 import { chatFolders, dirOf, masterRaw, rawLink } from '../raw-folders';
 import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { loginRef } from '../accounts';
@@ -82,7 +82,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 	const wait = async (): Promise<void> => { await sleep(delayMs); };
 	const result: LumoSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], failed: [], edits: noEdits() };
 	if (nothingSelected(g)) return { ...result, nothingSelected: true };
-	const exists =(path: string): boolean => app.vault.getAbstractFileByPath(path) instanceof TFile;
+	const exists =(path: string): boolean => findFile(app, path) instanceof TFile;
 	let api: LumoApi | null = null;
 
 	try {

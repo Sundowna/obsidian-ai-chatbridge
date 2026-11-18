@@ -10,7 +10,7 @@ import { baseName, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { masterRaw, mirrorRaw, rawBase, rawLink } from '../raw-folders';
 import { cleanFolder, type ChatgptAccount, type CloudIndexEntry, type Settings } from '../settings';
-import { createNew, ensureFolder, freeStem } from '../vaultio';
+import { createNew, ensureFolder, findFile, freeStem } from '../vaultio';
 import { addVersion, keepVersion, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw } from '../versions';
 import { renderDesktopTranscript } from '../desktop/render';
 import {
@@ -125,7 +125,7 @@ function transcript(account: ChatgptAccount, task: CodexTask, t: CodexCloudTrans
 export async function syncCodexCloud(c: CodexCloudContext, r: CloudSyncResult): Promise<void> {
 	const { app, account } = c;
 	const index = (account.web.codexCloudIndex ??= {});
-	const exists = (p: string) => !!p && app.vault.getAbstractFileByPath(p) instanceof TFile;
+	const exists = (p: string) => !!p && findFile(app, p) instanceof TFile;
 
 	const tasks = await listTasks(c);
 	r.listed = tasks.length;

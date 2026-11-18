@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.34.1 - 2026-11-18
+
+### Fixed
+- **macOS: "File already exists" no longer stops the sync** - the plugin looked files up by their exact name, but macOS and Windows treat names that differ only in letter case as the same file, and file names synced by tools such as Syncthing can be stored in another Unicode form (accented letters written as two characters). Such a file looked missing, so creating it failed and the sync stopped there every time. Now the existing file is found: a changed chat updates it, and a new file whose name differs only in case gets a number (`… 2.png`). Linux keeps names that differ in case apart, as its file system does ([#25](https://github.com/Sundowna/obsidian-ai-chatbridge/issues/25))
+- **Gemini: one unreadable chat no longer stops the whole sync** - a chat Google sends in an unexpected shape (for example a turn without prompt text) is now skipped, named in the log under "could not read" and tried again next run, and the other chats keep syncing. If three chats in one run fail that way, the sync still stops, since Google may have changed its format ([#26](https://github.com/Sundowna/obsidian-ai-chatbridge/issues/26))
+
 ## 0.34.0 - 2026-11-18
 
 ### New

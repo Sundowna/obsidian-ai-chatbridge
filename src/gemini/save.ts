@@ -11,7 +11,7 @@ import type { ProgressFn } from '../progress';
 import { newestFirst, pickTodo, type Todo } from '../select';
 import type { GeminiAccount } from '../settings';
 import type { IndexEntry, ListItem } from '../types';
-import { ensureFolder, freeStem } from '../vaultio';
+import { ensureFolder, findFile, freeStem } from '../vaultio';
 import { dirOf, rawLink } from '../raw-folders';
 import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 
@@ -54,7 +54,7 @@ export async function saveChats(
 	result: GoogleSyncResult,
 ): Promise<void> {
 	const app = plugin.app;
-	const exists = (path: string): boolean => app.vault.getAbstractFileByPath(path) instanceof TFile;
+	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
 	const todo = pickTodo(items, index);
 	const queued = new Set(todo.map((t) => t.item.uuid));
 	const lost = (it: ListItem): boolean => {

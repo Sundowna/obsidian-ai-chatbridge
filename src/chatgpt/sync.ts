@@ -10,7 +10,7 @@ import { StopError } from '../api';
 import { ShapeError } from '../schema';
 import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames } from '../select';
 import { baseName, dailyNoteName, safeTitle, tagAccount, untagAccount } from '../naming';
-import { createNew, ensureFolder, freeFileName, freeStem } from '../vaultio';
+import { createNew, ensureFolder, findFile, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
 import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from '../settings';
@@ -138,7 +138,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	const retries = g.assetRetries ??= {};
 	const pendingAssets = new Set<string>();
 
-	const exists = (path: string): boolean => app.vault.getAbstractFileByPath(path) instanceof TFile;
+	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
 	const isMissing = (f: GptFileTask): boolean => {
 		const p = g.fileIndex[f.fileUuid];
 		if (p === undefined) return true;
@@ -161,7 +161,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 
 	const sameContent = async (bytes: ArrayBuffer, folder: string, stem: string): Promise<string | null> => {
 		for (const kindFolder of Object.values(KIND_FOLDER)) {
-			const dir = app.vault.getAbstractFileByPath(`${folder}/${kindFolder}/${stem}`);
+			const dir = findFile(app, `${folder}/${kindFolder}/${stem}`);
 			if (!(dir instanceof TFolder)) continue;
 			for (const f of dir.children) {
 				if (f instanceof TFile && f.stat.size === bytes.byteLength && equalBytes(await app.vault.readBinary(f), bytes)) return f.path;
@@ -309,7 +309,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		if (g.projectSubfolders) {
 			for (const name of projectFolderNames(kept.filter((item) => customProjectFolder(item, g, recent) === null), recent)) {
 				const path = `${base}/${name}`;
-				if (!app.vault.getAbstractFileByPath(path)) {
+				if (!findFile(app, path)) {
 					await ensureFolder(app, path);
 					result.foldersCreated.push(path);
 				}
@@ -443,7 +443,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				// Older parts the earlier version had and this one has not: they are in the kept version.
 				const keptNow = entry.versions?.some((v) => v.at === before?.updated_at) ?? false;
 				for (const stale of (before?.older ?? []).filter((p) => !paths.includes(p))) {
-					const file = app.vault.getAbstractFileByPath(stale);
+					const file = findFile(app, stale);
 					if (keptNow && file instanceof TFile) await app.fileManager.trashFile(file);
 				}
 			}

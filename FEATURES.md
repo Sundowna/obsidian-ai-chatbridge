@@ -202,6 +202,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 
 - [ ] ChatGPT: projects, archived optional, custom GPT chats to `Recent`, generated files and uploads, visual answers as HTML and pictures (nothing executed, no remote loads), voice chats as text, incremental sync with weekly full inventory, delayed-file retries
 - [ ] Gemini: chats with shown reasoning, pictures as links. AI Studio: chats and prompts
+- [ ] Gemini: a chat Google sends in an odd shape is skipped, named in the log under "could not read" and tried again next run; the third such chat in one run stops the sync ("could not be verified"), as a format change would
 - [ ] Lumo: chats and projects decrypted in memory, saved readable, no attachments
 - [ ] Claude Code local: folders follow sidebar groups or working folder, forks nested, `Attachments/` and `Artifacts/` (latest version, no source code or scratch files, vault notes linked), quiet wait, extra folders
 - [ ] Codex local: per project or `Recent`, same file rules
@@ -247,6 +248,7 @@ Every item here must hold on all three. Path logic takes the platform or a fake 
 - [ ] Scratch files are skipped in every system's temp folder: `AppData/Local/Temp`, `/tmp`, `/var/tmp`, `/var/folders`, also under `/private`
 - [ ] Computer folder name is the first part of the network name ("Walters-MacBook.local" gives "Walters-MacBook"); an IP address gives "This computer"
 - [ ] Example paths in placeholders and hints match the system Obsidian runs on
+- [ ] Vault lookups (`findFile` in vaultio.ts, used for every existence check) also find a name in the other Unicode form (NFC/NFD) on all three, and on Windows, macOS and iOS a name that differs only in letter case; so a name the file system already has is never treated as free (no "File already exists" stop). Linux and Android stay case-sensitive
 - [ ] Python fallback tries `python3`, `python`, `py`; Hermes' bundled one as `python.exe` or `bin/python3`
 
 ## 9. Not user-visible but required
