@@ -4,6 +4,12 @@
 
 ### New
 - **Codex cloud tasks** - tasks that Codex ran in OpenAI's cloud (chatgpt.com/codex) can now be saved with the ChatGPT sync, into the new **Codex Cloud folder** (`ChatGPT/Codex-Cloud/<repo>/`), one subfolder per environment. Each note holds your prompt, Codex's answer, the pull request and the changes as a folded diff, and links back to the task; the raw `.json` holds the whole answer. A running task is saved once it is done, and a follow-up updates its one note while the version before stays as raw `.json`. Off until you turn it on per account with **Codex cloud tasks** in the ChatGPT tab
+- **Sync from your phone, run by your computer** - the plugin now loads in Obsidian on Android and iOS. Its sync button there writes a small request file into the vault; your computer picks it up once your vault sync has delivered it, runs **Sync all** and writes back what it did. The phone tells you when the computer has started and finished, and the Overview shows "Last synced by …". No connection between the devices is needed besides the vault sync you already use. Set the shared folder under **General → Sync from another device**; whether a device syncs or asks is saved on the device itself. The computer runs each request once, at most one every two minutes, never interrupts a running sync, and ignores requests older than 12 hours (a setting). New command **Sync: here, or ask the computer**, for the mobile toolbar
+- **Test mobile connection** - a first step towards syncing on the phone itself. The new command **Test mobile connection** checks whether that device can reach claude.ai and ChatGPT with a pasted session key or cookie: it shows the status, the content type and whether a Cloudflare check page came back. Nothing is saved, and no key is shown or logged
+
+### Changed
+- The plugin is no longer marked desktop only. A phone or tablet does not sync by itself yet: there the sync button and **Sync all chats** ask your computer instead
+- The ribbon icon reads "Ask the computer to sync" on a device that asks
 
 ## 0.33.0 - 2026-11-16
 

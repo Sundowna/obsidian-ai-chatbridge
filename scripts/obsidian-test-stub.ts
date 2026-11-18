@@ -22,3 +22,5 @@ export async function requestUrl(): Promise<never> {
 	throw new Error('Network requests are forbidden in this test.');
 }
 export const getLinkpath = (linktext: string) => linktext.split('#')[0] ?? linktext;
+export const Platform = { isMobile: false, isDesktop: true, isAndroidApp: false, isIosApp: false, isTablet: false };
+export const apiVersion = 'test';

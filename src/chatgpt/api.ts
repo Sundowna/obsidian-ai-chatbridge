@@ -62,6 +62,32 @@ function header(headers: Record<string, string>, name: string): string {
 	return k ? (headers[k] ?? '') : '';
 }
 
+/**
+ * "Test mobile connection" only: one GET of chatgpt.com/api/auth/session with the pasted
+ * session cookie, sent the way the sync sends its requests. The answer holds a login key, so
+ * it stays in memory: the caller reads the status and type and never shows the text.
+ */
+export async function probeAuthSession(cookie: string, ua: string): Promise<{ status: number; headers: Record<string, string>; text: string }> {
+	let res;
+	try {
+		res = await requestUrl({ url: `${ORIGIN}/api/auth/session`, method: 'GET', headers: { Accept: 'application/json', Cookie: cookie, 'User-Agent': ua, 'OAI-Language': 'en-US' }, throw: false });
+	} catch (e) {
+		let why = e instanceof Error ? e.message : String(e);
+		for (const part of cookie.split('; ')) {
+			const secret = part.slice(part.indexOf('=') + 1);
+			if (secret.length >= 8) why = why.split(secret).join('[hidden]');
+		}
+		throw new Error(`Network error: ${maskSecrets(why)}`);
+	}
+	let text = '';
+	try {
+		text = res.text;
+	} catch {
+		text = '';
+	}
+	return { status: res.status, headers: res.headers, text };
+}
+
 export class GptApi {
 	inventoryKey = '';
 	/** The workspace of this login, if the key names one. Not secret. */

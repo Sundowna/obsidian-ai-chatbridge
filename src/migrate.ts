@@ -9,7 +9,7 @@ import { onlySelected } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
 import { dedupeLabels } from './hermes/profiles';
 import {
-	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_HERMES, DEFAULT_LUMO, DEFAULT_MEMORY, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
+	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_HERMES, DEFAULT_LUMO, DEFAULT_MEMORY, DEFAULT_REMOTE, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
 	type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type ClaudeWebSettings, type GptSettings, type LumoAccount, type Settings,
 } from './settings';
 
@@ -188,6 +188,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			desktop: { ...DEFAULT_DESKTOP, ...saved.desktop },
 			hermes: hydrateHermes(saved.hermes, hydratedClaude[0]!.web.chatFolder),
 			memory: { ...DEFAULT_MEMORY, ...saved.memory, states: { ...(saved.memory?.states ?? {}) }, chatgptWeb: { ...(saved.memory?.chatgptWeb ?? {}) }, claudeWeb: { ...(saved.memory?.claudeWeb ?? {}) } },
+			remote: { ...DEFAULT_REMOTE, ...saved.remote },
 			lastRuns: { ...(saved.lastRuns ?? {}) },
 			lastAll: saved.lastAll,
 		},
