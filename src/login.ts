@@ -190,6 +190,18 @@ export function hasLoginFetch(login: LoginRef): boolean {
 	}
 }
 
+/** Login windows exist here (Obsidian on a computer). Not on a phone or tablet. */
+export function hasLoginWindows(): boolean {
+	return remote() !== null;
+}
+
+/** The app's own browser name, for a device without login windows; same clean-up as above. */
+export function deviceUserAgent(): string {
+	// Not used to tell systems apart: requests carry the same name the app itself sends.
+	const { userAgent } = window.navigator;
+	return userAgent.replace(/\s(obsidian|Electron)\/\S+/gi, '');
+}
+
 /** Use the login window's Chromium transport with redirects under caller control. */
 export async function loginFetch(login: LoginRef, url: string, init: RequestInit, timeoutMs = 120_000): Promise<Response> {
 	const ses = session(login);

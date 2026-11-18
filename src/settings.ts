@@ -3,6 +3,7 @@
 // keys (claude.ai, ChatGPT, Google) live in Obsidian's secret storage – we only store the *name*
 // of that secret (secretId).
 
+import { DEFAULT_MAX_AGE_HOURS } from './remote/protocol';
 import { normalizePath } from 'obsidian';
 import { layoutFolders } from './desktop/layout';
 import type { IndexEntry } from './types';
@@ -62,9 +63,9 @@ export interface ClaudeWebSettings {
 	cloudIndex?: Record<string, CloudIndexEntry>;
 }
 
-/** What we remember per Claude Code cloud session (no chat text). */
+/** What we remember per cloud session: Claude Code (claude.ai/code) or Codex (chatgpt.com/codex). No chat text. */
 export interface CloudIndexEntry extends NoteState {
-	/** The session's last_event_at when it was saved. */
+	/** The session's last_event_at (Codex: the task's updated_at) when it was saved. */
 	updated: string;
 	/** Empty for a session with no message from you (nothing written, not asked again until it changes). */
 	md: string;
@@ -105,6 +106,16 @@ export interface GptSettings {
 	inventories?: Inventories;
 	overlapMinutes?: number;
 	chatProgress?: ChatCounts & { inventoryKey: string; scope: string };
+	/** Also save the Codex tasks run in the cloud (chatgpt.com/codex) into the Codex Cloud folder. */
+	codexCloud: boolean;
+	/** Folder for Codex cloud tasks (subfolders Tasks = started on chatgpt.com/codex, Work = started from ChatGPT). */
+	codexCloudFolder: string;
+	/** Folder for their raw .json. Empty = next to the transcripts. */
+	codexCloudRawFolder?: string;
+	/** Keep every step (commands, tool calls, file edits) in the raw .json. Off = the conversation only. */
+	codexCloudSteps?: boolean;
+	/** Codex cloud thread ID (a UUID) -> what was saved. */
+	codexCloudIndex?: Record<string, CloudIndexEntry>;
 }
 
 /** One Lumo login: its folders and what has been synced. No keys: those exist only during a sync. */
@@ -206,6 +217,8 @@ export interface Settings {
 	hermes: HermesSettings;
 	/** AI memory snapshots: what each AI keeps about you (desktop only for the local sources). */
 	memory: MemorySettings;
+	/** Asking another device to sync through files in the vault (see remote/protocol.ts). */
+	remote: RemoteSettings;
 	/** What the last sync of each account surface did (see last-run.ts). */
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
@@ -240,6 +253,9 @@ export const DEFAULT_GPT: GptSettings = {
 	projects: [],
 	index: {},
 	fileIndex: {},
+	// Off until you turn it on: it opens a second connection to chatgpt.com (Codex's own).
+	codexCloud: false,
+	codexCloudFolder: FIRST.codexCloud,
 };
 
 export const DEFAULT_LUMO: LumoSettings = {
@@ -283,6 +299,18 @@ export const DEFAULT_MEMORY: MemorySettings = {
 	states: {},
 };
 
+export interface RemoteSettings {
+	/** Where sync-request.json and sync-status.json live. Both devices must name the same folder. */
+	folder: string;
+	/** A request older than this when the computer sees it is not run. */
+	maxAgeHours: number;
+}
+
+export const DEFAULT_REMOTE: RemoteSettings = {
+	folder: '00 Inbox/Mobile/ChatBridge',
+	maxAgeHours: DEFAULT_MAX_AGE_HOURS,
+};
+
 export const DEFAULT_DESKTOP: DesktopSettings = {
 	projectSubfolders: true,
 	keepRaw: false,
@@ -311,6 +339,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	desktop: DEFAULT_DESKTOP,
 	hermes: DEFAULT_HERMES,
 	memory: DEFAULT_MEMORY,
+	remote: DEFAULT_REMOTE,
 	lastRuns: {},
 };
 

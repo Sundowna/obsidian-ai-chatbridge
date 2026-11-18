@@ -49,8 +49,8 @@ function knownChats(s: Settings): Map<string, Known> {
 			});
 		}
 	}
-	for (const a of s.claude) {
-		for (const [id, e] of Object.entries(a.web.cloudIndex ?? {})) {
+	for (const idx of [...s.claude.map((a) => a.web.cloudIndex), ...s.chatgpt.map((a) => a.web.codexCloudIndex)]) {
+		for (const [id, e] of Object.entries(idx ?? {})) {
 			if (!e.md) continue;
 			out.set(id, { note: e.md, state: e, apply: (md, raw) => { e.md = md; if (raw) e.json = raw; } });
 		}

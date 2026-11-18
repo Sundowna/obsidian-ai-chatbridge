@@ -7,6 +7,7 @@ import { profileGone } from '../hermes/profiles';
 import { bindSyncButton, count, type PanelContext } from './fields';
 import { hermesIcon, providerIcon } from './icons';
 import { addAccountButton } from './provider-tab';
+import { remoteStatusLine } from './remote-section';
 import { allText, desktopRun, HERMES, lastRunLine, runKey, type LastRun } from '../last-run';
 
 function surfaceLine(parent: HTMLElement, icon: string, name: string): { dot: HTMLElement; text: HTMLElement } {
@@ -106,7 +107,17 @@ function heroButtons(ctx: PanelContext, parent: HTMLElement): void {
 	const box = parent.createDiv({ cls: 'ccs-hero-actions' });
 	const stop = box.createEl('button', { text: 'Stop all' });
 	const sync = box.createEl('button', { text: 'Sync all', cls: 'mod-cta' });
+	// A device that does not sync itself asks the one that does; nothing runs here to stop.
+	const asks = () => plugin.remote.role === 'requester';
 	const draw = () => {
+		if (asks()) {
+			stop.hide();
+			sync.disabled = false;
+			sync.setText('Ask the computer to sync');
+			sync.setAttr('title', 'Writes a request into the vault; the computer that syncs runs it once the request has reached it');
+			return;
+		}
+		stop.show();
 		const running = plugin.syncing;
 		stop.disabled = !running || plugin.stopping;
 		stop.setText(plugin.stopping ? 'Stopping…' : 'Stop all');
@@ -126,7 +137,8 @@ function heroButtons(ctx: PanelContext, parent: HTMLElement): void {
 	});
 	stop.addEventListener('click', () => plugin.requestStop());
 	sync.addEventListener('click', () => {
-		if (!plugin.busy) void plugin.syncAll('manual').then(ctx.refresh);
+		if (asks()) void plugin.remote.ask();
+		else if (!plugin.busy) void plugin.syncAll('manual').then(ctx.refresh);
 	});
 	draw();
 }
@@ -151,6 +163,7 @@ export function overviewTab(ctx: PanelContext, el: HTMLElement): void {
 		line.createSpan({ cls: 'ccs-dot' });
 		line.createSpan({ cls: 'ccs-last-run-text', text });
 	}
+	remoteStatusLine(ctx, words);
 	heroButtons(ctx, hero);
 
 	for (const provider of ['claude', 'chatgpt', 'lumo', 'gemini'] as const) {

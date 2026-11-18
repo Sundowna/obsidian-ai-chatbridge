@@ -21,8 +21,13 @@ export interface Redaction {
 	total: number;
 }
 
-/** A letter or digit may not come directly before a label ("mypassword" is not a label). */
-const START = '(?<![\\p{L}\\p{N}_])';
+/**
+ * A letter or digit may not come directly before a label ("mypassword" is not a label).
+ * No lookbehinds anywhere in this file: iOS before 16.4 cannot read them, and one is enough for
+ * the whole plugin to fail to load there. Instead the character before is matched as the first
+ * group and given back unchanged.
+ */
+const START = '(^|[^\\p{L}\\p{N}_])';
 /** "for Proton", "für die Bank": a few words between the label and its ":" */
 const FOR = '(?:\\s+(?:for|für|fuer|vir|of|von|to|zu)\\s+[^\\n:=]{1,30}?)?';
 /** ":" or "=" (with Markdown bold or code marks around it), or "is" / "ist" / "lautet". */
@@ -35,12 +40,12 @@ const SECRET = new RegExp(`${START}(api[-_ ]?keys?|secret(?:[-_ ]?key)?|access[-
 const SEED = new RegExp(`${START}((?:2fa|totp|otp|mfa|two[- ]factor|zwei[- ]faktor|twee[- ]faktor|authenticator|authentifizierung)[^\\n:=]{0,40}?)${SEP}((?:[A-Za-z2-7]{4}[ -]?){4,16})(?![\\p{L}\\p{N}])`, 'giu');
 const ID = new RegExp(`${START}(passport|reisepass|paspoort|pass|ausweis|personalausweis|identity|identiteits?|id|ahv|avs|social security|ssn|sozialversicherungs?|steuer|tax|driver'?s licen[cs]e|führerschein|rybewys)[- ]?(number|nummer|nommer|nr\\.?|no\\.?|#)${FOR}${SEP}((?:[A-Z0-9]*\\d[A-Z0-9]*)(?:[ .\\-/][A-Z0-9]*\\d[A-Z0-9]*){0,8})`, 'giu');
 const OTPAUTH = /otpauth:\/\/[^\s"'`<>)\]]+/gi;
-const AHV = /(?<![\d.])756\.\d{4}\.\d{4}\.\d{2}(?![\d.])/g;
-const IBAN = /(?<![A-Za-z0-9])[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,3})?(?![A-Za-z0-9])/g;
-const DIGITS = /(?<![\d.,+])\d(?:[ -]?\d){12,18}(?![\d]|[.,]\d)/g;
+const AHV = /(^|[^\d.])756\.\d{4}\.\d{4}\.\d{2}(?![\d.])/g;
+const IBAN = /(^|[^A-Za-z0-9])[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,3})?(?![A-Za-z0-9])/g;
+const DIGITS = /(^|[^\d.,+])\d(?:[ -]?\d){12,18}(?![\d]|[.,]\d)/g;
 const RECOVERY = new RegExp(`${START}(?:recovery|backup|restore|emergency|wiederherstellungs?|notfall|sicherungs?|herstel|rugsteun|nood)[- ]?(?:codes?|keys?|phrase|schlüssel|kodes?|sleutels?)`, 'iu');
 /** One recovery code: letters and digits, at least one digit, perhaps in groups ("a1b2-c3d4"). */
-const CODE = /(?<![\p{L}\p{N}])(?=[A-Za-z-]*\d)[A-Za-z0-9]{4,}(?:-[A-Za-z0-9]{2,})*(?![\p{L}\p{N}])/gu;
+const CODE = /(^|[^\p{L}\p{N}])(?=[A-Za-z-]*\d)[A-Za-z0-9]{4,}(?:-[A-Za-z0-9]{2,})*(?![\p{L}\p{N}])/gu;
 
 /** Words after "password:" that say something about the password instead of being it. */
 const NOT_A_VALUE = new Set([
@@ -99,9 +104,10 @@ export function redact(input: string): Redaction {
 	// A key or token is long and not a plain word: "token: expired" stays.
 	text = text.replace(SECRET, keepLabel('secret key', (v) => bare(v).length >= 12 && /\d/.test(v)));
 	text = text.replace(ID, keepLabel('ID number', (v) => (v.match(/\d/g) ?? []).length >= 5));
-	text = text.replace(AHV, () => hit('ID number'));
-	text = text.replace(IBAN, (m) => (ibanOk(m) ? hit('bank account number') : m));
-	text = text.replace(DIGITS, (m) => (luhn(m.replace(/[ -]/g, '')) ? hit('card number') : m));
+	// The first group is the character before the value (see START); it is given back.
+	text = text.replace(AHV, (_m: string, before: string) => before + hit('ID number'));
+	text = text.replace(IBAN, (m: string, before: string) => (ibanOk(m.slice(before.length)) ? before + hit('bank account number') : m));
+	text = text.replace(DIGITS, (m: string, before: string) => (luhn(m.slice(before.length).replace(/[ -]/g, '')) ? before + hit('card number') : m));
 	return { text, hits, total };
 }
 
@@ -117,14 +123,14 @@ function recoveryCodes(text: string, hit: () => string): string {
 		const label = RECOVERY.exec(line);
 		if (label) {
 			const at = label.index + label[0].length;
-			lines[i] = line.slice(0, at) + line.slice(at).replace(CODE, hit);
+			lines[i] = line.slice(0, at) + line.slice(at).replace(CODE, (_m: string, before: string) => before + hit());
 			open = true;
 			continue;
 		}
 		if (!open) continue;
 		const rest = line.replace(/^\s*(?:[-*+]|\d+[.)])?\s*/, '').replace(/\r$/, '');
 		if (rest === '') continue; // an empty line inside the list
-		if (rest.replace(CODE, '').replace(/[\s,;|`]/g, '') === '') lines[i] = line.replace(CODE, hit);
+		if (rest.replace(CODE, (_m: string, before: string) => before).replace(/[\s,;|`]/g, '') === '') lines[i] = line.replace(CODE, (_m: string, before: string) => before + hit());
 		else open = false;
 	}
 	return lines.join('\n');

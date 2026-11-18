@@ -27,7 +27,9 @@ Command IDs are stable API. Never rename.
 - [ ] `stop-sync`: only offered while a sync runs and no stop was asked yet
 - [ ] `refresh-index`, `move-to-app-layout`, `diagnose-chat-downloads`
 - [ ] `merge-chat-copies`: opens the preview; refused with a notice while a sync runs
-- [ ] Ribbon icon: `refresh-cw` "Sync all chats" when idle; `square` "Stop sync" / "Stopping the sync…" plus class `is-syncing` while running; click toggles sync or stop
+- [ ] `test-mobile-connection` Test mobile connection: one GET to `claude.ai/api/organizations` and one to `chatgpt.com/api/auth/session` per account, with the pasted login only (secret storage; never the login window). Report dialog with **Copy**: status, content type, Cloudflare check page yes/no, login accepted/refused; "not tested" when nothing is pasted. Writes nothing to the vault or `data.json`; the report (also sent to the console) holds no secret and no answer text
+- [ ] `sync-or-ask` Sync: here, or ask the computer (same as the ribbon icon; see section 10). On mobile `sync-all-chats` does the same
+- [ ] Ribbon icon: on a device that asks, "Ask the computer to sync" and a click writes a request (section 10). On a device that syncs: `refresh-cw` "Sync all chats" when idle; `square` "Stop sync" / "Stopping the sync…" plus class `is-syncing` while running; click toggles sync or stop
 - [ ] Status bar item: click stops a running sync; `ccs-status-stoppable` (hover style) and aria-label only while stoppable
 
 ## 2. Sync engine, all providers [code: main.ts, sync.ts]
@@ -89,6 +91,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Closing settings forgets in-memory project lists (Lumo)
 
 **Overview**
+- [ ] Hero on a device that asks: **Stop all** hidden, the main button reads **Ask the computer to sync**; below the totals the remote status line (section 10), hidden while there is none
 - [ ] Hero: totals (chats, desktop sessions, Hermes chats), **Stop all** (disabled when idle, `mod-warning` while running, "Stopping…"), **Sync all** (`mod-cta`, disabled and "Syncing…" while busy), tooltips for both
 - [ ] Per provider: head with icon, name, **Add account**; one card per account
 - [ ] Account card: title button opens that account; surface lines (Web or Gemini, AI Studio, Desktop) with dot `is-on`, count or "Off" / "Not logged in" / "Checking…"; last-sync line where a failed run wins over a newer good one; **Sync** runs web, desktop and AI Studio as one stoppable run
@@ -111,7 +114,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Project picker: Fetch projects / Refresh list / Fetching… (cta only before first fetch), status with indeterminate bar, error text, "N of M selected · K with own folder", "Fetched … ago", filter box from 9 rows, Select all/Clear become Select shown/Clear shown while filtering, tags **New** and **Not found**, chat counts, warnings (nothing selected, catalog note), per-row transcript and JSON folder lines with greyed default, reset, invalid state; only the picker redraws on a tick
 - [ ] Lumo: project list fetched once per settings opening, full list in memory only, only selected names saved
 - [ ] Claude: Claude Code cloud sessions toggle; Advanced: Session key (secret storage), Organization ID (UUID check)
-- [ ] ChatGPT: Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
+- [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Keep Codex's steps toggle (off by default); Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
 - [ ] Gemini: "What is saved" note; Advanced: Google cookies. AI Studio: Sync AI Studio toggle, own folder
 - [ ] Lumo: Encryption note
 - [ ] Desktop app panel: Sync desktop sessions toggle (rest hidden while off), **Sync now**, Code Local / Codex Local folder, Raw session folder (only with Keep the raw session file), Reads from (roots and account matching text), Advanced: Extra session folders
@@ -136,6 +139,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] "What is saved" note
 
 **General tab**
+- [ ] **Sync from another device**: **This device** dropdown Syncs (writer) / Asks another device (requester), disabled on mobile, description changes with the role, remote status line, **Ask now** (cta) only when asking; **Name of this device** (saved on leaving the field, empty = default); **Folder for sync requests** (folder field; hidden, empty and `..` paths ignored); **Ignore requests older than (hours)** only when syncing (1 to 168, bad input ignored)
 - [ ] Max chats per run, Delay, Sync all on startup, Automatic sync (each validated; bad input ignored)
 - [ ] Raw files folder with on/off switch, default `80 Archive/raw`, description changes with state; move row for all raw files
 - [ ] Desktop sessions: Mirror the apps' sidebar, Wait until quiet (0 to 1440, default 15), Keep the raw session file, Include helper sessions (re-checks skipped ones), Save session files
@@ -167,6 +171,21 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Files: `Artifacts/` and `Attachments/` per chat; chat-view files read too; size mismatch and 404 skipped and remembered; identical file under another ID not copied; all files fetched before anything is written
 - [ ] Backfill of missing or deleted files for older chats, transcripts untouched
 - [ ] Cloud sessions (claude.ai/code): per repo folder, saved when done, counted in totals
+
+## 6a. Codex cloud [code: cloud/codex-app-server.ts, cloud/codex-cloud.ts, cloud/codex-sync.ts, covered by `npm run test:codex-cloud`]
+
+- [ ] Off by default per ChatGPT account (`codexCloud`); runs after the chats inside the ChatGPT sync, same login key, delay, per-run limit and Stop; counted in the run's totals; the log always names it when on ("0 Codex cloud tasks" or "N Codex cloud tasks listed, M saved", plus "N still running")
+- [ ] Connection: websocket `wss://codex-cloud-backend.chatgpt.com/`, sub-protocols `codex-app-server`, `codex-client.browser`, `openai-bearer.<access token>`; `initialize` (client name `obsidian-ai-chatbridge`, plugin version) then `initialized`; opened only when the sync reaches Codex, closed after it; 180 s per answer
+- [ ] Read only: the client refuses any method but `thread/list`, `thread/turns/list` (without items) and `thread/items/list` (`sortDirection: "asc"`, 200 per page) before sending; thread IDs must be UUIDs; the login key never appears in an error
+- [ ] Refused connection says to log in again; an error answer stops with its message; unexpected shape stops with "Unexpected Codex cloud task data", nothing more written
+- [ ] Turns (newest first, paged back) and steps joined: turns oldest first, steps back in their turn, steps of an unnamed turn kept as a turn of their own
+- [ ] **Keep Codex's steps** toggle (`codexCloudSteps`, off by default): off = raw keeps only `userMessage` and `agentMessage` items; each run of other steps between them becomes one `{ type: "stepsSkipped", count, kinds }` placeholder (reasoning dropped), so the note counts the same tool steps; no Changes section then. Long scheduled runs: 474 MB → a few MB for 21 tasks
+- [ ] With steps kept: step texts other than your messages and Codex's answers cut to 50,000 characters each in the raw file, marked "…[cut N characters]" (long scheduled runs carry megabytes of command output); raw `.json` (`{ thread, turns }`) without indentation
+- [ ] Folder `<Codex Cloud folder>/Tasks` (started on chatgpt.com/codex, `codex_cloud`) or `/Work` (started from ChatGPT, `codex_work_web` / `codex_work_mobile`), `Other` otherwise (with project subfolders on); name suffix = last 8 characters of the thread ID; raw mirrored under the raw files folder or the Codex Cloud JSON folder; older vaults get the folder beside their own `ChatGPT/Chat`
+- [ ] Title: Codex's name unless it is just the first prompt cut off (then the prompt's first line, 80 characters); a scheduled run ("System instruction (automation runtime…") is named after its schedule's `- Title:`
+- [ ] Note: `app: "Codex (cloud)"`, `session`, `model`, `started_from`, `source` (chatgpt.com/local/<id>), `account`; You / Codex turns, commands, tool calls and file edits counted as tool steps, reasoning left out; then Error (last turn's error, or "The last turn failed."; interrupted is no error) and Changes from file-edit steps (files, +/−, diff in a folded `[!diff]-` callout, fence longer than any backtick run; over 200,000 characters only in the raw file)
+- [ ] Running (`status.type` "active" in the list, or newest turn in progress) waits and is counted; no prompt = remembered, nothing written; unchanged `updatedAt` = not fetched
+- [ ] One note per task (follow-up rewrites it, earlier raw kept as version), restore from raw or by fetching, missing-guard, renames followed, Refresh index, raw-file move row, merge
 
 ## 6b. Merging copies from before one note per chat [code: merge.ts, merge-run.ts]
 
@@ -232,8 +251,23 @@ Every item here must hold on all three. Path logic takes the platform or a fake 
 
 ## 9. Not user-visible but required
 
-- [ ] Desktop only (`isDesktopOnly`), Obsidian 1.11.4+
+- [ ] Loads on phones and tablets (`isDesktopOnly: false`), Obsidian 1.11.4+. On mobile every sync of the device itself (manual, automatic, on startup, retry) is refused before it starts, manual ones with a notice; the settings, asking the computer (section 10) and **Test mobile connection** work there. No Node or Electron module is loaded at start-up (`main.js` requires only `obsidian`)
 - [ ] No network calls outside the listed provider hosts; no telemetry
 - [ ] Nothing changed or deleted on the provider side; files outside the vault only read
 - [ ] File writes: `createNew` never overwrites; `writeOver` (replace content) is used only by versions.ts, after the earlier version is kept; nothing is deleted except by the merge command, into Obsidian's trash
 - [ ] `npm run build`, `npm run lint` and `npm test` (every `test:*`) pass; CI runs `npm run test:ci` (all but `test:offline`, which needs the local `samples/`) on Linux, macOS and Windows
+
+## 10. Sync from another device [code: src/remote, covered by `npm run test:remote`]
+
+- [ ] Two files in the folder from the settings (default `00 Inbox/Mobile/ChatBridge`): `sync-request.json` (written only by a device that asks: `v`, `id`, `device`, `at`, `providers`) and `sync-status.json` (written only by the device that syncs: `requestId`, `device`, `requestedBy`, `state` running/done/refused, `startedAt`, `finishedAt`, `result` ok/problems/stopped/nothing/too-old/failed, counts and outcome per account, `message`). No other link between the devices
+- [ ] Role (writer on a computer, requester on mobile; mobile is always requester until direct sync exists), device name, handled request IDs (last 50), time of the last requested run and the pending request live in `app.saveLocalStorage`, never in `data.json`
+- [ ] Requester: the button writes the request and remembers it as pending; a second press within 2 minutes of an unanswered request writes nothing and says so; an unusable folder writes nothing
+- [ ] Requester: one notice when the status for its own request says running, one when it is done or refused (which ends the wait); a status for another request is shown in the status line but not announced
+- [ ] Writer: looks on vault `create`/`modify` of the two files, at start-up, every 60 s, when the window becomes visible and when a sync ends; a Requester waiting for an answer looks every 20 s
+- [ ] Writer: each request ID runs once, also across restarts; a request older than the limit is refused once with a `too-old` status; while a sync or project-list fetch runs the request waits for its end (never interrupts); at most one requested run per 2 minutes (a later one waits for the rest of the time)
+- [ ] Writer: a requested run is "Sync all" as the automatic sync does it (quiet, ChatGPT cooldowns respected, sources paused after an error stay paused); a notice names the asking device; the status is written before the run (running) and after it (done), with the runs recorded since its start; paused sources are named in the message ("Skipped until synced by hand on <device>: …") and make the result `problems`
+- [ ] A status left at running by a closed Obsidian is closed as `failed` on the next look, so the asking device stops waiting
+- [ ] Half-written or foreign JSON is ignored until the next look; nothing in the folder is ever deleted
+- [ ] A file whose reported size is 0 right after it was written is written once more (Android reports a newly created file as empty, and Syncthing then delivers it empty)
+- [ ] No login reaches the status file: notes are masked (`cleanNote`) and cut at 300 characters
+- [ ] Remote status line (Overview hero, General tab): "Asked …, waiting for the computer" while a request is unanswered; "<device> is syncing"; "Last synced by <device> <when>: <message>", green/orange/red dot, plus "(asked by <device>)" on the Writer

@@ -4,6 +4,7 @@
 //   <root>/Claude/Code-Cloud                   Claude Code sessions listed on claude.ai
 //   <root>/Claude/Code-Local/<computer>/<repo> Claude Code sessions on this computer
 //   <root>/ChatGPT/Chat/<project>              ChatGPT chats
+//   <root>/ChatGPT/Codex-Cloud/<Tasks|Work>    Codex tasks run in the cloud (chatgpt.com/codex)
 //   <root>/ChatGPT/Codex-Local/<computer>      Codex threads on this computer
 //   <root>/Lumo/Chat, <root>/Gemini/Chat, <root>/Gemini/AI Studio
 //
@@ -29,6 +30,7 @@ export const PLACES = {
 	claudeCodeCloud: 'Claude/Code-Cloud',
 	claudeCodeLocal: 'Claude/Code-Local',
 	chatgptChat: 'ChatGPT/Chat',
+	codexCloud: 'ChatGPT/Codex-Cloud',
 	codexLocal: 'ChatGPT/Codex-Local',
 	lumoChat: 'Lumo/Chat',
 	geminiChat: 'Gemini/Chat',
@@ -49,6 +51,7 @@ export function layoutFolders(root: string, computer = computerName()) {
 		claudeCodeCloud: at(PLACES.claudeCodeCloud),
 		claudeCodeLocal: at(`${PLACES.claudeCodeLocal}/${computer}`),
 		chatgptChat: at(PLACES.chatgptChat),
+		codexCloud: at(PLACES.codexCloud),
 		codexLocal: at(`${PLACES.codexLocal}/${computer}`),
 		lumoChat: at(PLACES.lumoChat),
 		geminiChat: at(PLACES.geminiChat),
@@ -101,6 +104,7 @@ export function layoutMoves(s: Settings, exists: (path: string) => boolean = () 
 		targets.push(
 			{ label: 'ChatGPT chats', setting: a.web.folder, legacy: ['ChatGPT Chat', `${CHATGPT_APP}/Chat`], to: to.chatgptChat, set: (_s, p) => (a.web.folder = p) },
 			{ label: 'Codex threads on this computer', setting: a.desktop.folder, legacy: ['Codex', `${CHATGPT_APP}/Codex`], to: to.codexLocal, set: (_s, p) => (a.desktop.folder = p) },
+			{ label: 'Codex tasks run in the cloud', setting: a.web.codexCloudFolder, to: to.codexCloud, set: (_s, p) => (a.web.codexCloudFolder = p) },
 		);
 	}
 	for (const a of s.lumo) targets.push({ label: 'Lumo chats', setting: a.web.folder, to: to.lumoChat, set: (_s, p) => (a.web.folder = p) });

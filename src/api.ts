@@ -54,6 +54,27 @@ const CODE_SESSIONS = '/v1/code/sessions';
 /** Every status the claude.ai Code page asks for, so archived and failed sessions are listed too. */
 const CODE_STATUSES = ['active', 'paused', 'failed', 'archived'];
 
+/**
+ * "Test mobile connection" only: one GET of claude.ai/api/organizations with the session key.
+ * The answer comes back whole and unjudged, in memory; the caller reads the status and type
+ * and never shows the text.
+ */
+export async function probeOrganizations(key: string): Promise<{ status: number; headers: Record<string, string>; text: string }> {
+	let res;
+	try {
+		res = await requestUrl({ url: `${ORIGIN}/api/organizations`, method: 'GET', headers: { Cookie: `sessionKey=${key}`, Accept: 'application/json' }, throw: false });
+	} catch (e) {
+		throw new Error(`Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`);
+	}
+	let text = '';
+	try {
+		text = res.text;
+	} catch {
+		text = '';
+	}
+	return { status: res.status, headers: res.headers, text };
+}
+
 export class ClaudeApi {
 	constructor(
 		private readonly orgId: string,
