@@ -58,7 +58,7 @@ Command IDs are stable API. Never rename.
 - [ ] Desktop: the raw `.jsonl` is rewritten in place; an earlier copy is kept as a version only when the new file does not start with it; none with Keep raw off. A changed raw folder setting does not move a session's raw copy (the move row does)
 - [ ] Hermes: raw `.json` per session (rows from `state.db`) under the raw files folder, linked as `raw:`; a session saved before that keeps its old note text as JSON for its first earlier version
 - [ ] ChatGPT: a note rendered differently now (new files, newer plugin) is rewritten in place, counted as "refreshed transcripts"
-- [ ] Index saved after every chat, so a stop loses nothing
+- [ ] Index saved after every chat (into this computer's file, section 11), so a stop loses nothing
 - [ ] Restore: deleted `.md` rewritten from saved `.json` under its own name and place, with its version info; deleted `.json` fetched again under the same name; both gone = saved like new (Claude) or again under the same names (ChatGPT, Gemini, AI Studio, Lumo)
 - [ ] Missing-guard: many saved chats missing stops the sync before anything is written
 - [ ] Unexpected data shape stops the sync ("could not be verified" class of errors), nothing more is written
@@ -77,7 +77,7 @@ Command IDs are stable API. Never rename.
 - [ ] Status bar idle: "next sync HH:MM" while automatic sync is on, plus " · waiting for you: <sources>" for sources paused after an error; "syncing in 10 s" before a startup sync; "retry in MM:SS" during a ChatGPT cooldown
 - [ ] Result notice after manual runs, and after automatic runs that saved or restored something: new, changed, unchanged, restored, left for next run, still active, Hermes profiles not found
 - [ ] Stopped, waiting (cooldown) and failed runs each have their own notice text
-- [ ] Last run stored per account surface in `data.json` (counts and reason only, never chat text; note cut at 300 chars)
+- [ ] Last run stored per account surface in this computer's file (section 11; counts and reason only, never chat text; note cut at 300 chars); a run another computer did shows its name ("today 10:02 on Tower")
 - [ ] Last-sync line: `history` icon, coloured dot, text, tooltip. Tone: `is-ok` green, `is-warn` orange (stopped, waiting, nothing selected, Hermes not found), `is-bad` red plus red text. "not synced yet" without a run. Automatic runs marked "(automatic)"
 - [ ] Overview hero: one line for the last Sync all, naming accounts with problems
 
@@ -139,6 +139,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] "What is saved" note
 
 **General tab**
+- [ ] **Computers** (before Sync from another device): **This computer** with its name in bold and what the files are for; **Other computers**: "Looking…", then one line per other computer file ("Laptop: last synced today 10:02", newest first, clash copies counted once) or "None yet…"
 - [ ] **Sync from another device**: **This device** dropdown Syncs (writer) / Asks another device (requester), disabled on mobile, description changes with the role, remote status line, **Ask now** (cta) only when asking; **Name of this device** (saved on leaving the field, empty = default); **Folder for sync requests** (folder field; hidden, empty and `..` paths ignored); **Ignore requests older than (hours)** only when syncing (1 to 168, bad input ignored)
 - [ ] Max chats per run, Delay, Sync all on startup, Automatic sync (each validated; bad input ignored)
 - [ ] Raw files folder with on/off switch, default `80 Archive/raw`, description changes with state; move row for all raw files
@@ -273,3 +274,17 @@ Every item here must hold on all three. Path logic takes the platform or a fake 
 - [ ] A file whose reported size is 0 right after it was written is written once more (Android reports a newly created file as empty, and Syncthing then delivers it empty)
 - [ ] No login reaches the status file: notes are masked (`cleanNote`) and cut at 300 characters
 - [ ] Remote status line (Overview hero, General tab): "Asked …, waiting for the computer" while a request is unanswered; "<device> is syncing"; "Last synced by <device> <when>: <message>", green/orange/red dot, plus "(asked by <device>)" on the Writer
+- [ ] Writer: while another computer's busy marker is alive (section 11), a request is left alone; the next look takes it once that computer has finished
+
+## 11. Several computers, one vault [code: src/computers, covered by `npm run test:computers`]
+
+The vault (with `.obsidian`) may be synced between computers by a tool with no ignore list (Proton Drive). No file may be written by two computers.
+
+- [ ] `data.json` holds only what you set (marked `storage: 2`) and is rewritten only when a setting changes, never after a chat
+- [ ] `computers/<computer name>.json` in the plugin folder holds that computer's history: the web indexes (`index`, `fileIndex`, `cloudIndex`, `codexCloudIndex`, AI Studio `index`), ChatGPT cooldown, retry, captures, asset retries, inventories and progress, the project lists, each desktop app's extra folders, index, ignored files and group cache, the Hermes profiles and Python path, AI memory states, the last runs and the last Sync all. Only that computer writes it, and only when it changed. A phone writes none
+- [ ] Before every sync and once after start-up, the other computers' files are read (a sync tool's clash copies too; half-written or foreign files ignored) and their web history combined into this one: chats, cloud sessions, downloaded files, the newer project list, web AI memory states, the newest last run per source. The same chat remembered differently: the one whose note is in the vault wins, then the newer, then ours. Combining only adds. Desktop apps, Hermes and cooldowns are never combined
+- [ ] First start after the update: the old `data.json` is kept as `data.before-computers.json`, then split once. Desktop and Hermes history whose paths exist nowhere on this computer is put aside in `computers/_unclaimed.json` (with a notice) and taken back by the computer where they exist; the file is then emptied, never deleted
+- [ ] History in `data.json` (an older build wrote it) never wins over the computer file
+- [ ] No plugin folder known: everything stays in `data.json`, as before
+- [ ] `data.json` changed by another computer: its settings are taken over and this computer's history kept; during a sync, once the sync has ended
+- [ ] Busy marker `sync-busy.json` in the plugin folder: `running` (computer, start, a sign of life every 60 s) while a sync runs here, `idle` afterwards. Another computer's `running` marker with a sign of life in the last 30 minutes: a manual sync asks **Another computer is syncing** (Cancel / **Sync here anyway**); automatic, start-up and retry runs are skipped; our own marker never blocks

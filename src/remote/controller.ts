@@ -273,6 +273,9 @@ export class RemoteSync {
 			}
 			return;
 		}
+		// Another computer is syncing this vault: it may well answer this request itself. If not,
+		// the next look (every minute) takes it once that computer has finished.
+		if (await plugin.computers.busyElsewhere(now)) return;
 		const running = runningStatus(request, this.deviceName, now);
 		await this.write(STATUS_FILE, running);
 		// Something else may have started while the status was written; then this request waits.

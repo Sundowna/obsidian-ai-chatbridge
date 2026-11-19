@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.35.0 - 2026-11-19
+
+### New
+- **One vault on several computers** - the vault can now be synced between computers by a file syncing app that copies everything, `.obsidian` included (Proton Drive, Syncthing, Obsidian Sync), and whichever computer you are on syncs everything itself. No computer has to stay switched on for the others
+  - `data.json` now holds only what you set. It is rewritten only when you change a setting, never after a chat, so two computers no longer write over each other's copy
+  - What a computer synced goes to a file of its own, `computers/<computer name>.json` in the plugin folder: what has been saved per chat, downloaded files, ChatGPT cooldowns and retries, project lists, the last runs. So do its own folders: Claude Code and Codex extra session folders, Hermes profiles and the Python path. No other computer writes that file
+  - Before each sync, what the other computers saved is read and combined, so a chat Tower saved yesterday is not fetched again on the laptop and no second note is written. The same chat remembered differently on two computers: the one whose note is in the vault wins (the other may still name the note from before a rename), then the newer. Combining only adds. Claude Code, Codex and Hermes sessions stay with the computer they are on
+  - **Busy marker** - while a sync runs, `sync-busy.json` says which computer is syncing. If you start a sync on another computer meanwhile, it asks whether to wait or sync anyway; the automatic sync, the sync on startup, a retry and a phone's request wait. A marker with no sign of life for 30 minutes (lid closed, Obsidian ended) no longer counts
+  - The last-sync lines name the computer when another one ran it ("today 10:02 on Tower"). **General → Computers** shows this computer's name and when the others last synced
+  - A settings change made on another computer (it arrives as a new `data.json`) is taken over without losing this computer's history
+
+### Good to know
+- On the first start the settings are split once, and the old `data.json` is kept as `data.before-computers.json`. Claude Code and Hermes history that belongs to another computer (its folders do not exist here) is put aside in `computers/_unclaimed.json` and taken back by that computer when it opens the vault
+- Each computer signs in to each account once: logins live in that computer's Obsidian, not in the vault
+- Let the file syncing app finish copying the vault to a new computer before its first sync. A chat whose note has not arrived yet would otherwise be written again
+- The plugin's own files travel with the vault too, so every computer runs the same version once the sync has delivered it
+
 ## 0.34.1 - 2026-11-18
 
 ### Fixed

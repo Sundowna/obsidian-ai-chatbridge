@@ -14,6 +14,11 @@ import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
 import { testMobileConnection } from './mobile/connection-test';
 import { RemoteSync } from './remote/controller';
+import { ComputerStore } from './computers/store';
+import { ALIVE_EVERY_MS, busyText, type BusyMarker } from './computers/busy';
+import { joinSaved, splitSettings } from './computers/split';
+import { ConfirmModal } from './ui/modals';
+import { findFile } from './vaultio';
 import { followRename } from './follow';
 import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { StopError } from './api';
@@ -73,6 +78,10 @@ export default class AIChatBridge extends Plugin {
 	private readonly busyListeners = new Set<() => void>();
 	/** The Sync button across devices: this one syncs, or asks the one that does. */
 	readonly remote = new RemoteSync(this);
+	/** Settings split between data.json (shared) and this computer's own file (see computers/). */
+	readonly computers = new ComputerStore(() => this.app.vault.adapter, () => this.manifest?.dir);
+	/** data.json changed on disk during a sync: read it once the sync is done. */
+	private externalPending = false;
 	/** The last "Refresh index" result, shown in the settings. */
 	lastReindex: (ReindexResult & { at: number }) | null = null;
 
@@ -218,6 +227,8 @@ export default class AIChatBridge extends Plugin {
 			for (const ref of watch.events) this.registerEvent(ref);
 			this.registerInterval(watch.interval);
 			this.scheduleGptResume();
+			// The vault's files are known now, so what other computers synced can be checked against them.
+			void this.mergeOtherComputers();
 			if (this.settings.syncOnStartup) this.scheduleStartupSync();
 			// Moves/renames in Obsidian update the index (registered after load, so the
 			// vault's start-up scan is not mistaken for renames).
@@ -694,19 +705,84 @@ export default class AIChatBridge extends Plugin {
 			if (trigger === 'manual') new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is already running.');
 			return;
 		}
+		// Another computer syncing this vault right now would write the same notes. You may still
+		// go ahead by hand; the automatic sync, a retry and another device's request just wait.
+		const other = await this.computers.busyElsewhere();
+		if (other) {
+			if (trigger !== 'manual') return;
+			if (!(await this.syncAnyway(other))) return;
+		}
+		if (this.running || this.unloaded) return; // something started while we looked
 		this.clearGptResumeTimer();
 		this.running = true;
 		this.stopRequested = false;
 		this.busyChanged();
+		const started = Date.now();
+		let alive: number | null = null;
 		try {
+			// What the other computers synced since we last looked, so it is not fetched again.
+			await this.mergeOtherComputers();
+			await this.computers.markRunning(started);
+			alive = window.setInterval(() => void this.computers.markRunning(started), ALIVE_EVERY_MS);
 			await fn();
 		} finally {
+			if (alive !== null) window.clearInterval(alive);
+			await this.computers.markIdle();
 			this.running = false;
 			this.stopRequested = false;
 			this.current = null;
 			this.busyChanged();
 			this.scheduleGptResume();
+			if (this.externalPending) void this.onExternalSettingsChange();
 		}
+	}
+
+	/** Asks whether to sync while another computer is syncing. */
+	private syncAnyway(other: BusyMarker): Promise<boolean> {
+		return new Promise((resolve) => {
+			let yes = false;
+			const modal = new ConfirmModal(this.app, 'Another computer is syncing',
+				`${busyText(other, formatClock)} If both sync at once, they may both write the same notes. Wait until it has finished, or sync here anyway.`,
+				'Sync here anyway', () => {
+					yes = true;
+				});
+			const close = modal.onClose.bind(modal);
+			modal.onClose = () => {
+				close();
+				resolve(yes);
+			};
+			modal.open();
+		});
+	}
+
+	/** Brings in what the other computers synced (see computers/merge.ts). */
+	async mergeOtherComputers(): Promise<number> {
+		try {
+			const n = await this.computers.mergeOthers(this.settings, (path) => findFile(this.app, path) !== null);
+			if (n) await this.saveSettings();
+			return n;
+		} catch (e) {
+			console.error('AI ChatBridge: could not read the other computers\' history', e instanceof Error ? e.message : e);
+			return 0;
+		}
+	}
+
+	/** data.json was changed by another computer (through the vault's sync): take its settings, keep our history. */
+	async onExternalSettingsChange(): Promise<void> {
+		if (this.unloaded) return;
+		if (this.running) {
+			this.externalPending = true;
+			return;
+		}
+		this.externalPending = false;
+		const loaded = (await this.loadData()) as unknown;
+		if (!this.computers.isNewShared(loaded)) return;
+		const { local } = splitSettings(this.settings, this.computers.here);
+		this.settings = normalizeSettings(joinSaved(loaded, local)).settings;
+		this.computers.noteShared(loaded);
+		this.restartTimer();
+		this.restartMemoryTimer();
+		this.busyChanged();
 	}
 
 	/** A sync (not a project-list fetch) is running, so it can be stopped. */
@@ -907,16 +983,23 @@ export default class AIChatBridge extends Plugin {
 
 	async loadSettings() {
 		const loaded = (await this.loadData()) as unknown;
-		const { settings, migrated } = normalizeSettings(loaded);
+		// data.json holds what you set; this computer's file what it synced (see computers/).
+		const { raw, firstSplit, putAside } = await this.computers.load(loaded);
+		const { settings, migrated } = normalizeSettings(raw);
 		this.settings = settings;
 		if (migrated) await this.keepOldSettings(loaded);
+		if (firstSplit) {
+			await this.keepOldSettings(loaded, 'data.before-computers.json');
+			await this.saveSettings();
+			if (putAside) new Notice('AI ChatBridge: the Claude Code and Hermes history in the settings is from another computer, so it was put aside for that one.', 15_000);
+		}
 	}
 
-	/** One copy of the settings from before multiple accounts, in case you ever go back a version. */
-	private async keepOldSettings(loaded: unknown): Promise<void> {
+	/** One copy of the settings from before a change of format, in case you ever go back a version. */
+	private async keepOldSettings(loaded: unknown, name = 'data.before-accounts.json'): Promise<void> {
 		const dir = this.manifest?.dir;
 		if (!dir) return;
-		const path = `${dir}/data.before-accounts.json`;
+		const path = `${dir}/${name}`;
 		try {
 			const adapter = this.app.vault.adapter;
 			if (!(await adapter.exists(path))) await adapter.write(path, JSON.stringify(loaded));
@@ -929,7 +1012,7 @@ export default class AIChatBridge extends Plugin {
 
 	async saveSettings() {
 		if (this.unloaded) return; // see onunload
-		const write = this.settingsWrite.then(() => this.saveData(this.settings));
+		const write = this.settingsWrite.then(() => this.computers.save(this.settings, (data) => this.saveData(data)));
 		this.settingsWrite = write.catch(() => undefined);
 		await write;
 	}
