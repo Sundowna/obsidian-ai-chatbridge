@@ -26,6 +26,7 @@
 - [Codex cloud tasks](#codex-cloud-tasks)
 - [Hermes Agent](#hermes-agent)
 - [AI memory](#ai-memory)
+- [Several computers](#several-computers)
 - [Phone and tablet](#phone-and-tablet)
 - [Commands](#commands)
 - [Part of the Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite)
@@ -206,7 +207,7 @@ You don't have to catch the notice to know what a sync did. Each account remembe
 - **Overview** - every account card and the Hermes card have a **Last sync** line, e.g. "today 14:02: 3 new, 1 changed, 240 unchanged". Under the totals at the top, one line sums up the last **Sync all** and names any account that had a problem
 - **Each tab** - the sync row of **Web**, **Desktop app**, **AI Studio** and **Hermes** shows that part's last run
 - **The dot** - green: it went fine. Orange: you stopped it, it is waiting out a ChatGPT cooldown, no projects were selected, or Hermes profiles were not found. Red: it failed, with the reason
-- Automatic syncs are marked "(automatic)". Only counts and the stop reason are kept (in `data.json`), never chat text
+- Automatic syncs are marked "(automatic)". Only counts and the stop reason are kept (in the computer's own file in the plugin folder), never chat text
 
 ## Desktop app sessions
 
@@ -419,6 +420,16 @@ Turn it off to save everything exactly as the AI keeps it; the next sync then wr
 - **Left out:** folders named `Private` (and Claude Code projects with `Private` as a part of their name) are never read, and the memory folder cannot be inside one. Files larger than 2 MB or not text are named, not copied. Codex's use counters and ChatGPT's per-memory status are left out, because they change without the memory changing and would cause a new snapshot each time
 - **If an answer looks different from what the plugin knows,** the read stops and nothing is saved for that account, so a snapshot is never half-written
 
+## Several computers
+
+You can keep one vault on several computers and sync it between them with any file syncing app, even one that copies everything including `.obsidian` (Proton Drive, Syncthing, Obsidian Sync). Whichever computer you are on syncs everything itself; none has to stay switched on for the others.
+
+- **Settings are shared, history is not.** `data.json` holds only what you set, and changes only when you change a setting. What each computer synced goes to a file of its own, `computers/<computer name>.json` in the plugin folder, together with its own folders (extra Claude Code and Codex session folders, Hermes profiles). Two computers never write the same file
+- **No chat is fetched twice.** Before each sync the plugin reads what the other computers saved. A chat Tower saved yesterday is known on the laptop, so it is not fetched again and no second note is written. Claude Code, Codex and Hermes sessions stay with the computer they are on, in its own folder (`Code-Local/<computer>/…`)
+- **One at a time.** While a sync runs, a small file says which computer is syncing. If you start a sync on another computer meanwhile, it asks whether to wait or sync anyway; automatic syncs just wait. The last-sync lines say "on Tower" when another computer ran them, and **General → Computers** lists the others
+- **Each computer signs in once** per account: logins live in that computer's Obsidian, not in the vault
+- **New computer:** let the file syncing app finish copying the vault before the first sync there. A chat whose note has not arrived yet would otherwise be written again, and the syncing app would then keep two copies
+
 ## Phone and tablet
 
 The plugin loads in Obsidian on Android and iOS, but a phone does not sync by itself yet: the login windows and the local sessions only exist on a computer. Instead the phone **asks your computer to sync**, through two small files in the vault. Whatever carries your vault between the devices (Syncthing, Obsidian Sync, …) carries them too; there is no other connection and no extra service.
@@ -487,7 +498,7 @@ This plugin needs network access for the web providers. Please read this before 
 - **Gemini and AI Studio:** Google has no API for either, so the plugin opens them in a hidden window with your Google login and reads the same data their own pages load. Requests are signed inside that page the way the page signs its own - no Google token is saved or logged. Google blocks logins from windows inside apps, so the Google login window says it's Firefox
 - **Proton Lumo:** Lumo stores chats end-to-end encrypted. To sync them, the plugin opens Lumo in a hidden window with your login and unlocks your keys for that one sync - the keys stay in memory and are never saved or logged. The chats are then saved **readable** in your vault, so anything that can read your vault can read them
 - **ChatGPT's visual answers:** turned into plain HTML and pictures in your notes - nothing from a chat is ever run, and drawings can't load anything from other websites
-- **What is written:** transcripts, raw JSON, downloaded files and a sync log - only in the vault folders you choose. The sync index in `data.json` holds chat IDs and paths, no chat content and no secrets
+- **What is written:** transcripts, raw JSON, downloaded files and a sync log - only in the vault folders you choose. The sync index (in each computer's own file in the plugin folder, see [Several computers](#several-computers)) holds chat IDs and paths, no chat content and no secrets
 - **Files outside the vault (desktop apps and Hermes only):** the plugin *reads* local files only for what you turn on - for Claude Code and Codex: `~/.claude/projects`, the Claude desktop app's session list and Local Storage (for titles and sidebar groups), `~/.codex/.codex-global-state.json`, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl` and any extra folders you add; for Hermes: the `state.db` of each profile that is on. It never changes them and sends nothing over the network. Hermes snapshots are written to your system's temporary folder and deleted right after reading; if Obsidian has no built-in SQLite, a Python on your computer is started to make them. Hermes tool results can contain file contents, so they are shortened in the notes and steps mentioning a `Private` folder are left out
 - **AI memory, Claude (only for the accounts you turn on):** asks claude.ai for the list of memory files, each file's text, the names of the projects that have memory, and your instructions for Claude, with the same login as the chat sync. Listing and reading memory files are requests that only read (claude.ai asks for them with POST, like its chat view). Nothing is changed there
 - **AI memory, ChatGPT (only for the accounts you turn on):** asks chatgpt.com for the memory summary, the saved memories and the custom instructions, with the same login as the chat sync. It changes nothing there (see [AI memory](#ai-memory) for the one request that is not a GET). Saved memories can hold names and email addresses; the privacy filter does not replace those

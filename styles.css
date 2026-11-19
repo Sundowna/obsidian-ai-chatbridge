@@ -1043,3 +1043,13 @@
 	user-select: text;
 	-webkit-user-select: text;
 }
+
+/* General tab, Computers: this computer's name and the other computers. */
+.ccs-computer-name {
+	font-weight: var(--font-semibold);
+}
+
+.ccs-computer-list {
+	margin: 0;
+	padding-inline-start: var(--size-4-5);
+}

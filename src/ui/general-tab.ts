@@ -9,6 +9,7 @@ import { allRawMoves } from '../raw-move';
 import { rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import type { EditedPolicy } from '../versions';
 import { remoteSection } from './remote-section';
+import { computersSection } from './computers-section';
 
 export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 	const { plugin } = ctx;
@@ -61,6 +62,7 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 			}),
 		);
 
+	computersSection(ctx, el);
 	remoteSection(ctx, el);
 
 	new Setting(el).setName('Notes').setHeading();

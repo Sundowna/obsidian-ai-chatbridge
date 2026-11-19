@@ -134,8 +134,9 @@ const adapter = {
 const FOLDER = 'Inbox/ChatBridge';
 function device(role: 'writer' | 'requester', name: string) {
 	const store = new Map<string, unknown>([['ai-chatbridge-role', role], ['ai-chatbridge-device', name]]);
-	const state = { busy: false, synced: 0, fail: false, lastRuns: {} as Record<string, LastRun> };
+	const state = { busy: false, synced: 0, fail: false, lastRuns: {} as Record<string, LastRun>, otherComputerBusy: false };
 	const plugin = {
+		computers: { busyElsewhere: async () => (state.otherComputerBusy ? { v: 1, device: 'Laptop', state: 'running', at: new Date().toISOString() } : null) },
 		app: { vault: { adapter }, loadLocalStorage: (k: string) => store.get(k) ?? null, saveLocalStorage: (k: string, v: unknown) => (v === null ? store.delete(k) : store.set(k, v)) },
 		settings: { remote: { folder: FOLDER, maxAgeHours: 12 }, get lastRuns() { return state.lastRuns; } },
 		get busy() { return state.busy; },
@@ -224,6 +225,17 @@ async function devices() {
 	towerLater.store.set('ai-chatbridge-requests-handled', [cut.id]);
 	await tower2.check();
 	expect('devices: a status left at "running" is closed after a restart', towerLater.state.synced === 1 && readStatus()?.state === 'done' && readStatus()?.result === 'failed');
+
+	// Another computer is syncing the vault: the request waits for it instead of starting a second sync.
+	const busyReq = newRequest('while-laptop-01', 'Pixel', Date.now());
+	files.set(`${FOLDER}/${REQUEST_FILE}`, JSON.stringify(busyReq));
+	towerLater.store.set('ai-chatbridge-request-last-run', Date.now() - MIN_GAP_MS - 1);
+	towerLater.state.otherComputerBusy = true;
+	await tower2.check();
+	expect('devices: while another computer syncs, the request is left alone', towerLater.state.synced === 1 && readStatus()?.requestId !== busyReq.id);
+	towerLater.state.otherComputerBusy = false;
+	await tower2.check();
+	expect('devices: once it has finished, the request runs', towerLater.state.synced === 2 && readStatus()?.requestId === busyReq.id && readStatus()?.state === 'done');
 
 	// A computer set to ask does not serve requests.
 	const laptop = device('requester', 'Laptop');
