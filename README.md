@@ -173,7 +173,7 @@ earlier_raw:
 Up to 0.31 a chat that continued got a second note, `<name> (updated <date>)`, and ChatGPT chats could get `(transcript …)` copies. **General → Merge chat copies into one note** (or the command of that name) tidies them up:
 
 1. It shows a **preview**: per chat, which notes merge into which, which raw files become earlier versions and how many links change. Nothing changes until you press **Merge**. **Save preview as a note** keeps the full list
-2. Per chat, the first note keeps its name and gets the newest text. Raw files of earlier versions become `(version …)` files, saved files move into the note's own `Artifacts/` and `Attachments/` folders, and links to the merged notes are rewritten to the note that stays
+2. Per chat, the first note keeps its name and gets the newest text. Raw files of earlier versions become `(version …)` files, saved files move into the note's own `Artifacts/` and `Attachments/` folders, and links to the merged notes are rewritten to the note that stays. That includes canvases: a file card shows the note that stays, and links in text cards are rewritten like links in a note
 3. The merged notes go to Obsidian's trash (the one set under **Files and links → Deleted files**), not deleted for good
 4. A **report note** next to the sync log lists what was merged and any link that could not be fixed
 

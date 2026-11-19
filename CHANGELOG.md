@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.35.1 - 2026-11-19
 
 ### Changed
 - **Merging chat copies also fixes links in canvases** - **Merge chat copies into one note** now rewrites a canvas's cards that show a merged note: a file card points at the note that stays (a card showing one heading keeps it), and links written in a text card are rewritten like links in a note, alias, heading and embed kept. Nothing else in the canvas changes, and a canvas without such a link is not written at all. The preview counts these links like any other. Before, a canvas was only named in the report to check by hand. A canvas that cannot be read, and other files that are not notes (such as Excalidraw drawings), are still only reported
