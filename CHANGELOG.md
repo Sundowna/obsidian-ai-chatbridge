@@ -5,6 +5,40 @@
 ### Changed
 - **Merging chat copies also fixes links in canvases** - **Merge chat copies into one note** now rewrites a canvas's cards that show a merged note: a file card points at the note that stays (a card showing one heading keeps it), and links written in a text card are rewritten like links in a note, alias, heading and embed kept. Nothing else in the canvas changes, and a canvas without such a link is not written at all. The preview counts these links like any other. Before, a canvas was only named in the report to check by hand. A canvas that cannot be read, and other files that are not notes (such as Excalidraw drawings), are still only reported
 
+## 0.35.0 - 2026-11-19
+
+### New
+- **One vault on several computers** - the vault can now be synced between computers by a file syncing app that copies everything, `.obsidian` included (Proton Drive, Syncthing, Obsidian Sync), and whichever computer you are on syncs everything itself. No computer has to stay switched on for the others
+  - `data.json` now holds only what you set. It is rewritten only when you change a setting, never after a chat, so two computers no longer write over each other's copy
+  - What a computer synced goes to a file of its own, `computers/<computer name>.json` in the plugin folder: what has been saved per chat, downloaded files, ChatGPT cooldowns and retries, project lists, the last runs. So do its own folders: Claude Code and Codex extra session folders, Hermes profiles and the Python path. No other computer writes that file
+  - Before each sync, what the other computers saved is read and combined, so a chat Tower saved yesterday is not fetched again on the laptop and no second note is written. The same chat remembered differently on two computers: the one whose note is in the vault wins (the other may still name the note from before a rename), then the newer. Combining only adds. Claude Code, Codex and Hermes sessions stay with the computer they are on
+  - **Busy marker** - while a sync runs, `sync-busy.json` says which computer is syncing. If you start a sync on another computer meanwhile, it asks whether to wait or sync anyway; the automatic sync, the sync on startup, a retry and a phone's request wait. A marker with no sign of life for 30 minutes (lid closed, Obsidian ended) no longer counts
+  - The last-sync lines name the computer when another one ran it ("today 10:02 on Tower"). **General → Computers** shows this computer's name and when the others last synced
+  - A settings change made on another computer (it arrives as a new `data.json`) is taken over without losing this computer's history
+
+### Good to know
+- On the first start the settings are split once, and the old `data.json` is kept as `data.before-computers.json`. Claude Code and Hermes history that belongs to another computer (its folders do not exist here) is put aside in `computers/_unclaimed.json` and taken back by that computer when it opens the vault
+- Each computer signs in to each account once: logins live in that computer's Obsidian, not in the vault
+- Let the file syncing app finish copying the vault to a new computer before its first sync. A chat whose note has not arrived yet would otherwise be written again
+- The plugin's own files travel with the vault too, so every computer runs the same version once the sync has delivered it
+
+## 0.34.1 - 2026-11-18
+
+### Fixed
+- **macOS: "File already exists" no longer stops the sync** - the plugin looked files up by their exact name, but macOS and Windows treat names that differ only in letter case as the same file, and file names synced by tools such as Syncthing can be stored in another Unicode form (accented letters written as two characters). Such a file looked missing, so creating it failed and the sync stopped there every time. Now the existing file is found: a changed chat updates it, and a new file whose name differs only in case gets a number (`… 2.png`). Linux keeps names that differ in case apart, as its file system does ([#25](https://github.com/Sundowna/obsidian-ai-chatbridge/issues/25))
+- **Gemini: one unreadable chat no longer stops the whole sync** - a chat Google sends in an unexpected shape (for example a turn without prompt text) is now skipped, named in the log under "could not read" and tried again next run, and the other chats keep syncing. If three chats in one run fail that way, the sync still stops, since Google may have changed its format ([#26](https://github.com/Sundowna/obsidian-ai-chatbridge/issues/26))
+
+## 0.34.0 - 2026-11-18
+
+### New
+- **Codex cloud tasks** - tasks that Codex ran in OpenAI's cloud can now be saved with the ChatGPT sync, into the new **Codex Cloud folder**: `ChatGPT/Codex-Cloud/Tasks/` for those started on chatgpt.com/codex, `Work/` for those started from ChatGPT on the web, the phone or a schedule. Each note holds every prompt and Codex's answers with the steps counted, the error of a failed turn and the files changed as a folded diff, and links back to the task; the raw `.json` holds the conversation, and with the new **Keep Codex's steps** toggle every step too (very long command output cut at 50,000 characters). Scheduled runs are named after their schedule. A running task is saved once it is done, and a follow-up updates its one note while the version before stays as raw `.json`. The plugin reads Codex over the same live connection the Codex page uses, and only reads. Off until you turn it on per account with **Codex cloud tasks** in the ChatGPT tab. The ChatGPT log line always says how many Codex cloud tasks it found
+- **Sync from your phone, run by your computer** - the plugin now loads in Obsidian on Android and iOS. Its sync button there writes a small request file into the vault; your computer picks it up once your vault sync has delivered it, runs **Sync all** and writes back what it did. The phone tells you when the computer has started and finished, and the Overview shows "Last synced by …". No connection between the devices is needed besides the vault sync you already use. Set the shared folder under **General → Sync from another device**; whether a device syncs or asks is saved on the device itself. The computer runs each request once, at most one every two minutes, never interrupts a running sync, and ignores requests older than 12 hours (a setting). New command **Sync: here, or ask the computer**, for the mobile toolbar
+- **Test mobile connection** - a first step towards syncing on the phone itself. The new command **Test mobile connection** checks whether that device can reach claude.ai and ChatGPT with a pasted session key or cookie: it shows the status, the content type and whether a Cloudflare check page came back. Nothing is saved, and no key is shown or logged
+
+### Changed
+- The plugin is no longer marked desktop only. A phone or tablet does not sync by itself yet: there the sync button and **Sync all chats** ask your computer instead
+- The ribbon icon reads "Ask the computer to sync" on a device that asks
+
 ## 0.33.0 - 2026-11-16
 
 ### New

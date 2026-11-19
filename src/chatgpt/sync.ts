@@ -10,7 +10,7 @@ import { StopError } from '../api';
 import { ShapeError } from '../schema';
 import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames } from '../select';
 import { baseName, dailyNoteName, safeTitle, tagAccount, untagAccount } from '../naming';
-import { createNew, ensureFolder, freeFileName, freeStem } from '../vaultio';
+import { createNew, ensureFolder, findFile, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
 import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from '../settings';
@@ -28,6 +28,9 @@ import { renderGptTranscript } from './transcript';
 import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
+import { CodexCloudShapeError } from '../cloud/codex-cloud';
+import { syncCodexCloud } from '../cloud/codex-sync';
+import { emptyCloudResult, type CloudSyncResult } from '../cloud/sync';
 
 const MAX_PAGES = 300; // 6000 chats per list; a guard against an endless paging loop
 const MAX_OLDER = 200; // older parts per chat (10 turns each)
@@ -64,6 +67,8 @@ export interface GptSyncResult {
 	stopped?: string;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
+	/** Codex cloud tasks (chatgpt.com/codex); also counted in the totals above. */
+	codexCloud?: CloudSyncResult;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -133,7 +138,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	const retries = g.assetRetries ??= {};
 	const pendingAssets = new Set<string>();
 
-	const exists = (path: string): boolean => app.vault.getAbstractFileByPath(path) instanceof TFile;
+	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
 	const isMissing = (f: GptFileTask): boolean => {
 		const p = g.fileIndex[f.fileUuid];
 		if (p === undefined) return true;
@@ -156,7 +161,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 
 	const sameContent = async (bytes: ArrayBuffer, folder: string, stem: string): Promise<string | null> => {
 		for (const kindFolder of Object.values(KIND_FOLDER)) {
-			const dir = app.vault.getAbstractFileByPath(`${folder}/${kindFolder}/${stem}`);
+			const dir = findFile(app, `${folder}/${kindFolder}/${stem}`);
 			if (!(dir instanceof TFolder)) continue;
 			for (const f of dir.children) {
 				if (f instanceof TFile && f.stat.size === bytes.byteLength && equalBytes(await app.vault.readBinary(f), bytes)) return f.path;
@@ -304,7 +309,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		if (g.projectSubfolders) {
 			for (const name of projectFolderNames(kept.filter((item) => customProjectFolder(item, g, recent) === null), recent)) {
 				const path = `${base}/${name}`;
-				if (!app.vault.getAbstractFileByPath(path)) {
+				if (!findFile(app, path)) {
 					await ensureFolder(app, path);
 					result.foldersCreated.push(path);
 				}
@@ -438,7 +443,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				// Older parts the earlier version had and this one has not: they are in the kept version.
 				const keptNow = entry.versions?.some((v) => v.at === before?.updated_at) ?? false;
 				for (const stale of (before?.older ?? []).filter((p) => !paths.includes(p))) {
-					const file = app.vault.getAbstractFileByPath(stale);
+					const file = findFile(app, stale);
 					if (keptNow && file instanceof TFile) await app.fileManager.trashFile(file);
 				}
 			}
@@ -518,6 +523,20 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			await refreshView(chat, item, entry);
 		}
 
+		// Codex tasks run in the cloud (chatgpt.com/codex), into the Codex Cloud folder.
+		if (g.codexCloud) {
+			requestStage = 'reading Codex cloud tasks';
+			requestChat = undefined;
+			const cloud = (result.codexCloud = emptyCloudResult());
+			let codex: Awaited<ReturnType<GptApi['codexAppServer']>> | undefined;
+			const client = async () => (codex ??= await a.codexAppServer(plugin.manifest.version));
+			try {
+				await syncCodexCloud({ app, settings: s, account, client, delayMs, progress, save: () => plugin.saveSettings(), sleep }, cloud);
+			} finally {
+				codex?.close();
+				addCodexCloud(result, cloud);
+			}
+		}
 	} catch (e) {
 		if (e instanceof GptRateLimitError) {
 			const consecutive = (g.resumeAfter429?.consecutive ?? 0) + 1;
@@ -533,6 +552,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			await plugin.saveSettings();
 		} else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `ChatGPT response could not be verified (${e.message}). Saved captures are available for the next run.`;
+		else if (e instanceof CodexCloudShapeError) result.stopped = `Unexpected Codex cloud task data (${e.message}). chatgpt.com may have changed its internal API – nothing more was written.`;
 		else {
 			const msg = e instanceof Error ? e.message : String(e);
 			result.stopped = api ? api.redact(msg) : msg.replace(/Bearer\s+\S+/gi, 'Bearer [hidden]');
@@ -554,6 +574,19 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	return result;
 }
 
+/** Codex cloud tasks count in the run's totals (notices, log); the log names them too. */
+function addCodexCloud(r: GptSyncResult, c: CloudSyncResult): void {
+	r.listed += c.listed;
+	r.unchanged += c.unchanged;
+	r.newCount += c.newCount;
+	r.changedCount += c.changedCount;
+	r.leftForLater += c.leftForLater;
+	r.written.push(...c.written);
+	r.restored.push(...c.restored);
+	r.edits.copies.push(...c.edits.copies);
+	r.edits.kept.push(...c.edits.kept);
+}
+
 async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyncResult): Promise<void> {
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -572,6 +605,13 @@ async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyn
 	if (r.tooLong.length) parts.push(`too long to load in one piece, skipped: ${r.tooLong.join(', ')}`);
 	if (r.projectsCut) parts.push('more projects exist than chatgpt.com listed – chats in unlisted projects use the project ID as folder name');
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
+	// Suggested by a Codex cloud task (2026-11-18): always say that Codex was looked at.
+	if (r.codexCloud) {
+		const { listed, written, restored, running } = r.codexCloud;
+		const saved = written.length + restored.length;
+		parts.push(`${listed} Codex cloud ${listed === 1 ? 'task' : 'tasks'}${listed ? ' listed' : ''}${saved ? `, ${saved} saved` : ''}`);
+		if (running) parts.push(`${running} Codex cloud tasks still running (saved when done)`);
+	}
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount('ChatGPT', plugin.settings.chatgpt, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) {
 		const shown = r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ');

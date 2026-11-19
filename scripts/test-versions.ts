@@ -1,7 +1,7 @@
 // Offline test of the one-note-per-chat rule (src/versions.ts) and of the shared save used by
 // Gemini and AI Studio. Run: npm run test:versions
 
-import { TFile } from 'obsidian';
+import { Platform, TFile, TFolder } from 'obsidian';
 import { emptyResult, saveChats, type Saved } from '../src/gemini/save';
 import { followRename } from '../src/follow';
 import { normalizeSettings } from '../src/migrate';
@@ -10,6 +10,7 @@ import { hermesRawMoves, googleRawMoves } from '../src/raw-move';
 import { allEntries, refreshEntries } from '../src/reindex';
 import type { IndexEntry, ListItem } from '../src/types';
 import { addVersion, bodyOf, carryProperties, continues, keepNoteAsVersion, keepVersion, noteHash, splitNote, versionPath, wasEdited, withVersionInfo, writeNote } from '../src/versions';
+import { findFile, freeFileName } from '../src/vaultio';
 import { readWrite } from './fake-vault';
 
 let failures = 0;
@@ -218,6 +219,33 @@ const note = (body: string, extra = '') => `---\nuuid: abc\nupdated: 2026-11-07T
 		files.set('AI/Hermes/p/s.md', 'x');
 		s4.hermes.profiles = [{ id: 'p', label: 'p', path: 'D:/p', enabled: true, index: { s: { rev: '1:1', updated: 'x', md: 'AI/Hermes/p/s.md', json: 'AI/Hermes/p/s.json', synced: 'x' } } }];
 		expect('raw move: Hermes raw files follow the raw files folder', hermesRawMoves(app, s4, '80 Archive/raw')[0]?.to === '80 Archive/raw/AI/Hermes/p/s.json');
+	}
+
+	// --- file names the file system sees as the same (issue #25) ----------------------------------
+	{
+		const nfd = 'Caffè';
+		const root = new TFolder('');
+		const chats = new TFolder('Chats');
+		const art = new TFolder('Chats/Artifacts');
+		const png = new TFile('Chats/Artifacts/Guide to the characters.png', { size: 1 });
+		const md = new TFile(`Chats/2026-01-01 ${nfd}.md`, { size: 1 });
+		const named = (f: TFile | TFolder) => Object.assign(f, { name: f.path.split('/').pop() });
+		root.children = [named(chats)];
+		chats.children = [named(art), named(md)];
+		art.children = [named(png)];
+		const all = new Map<string, TFile | TFolder>([['Chats', chats], ['Chats/Artifacts', art], [png.path, png], [md.path, md]]);
+		const app = { vault: { getAbstractFileByPath: (p: string) => all.get(p) ?? null, getRoot: () => root } } as never;
+		const os = Platform as { isMacOS?: boolean; isWin?: boolean };
+		const numbered = (n: string, i: number) => n.replace(/\.png$/, ` ${i}.png`);
+
+		expect('find: NFC name finds the NFD file on any system', findFile(app, 'Chats/2026-01-01 Caffè.md') === md);
+		expect('find: case differs, Linux -> not found', findFile(app, 'Chats/Artifacts/Guide to the Characters.png') === null);
+		os.isMacOS = true;
+		expect('find: case differs, macOS -> same file', findFile(app, 'Chats/Artifacts/Guide to the Characters.png') === png);
+		expect('find: case differs in a folder too', findFile(app, 'chats/artifacts/GUIDE to the characters.png') === png);
+		expect('find: a free name stays free', findFile(app, 'Chats/Artifacts/Other.png') === null && findFile(app, 'Nope/x.md') === null);
+		expect('free name: a case-only rename gets a number', freeFileName(app, 'Chats/Artifacts', 'Guide to the Characters.png', numbered) === 'Guide to the Characters 2.png');
+		os.isMacOS = false;
 	}
 
 	console.log(failures ? `\n${failures} FAILED` : '\nAll version tests passed.');

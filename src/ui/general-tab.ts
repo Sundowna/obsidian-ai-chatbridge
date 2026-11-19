@@ -8,6 +8,8 @@ import { DEFAULT_SETTINGS, MIN_DELAY_SECONDS, MIN_INTERVAL_MINUTES } from '../se
 import { allRawMoves } from '../raw-move';
 import { rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import type { EditedPolicy } from '../versions';
+import { remoteSection } from './remote-section';
+import { computersSection } from './computers-section';
 
 export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 	const { plugin } = ctx;
@@ -59,6 +61,9 @@ export function generalTab(ctx: PanelContext, el: HTMLElement): void {
 				plugin.restartTimer();
 			}),
 		);
+
+	computersSection(ctx, el);
+	remoteSection(ctx, el);
 
 	new Setting(el).setName('Notes').setHeading();
 	new Setting(el)

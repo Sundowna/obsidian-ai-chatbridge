@@ -4,7 +4,7 @@
 
 import { App, TFile } from 'obsidian';
 import { KIND_FOLDER, numbered, safeFileName } from '../files';
-import { createNew, ensureFolder, freeFileName } from '../vaultio';
+import { createNew, ensureFolder, findFile, freeFileName } from '../vaultio';
 import type { SessionFile } from './session-files';
 import { claudeHome, sameOrUnder, type DesktopFs } from './scan';
 import type { DesktopSession } from './types';
@@ -84,7 +84,7 @@ export async function saveSessionFiles(
 		if (f.source && base && sameOrUnder(f.source, base)) {
 			// Already a note in this vault: link it where it is.
 			const rel = slashes(f.source).slice(base.length + 1);
-			const inVault = app.vault.getAbstractFileByPath(rel) ?? app.vault.getFiles().find((x) => x.path.toLowerCase() === rel.toLowerCase());
+			const inVault = findFile(app, rel) ?? app.vault.getFiles().find((x) => x.path.toLowerCase() === rel.toLowerCase());
 			if (inVault instanceof TFile) out.files[f.key] = inVault.path;
 			continue;
 		}
@@ -92,7 +92,7 @@ export async function saveSessionFiles(
 		const bytes = await bytesOf(ctx, f);
 		if (!bytes) continue;
 		// Saved before (an earlier version of this session) and unchanged: link that copy.
-		const old = previous[f.key] ? app.vault.getAbstractFileByPath(previous[f.key]!) : null;
+		const old = previous[f.key] ? findFile(app, previous[f.key]!) : null;
 		if (old instanceof TFile && old.stat.size === bytes.byteLength && equalBytes(await app.vault.readBinary(old), bytes)) {
 			out.files[f.key] = old.path;
 			continue;

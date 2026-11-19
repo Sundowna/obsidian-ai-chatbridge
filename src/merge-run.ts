@@ -15,10 +15,10 @@ import { masterRaw, mirrorRaw, rawLink } from './raw-folders';
 import type { Settings } from './settings';
 import type { NoteState, RawVersion } from './types';
 import { carryProperties, keepNoteAsVersion, noteHash, splitNote, versionPath, withVersionInfo } from './versions';
-import { ensureFolder, freeFileName } from './vaultio';
+import { ensureFolder, findFile, freeFileName } from './vaultio';
 
 const fileAt = (app: App, path: string): TFile | null => {
-	const f = app.vault.getAbstractFileByPath(normalizePath(path));
+	const f = findFile(app, normalizePath(path));
 	return f instanceof TFile ? f : null;
 };
 
@@ -50,8 +50,8 @@ function knownChats(s: Settings): Map<string, Known> {
 			});
 		}
 	}
-	for (const a of s.claude) {
-		for (const [id, e] of Object.entries(a.web.cloudIndex ?? {})) {
+	for (const idx of [...s.claude.map((a) => a.web.cloudIndex), ...s.chatgpt.map((a) => a.web.codexCloudIndex)]) {
+		for (const [id, e] of Object.entries(idx ?? {})) {
 			if (!e.md) continue;
 			out.set(id, { note: e.md, state: e, apply: (md, raw) => { e.md = md; if (raw) e.json = raw; } });
 		}
@@ -159,7 +159,7 @@ function savedFileMoves(app: App, g: MergeGroup): { from: string; to: string }[]
 	const out: { from: string; to: string }[] = [];
 	for (const note of g.remove) {
 		for (const kind of Object.values(KIND_FOLDER)) {
-			const dir = app.vault.getAbstractFileByPath(`${dirOf(note)}/${kind}/${stemOf(note)}`);
+			const dir = findFile(app, `${dirOf(note)}/${kind}/${stemOf(note)}`);
 			if (!(dir instanceof TFolder)) continue;
 			for (const f of dir.children) {
 				if (f instanceof TFile) out.push({ from: f.path, to: `${dirOf(g.target)}/${kind}/${stemOf(g.target)}/${f.name}` });
@@ -172,7 +172,7 @@ function savedFileMoves(app: App, g: MergeGroup): { from: string; to: string }[]
 /** What would be merged. Reads only. */
 export async function previewMerge(app: App, s: Settings): Promise<MergePreview> {
 	const known = knownChats(s);
-	const plan = planMerge(findNotes(app), known, (p) => app.vault.getAbstractFileByPath(normalizePath(p)) !== null);
+	const plan = planMerge(findNotes(app), known, (p) => findFile(app, normalizePath(p)) !== null);
 	const canvases = await readCanvases(app);
 	const groups: PreviewGroup[] = [];
 	for (const g of plan.groups) {
@@ -248,7 +248,7 @@ function freeVersion(app: App, targetRaw: string, at: string, parts: number): nu
 	const stem = stemOf(targetRaw);
 	for (let n = 1; n < 1000; n++) {
 		const names = [versionPath(targetRaw, stem, at, n), ...Array.from({ length: parts }, (_x, i) => versionPath(`${dirOf(targetRaw)}/${stem} (older ${i + 1})${extOf(targetRaw)}`, stem, at, n))];
-		if (names.every((p) => app.vault.getAbstractFileByPath(p) === null)) return n;
+		if (names.every((p) => findFile(app, p) === null)) return n;
 	}
 	throw new Error(`No free file name for an earlier version of ${targetRaw}`);
 }
@@ -367,7 +367,7 @@ async function mergeOne(app: App, s: Settings, g: PreviewGroup, known: Map<strin
 	if (main && g.targetRaw && main.path !== g.targetRaw) {
 		const parts = olderParts(app, main.path);
 		const partTargets = parts.map((_p, i) => `${dirOf(g.targetRaw!)}/${stemOf(g.targetRaw!)} (older ${i + 1})${extOf(g.targetRaw!)}`);
-		if ([g.targetRaw, ...partTargets].some((p) => app.vault.getAbstractFileByPath(p) !== null)) {
+		if ([g.targetRaw, ...partTargets].some((p) => findFile(app, p) !== null)) {
 			r.left.push(`${g.targetRaw}: the name is taken, so the raw file stays ${main.path}`);
 		} else {
 			for (const [i, part] of parts.entries()) await move(app, s, part, partTargets[i]!, moved);
@@ -383,7 +383,7 @@ async function mergeOne(app: App, s: Settings, g: PreviewGroup, known: Map<strin
 		const file = fileAt(app, m.from);
 		if (!file) continue;
 		const there = fileAt(app, m.to);
-		if (!there && app.vault.getAbstractFileByPath(m.to) === null) {
+		if (!there && findFile(app, m.to) === null) {
 			await move(app, s, file, m.to, moved);
 			r.filesMoved++;
 		} else if (there && sameBytes(await app.vault.readBinary(there), await app.vault.readBinary(file))) {
@@ -399,7 +399,7 @@ async function mergeOne(app: App, s: Settings, g: PreviewGroup, known: Map<strin
 		}
 	}
 	for (const m of g.fileMoves) {
-		const dir = app.vault.getAbstractFileByPath(dirOf(m.from));
+		const dir = findFile(app, dirOf(m.from));
 		if (dir instanceof TFolder && dir.children.length === 0) await app.fileManager.trashFile(dir);
 	}
 
@@ -531,7 +531,7 @@ export async function writeMergeReport(app: App, s: Settings, title: string, bod
 	const dir = dirOf(s.logPath);
 	const base = `${dir ? `${dir}/` : ''}AI ChatBridge ${title} ${localStamp(now.toISOString())}`;
 	let path = `${base}.md`;
-	for (let n = 2; app.vault.getAbstractFileByPath(path) !== null; n++) path = `${base} ${n}.md`;
+	for (let n = 2; findFile(app, path) !== null; n++) path = `${base} ${n}.md`;
 	await ensureFolder(app, dir);
 	await app.vault.create(path, `---\nunread: true\n---\n\n${body}\n`);
 	if (logLine) {

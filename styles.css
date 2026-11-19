@@ -1029,3 +1029,27 @@
 .ccs-merge-list li.ccs-merge-warn {
 	color: var(--text-warning);
 }
+
+/* "Test mobile connection": the report, selectable so it can be copied by hand too. */
+.ccs-report {
+	max-height: 60vh;
+	overflow: auto;
+	padding: var(--size-4-2);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+/* General tab, Computers: this computer's name and the other computers. */
+.ccs-computer-name {
+	font-weight: var(--font-semibold);
+}
+
+.ccs-computer-list {
+	margin: 0;
+	padding-inline-start: var(--size-4-5);
+}

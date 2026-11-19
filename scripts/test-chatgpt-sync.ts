@@ -53,6 +53,8 @@ async function testAutomaticResume() {
 	const load = async () => {
 		const p = Object.assign(new AIChatBridge(), {
 			app: { ...h.plugin.app, workspace: { onLayoutReady: (fn: () => void) => fn() },
+				// Device storage (role, device name): nothing saved, so this is a computer that syncs itself.
+				loadLocalStorage: () => null, saveLocalStorage: () => {},
 				vault: { ...h.plugin.app.vault, on: () => ({}) } },
 			loadData: async () => structuredClone(persisted),
 			saveData: async (settings: typeof persisted) => { persisted = structuredClone(settings); },
@@ -78,7 +80,7 @@ async function testAutomaticResume() {
 		clearTimeout: (id: number) => { timers.delete(id); },
 		setInterval: () => 999,
 		clearInterval: () => {},
-	} });
+	}, document: { visibilityState: 'visible' } });
 	GptApi.connect = async () => {
 		calls++;
 		if (outcome === 'limit') throw new GptRateLimitError(now + 1000);

@@ -9,7 +9,7 @@ import { normalizePath, TFile, type App } from 'obsidian';
 import { localStamp } from './naming';
 import { dirOf, rawLink } from './raw-folders';
 import type { NoteState, RawVersion } from './types';
-import { createNew, ensureFolder, writeOver } from './vaultio';
+import { createNew, ensureFolder, findFile, writeOver } from './vaultio';
 
 /** What happens to a note you edited when its chat continues. */
 export type EditedPolicy = 'copy' | 'keep' | 'overwrite';
@@ -138,7 +138,7 @@ function toBytes(data: string | ArrayBuffer): ArrayBuffer {
 }
 
 const fileAt = (app: App, path: string): TFile | null => {
-	const f = app.vault.getAbstractFileByPath(normalizePath(path));
+	const f = findFile(app, normalizePath(path));
 	return f instanceof TFile ? f : null;
 };
 
@@ -169,7 +169,7 @@ export async function keepVersion(app: App, files: readonly string[], at: string
 		const targets = present.map((p) => versionPath(p.path, mainStem, at, n));
 		let clash = false;
 		for (const [i, target] of targets.entries()) {
-			const there = app.vault.getAbstractFileByPath(normalizePath(target));
+			const there = findFile(app, normalizePath(target));
 			if (there === null) continue;
 			// A copy from a run that was stopped is reused; anything else means the name is taken.
 			if (!(there instanceof TFile) || !same(await app.vault.readBinary(there), present[i]!.bytes)) clash = true;
@@ -240,7 +240,7 @@ function editsPath(app: App, mdPath: string, now: Date): string {
 	const base = `${dir ? `${dir}/` : ''}${stemOf(mdPath)} (my edits ${localStamp(now.toISOString())}`;
 	for (let n = 1; n < 1000; n++) {
 		const p = `${base}${n > 1 ? ` ${n}` : ''}).md`;
-		if (app.vault.getAbstractFileByPath(normalizePath(p)) === null) return p;
+		if (findFile(app, normalizePath(p)) === null) return p;
 	}
 	throw new Error(`No free file name for your edits of ${mdPath}`);
 }

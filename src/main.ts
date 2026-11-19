@@ -1,4 +1,4 @@
-import { Notice, Plugin, setIcon } from 'obsidian';
+import { Notice, Platform, Plugin, setIcon } from 'obsidian';
 import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 import { accountsOf, hasPastedSession, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
@@ -12,6 +12,13 @@ import { mergeReportText, runMerge, writeMergeReport, type MergePreview, type Me
 import { MergeModal } from './ui/merge-modal';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
+import { testMobileConnection } from './mobile/connection-test';
+import { RemoteSync } from './remote/controller';
+import { ComputerStore } from './computers/store';
+import { ALIVE_EVERY_MS, busyText, type BusyMarker } from './computers/busy';
+import { joinSaved, splitSettings } from './computers/split';
+import { ConfirmModal } from './ui/modals';
+import { findFile } from './vaultio';
 import { followRename } from './follow';
 import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { StopError } from './api';
@@ -69,6 +76,12 @@ export default class AIChatBridge extends Plugin {
 	private current: { provider?: Provider; id?: string; hermes?: boolean; memory?: boolean } | null = null;
 	private progress: SyncProgress | null = null;
 	private readonly busyListeners = new Set<() => void>();
+	/** The Sync button across devices: this one syncs, or asks the one that does. */
+	readonly remote = new RemoteSync(this);
+	/** Settings split between data.json (shared) and this computer's own file (see computers/). */
+	readonly computers = new ComputerStore(() => this.app.vault.adapter, () => this.manifest?.dir);
+	/** data.json changed on disk during a sync: read it once the sync is done. */
+	private externalPending = false;
 	/** The last "Refresh index" result, shown in the settings. */
 	lastReindex: (ReindexResult & { at: number }) | null = null;
 
@@ -90,11 +103,16 @@ export default class AIChatBridge extends Plugin {
 		this.registerDomEvent(this.statusEl, 'click', () => {
 			if (this.syncing) this.requestStop();
 		});
-		this.ribbonEl = this.addRibbonIcon('refresh-cw', 'Sync all chats', () => {
-			if (this.syncing) this.requestStop();
-			else void this.syncAll('manual');
-		});
+		this.ribbonEl = this.addRibbonIcon('refresh-cw', this.idleSyncLabel(), () => this.pressSync());
 		this.ribbonEl.addClass('ccs-ribbon');
+		this.remote.onChange(() => this.busyChanged());
+
+		this.addCommand({
+			id: 'sync-or-ask',
+			name: 'Sync: here, or ask the computer',
+			icon: 'refresh-cw',
+			callback: () => this.pressSync(),
+		});
 
 		this.addCommand({
 			id: 'sync-claude-chats',
@@ -163,7 +181,8 @@ export default class AIChatBridge extends Plugin {
 		this.addCommand({
 			id: 'sync-all-chats',
 			name: 'Sync all chats',
-			callback: () => void this.syncAll('manual'),
+			// A phone or tablet cannot sync itself, so there this asks the computer.
+			callback: () => (Platform.isMobile ? this.pressSync() : void this.syncAll('manual')),
 		});
 
 		this.addCommand({
@@ -194,11 +213,22 @@ export default class AIChatBridge extends Plugin {
 			callback: () => void diagnoseActiveChat(this),
 		});
 
+		this.addCommand({
+			id: 'test-mobile-connection',
+			name: 'Test mobile connection',
+			callback: () => void testMobileConnection(this),
+		});
+
 		this.addSettingTab(new AIChatBridgeSettingTab(this.app, this));
 		this.app.workspace.onLayoutReady(() => {
 			this.restartTimer();
 			this.restartMemoryTimer();
+			const watch = this.remote.start();
+			for (const ref of watch.events) this.registerEvent(ref);
+			this.registerInterval(watch.interval);
 			this.scheduleGptResume();
+			// The vault's files are known now, so what other computers synced can be checked against them.
+			void this.mergeOtherComputers();
 			if (this.settings.syncOnStartup) this.scheduleStartupSync();
 			// Moves/renames in Obsidian update the index (registered after load, so the
 			// vault's start-up scan is not mistaken for renames).
@@ -231,6 +261,7 @@ export default class AIChatBridge extends Plugin {
 		this.unloaded = true;
 		// A running sync stops before its next chat (it may still be fetching one).
 		this.stopRequested = true;
+		this.remote.stop();
 		this.clearGptResumeTimer();
 		this.statusEl?.setText('');
 		closeLoginWindows();
@@ -575,6 +606,32 @@ export default class AIChatBridge extends Plugin {
 		return r;
 	}
 
+	/** What the Sync button says while nothing runs. */
+	private idleSyncLabel(): string {
+		return this.remote.role === 'requester' ? 'Ask the computer to sync' : 'Sync all chats';
+	}
+
+	/** The Sync button (ribbon, command): a Writer syncs or stops its sync, a Requester asks. */
+	pressSync(): void {
+		if (this.remote.role === 'requester') void this.remote.ask();
+		else if (this.syncing) this.requestStop();
+		else void this.syncAll('manual');
+	}
+
+	/**
+	 * "Sync all" because another device asked. Exactly what the automatic sync does: quiet,
+	 * ChatGPT cooldowns left alone, and a source that stopped with an error stays paused until
+	 * someone syncs it by hand here (the asking device is told which ones wait).
+	 */
+	async syncAllRequested(): Promise<void> {
+		await this.syncAll('auto');
+	}
+
+	/** The sources the automatic sync skips until they are synced by hand, by label. */
+	pausedSources(): string[] {
+		return [...new Set(this.paused.values())];
+	}
+
 	/** Every account you are logged in to, one after the other, then the desktop apps. */
 	async syncAll(trigger: 'manual' | 'auto') {
 		await this.guarded(trigger, async () => {
@@ -638,23 +695,94 @@ export default class AIChatBridge extends Plugin {
 	/** One sync at a time. (A source that stopped with an error is skipped by runOne, not here.) */
 	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>) {
 		if (this.unloaded) return;
+		// A phone or tablet cannot sync by itself yet: it has no login windows and must not write
+		// beside the computer that does. There the sync button asks the computer (remote/).
+		if (Platform.isMobile) {
+			if (trigger === 'manual') new Notice('A phone or tablet cannot sync by itself yet. Use the sync button to ask your computer.', 10_000);
+			return;
+		}
 		if (this.running) {
 			if (trigger === 'manual') new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is already running.');
 			return;
 		}
+		// Another computer syncing this vault right now would write the same notes. You may still
+		// go ahead by hand; the automatic sync, a retry and another device's request just wait.
+		const other = await this.computers.busyElsewhere();
+		if (other) {
+			if (trigger !== 'manual') return;
+			if (!(await this.syncAnyway(other))) return;
+		}
+		if (this.running || this.unloaded) return; // something started while we looked
 		this.clearGptResumeTimer();
 		this.running = true;
 		this.stopRequested = false;
 		this.busyChanged();
+		const started = Date.now();
+		let alive: number | null = null;
 		try {
+			// What the other computers synced since we last looked, so it is not fetched again.
+			await this.mergeOtherComputers();
+			await this.computers.markRunning(started);
+			alive = window.setInterval(() => void this.computers.markRunning(started), ALIVE_EVERY_MS);
 			await fn();
 		} finally {
+			if (alive !== null) window.clearInterval(alive);
+			await this.computers.markIdle();
 			this.running = false;
 			this.stopRequested = false;
 			this.current = null;
 			this.busyChanged();
 			this.scheduleGptResume();
+			if (this.externalPending) void this.onExternalSettingsChange();
 		}
+	}
+
+	/** Asks whether to sync while another computer is syncing. */
+	private syncAnyway(other: BusyMarker): Promise<boolean> {
+		return new Promise((resolve) => {
+			let yes = false;
+			const modal = new ConfirmModal(this.app, 'Another computer is syncing',
+				`${busyText(other, formatClock)} If both sync at once, they may both write the same notes. Wait until it has finished, or sync here anyway.`,
+				'Sync here anyway', () => {
+					yes = true;
+				});
+			const close = modal.onClose.bind(modal);
+			modal.onClose = () => {
+				close();
+				resolve(yes);
+			};
+			modal.open();
+		});
+	}
+
+	/** Brings in what the other computers synced (see computers/merge.ts). */
+	async mergeOtherComputers(): Promise<number> {
+		try {
+			const n = await this.computers.mergeOthers(this.settings, (path) => findFile(this.app, path) !== null);
+			if (n) await this.saveSettings();
+			return n;
+		} catch (e) {
+			console.error('AI ChatBridge: could not read the other computers\' history', e instanceof Error ? e.message : e);
+			return 0;
+		}
+	}
+
+	/** data.json was changed by another computer (through the vault's sync): take its settings, keep our history. */
+	async onExternalSettingsChange(): Promise<void> {
+		if (this.unloaded) return;
+		if (this.running) {
+			this.externalPending = true;
+			return;
+		}
+		this.externalPending = false;
+		const loaded = (await this.loadData()) as unknown;
+		if (!this.computers.isNewShared(loaded)) return;
+		const { local } = splitSettings(this.settings, this.computers.here);
+		this.settings = normalizeSettings(joinSaved(loaded, local)).settings;
+		this.computers.noteShared(loaded);
+		this.restartTimer();
+		this.restartMemoryTimer();
+		this.busyChanged();
 	}
 
 	/** A sync (not a project-list fetch) is running, so it can be stopped. */
@@ -691,7 +819,7 @@ export default class AIChatBridge extends Plugin {
 		const running = this.syncing;
 		if (this.ribbonEl) {
 			setIcon(this.ribbonEl, running ? 'square' : 'refresh-cw');
-			this.ribbonEl.setAttr('aria-label', running ? (this.stopRequested ? 'Stopping the sync…' : 'Stop sync') : 'Sync all chats');
+			this.ribbonEl.setAttr('aria-label', running ? (this.stopRequested ? 'Stopping the sync…' : 'Stop sync') : this.idleSyncLabel());
 			this.ribbonEl.toggleClass('is-syncing', running);
 		}
 		const stoppable = running && !this.stopRequested;
@@ -855,16 +983,23 @@ export default class AIChatBridge extends Plugin {
 
 	async loadSettings() {
 		const loaded = (await this.loadData()) as unknown;
-		const { settings, migrated } = normalizeSettings(loaded);
+		// data.json holds what you set; this computer's file what it synced (see computers/).
+		const { raw, firstSplit, putAside } = await this.computers.load(loaded);
+		const { settings, migrated } = normalizeSettings(raw);
 		this.settings = settings;
 		if (migrated) await this.keepOldSettings(loaded);
+		if (firstSplit) {
+			await this.keepOldSettings(loaded, 'data.before-computers.json');
+			await this.saveSettings();
+			if (putAside) new Notice('AI ChatBridge: the Claude Code and Hermes history in the settings is from another computer, so it was put aside for that one.', 15_000);
+		}
 	}
 
-	/** One copy of the settings from before multiple accounts, in case you ever go back a version. */
-	private async keepOldSettings(loaded: unknown): Promise<void> {
+	/** One copy of the settings from before a change of format, in case you ever go back a version. */
+	private async keepOldSettings(loaded: unknown, name = 'data.before-accounts.json'): Promise<void> {
 		const dir = this.manifest?.dir;
 		if (!dir) return;
-		const path = `${dir}/data.before-accounts.json`;
+		const path = `${dir}/${name}`;
 		try {
 			const adapter = this.app.vault.adapter;
 			if (!(await adapter.exists(path))) await adapter.write(path, JSON.stringify(loaded));
@@ -877,7 +1012,7 @@ export default class AIChatBridge extends Plugin {
 
 	async saveSettings() {
 		if (this.unloaded) return; // see onunload
-		const write = this.settingsWrite.then(() => this.saveData(this.settings));
+		const write = this.settingsWrite.then(() => this.computers.save(this.settings, (data) => this.saveData(data)));
 		this.settingsWrite = write.catch(() => undefined);
 		await write;
 	}

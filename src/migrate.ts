@@ -9,7 +9,7 @@ import { onlySelected } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
 import { dedupeLabels } from './hermes/profiles';
 import {
-	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_HERMES, DEFAULT_LUMO, DEFAULT_MEMORY, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
+	DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_LABEL, DEFAULT_CLAUDE_WEB, DEFAULT_DESKTOP, DEFAULT_GEMINI, DEFAULT_GPT, DEFAULT_HERMES, DEFAULT_LUMO, DEFAULT_MEMORY, DEFAULT_REMOTE, DEFAULT_STUDIO, DEFAULT_SETTINGS, desktopApp,
 	type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type ClaudeWebSettings, type GptSettings, type LumoAccount, type Settings,
 } from './settings';
 
@@ -100,8 +100,16 @@ const hydrateClaude = (a: Partial<ClaudeAccount>): ClaudeAccount => ({
 	desktop: hydrateDesktop(a.desktop, DEFAULT_SETTINGS.claude[0]!.desktop.folder),
 });
 
+/** ".../ChatGPT/Chat" -> ".../ChatGPT/Codex-Cloud"; otherwise the layout's place below the chat folder's root. */
+export function codexCloudBeside(chatFolder: string): string {
+	const m = /^(.*\/)?ChatGPT\/Chat$/.exec(chatFolder.replace(/\/+$/, ''));
+	return m ? `${m[1] ?? ''}ChatGPT/Codex-Cloud` : layoutFolders(layoutRoot(chatFolder)).codexCloud;
+}
+
 const hydrateGpt = (a: Partial<ChatgptAccount>): ChatgptAccount => {
 	const web: GptSettings = { ...DEFAULT_GPT, ...a.web, projects: [...(a.web?.projects ?? [])], index: { ...(a.web?.index ?? {}) }, fileIndex: { ...(a.web?.fileIndex ?? {}) } };
+	// Codex Cloud (0.34) starts next to the account's own ChatGPT folders, wherever they are.
+	if (!a.web?.codexCloudFolder) web.codexCloudFolder = codexCloudBeside(web.folder);
 	seedChatProgress(web);
 	return {
 		id: a.id ?? DEFAULT_ACCOUNT_ID,
@@ -180,6 +188,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			desktop: { ...DEFAULT_DESKTOP, ...saved.desktop },
 			hermes: hydrateHermes(saved.hermes, hydratedClaude[0]!.web.chatFolder),
 			memory: { ...DEFAULT_MEMORY, ...saved.memory, states: { ...(saved.memory?.states ?? {}) }, chatgptWeb: { ...(saved.memory?.chatgptWeb ?? {}) }, claudeWeb: { ...(saved.memory?.claudeWeb ?? {}) } },
+			remote: { ...DEFAULT_REMOTE, ...saved.remote },
 			lastRuns: { ...(saved.lastRuns ?? {}) },
 			lastAll: saved.lastAll,
 		},

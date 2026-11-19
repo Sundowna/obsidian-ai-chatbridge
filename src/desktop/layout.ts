@@ -4,6 +4,7 @@
 //   <root>/Claude/Code-Cloud                   Claude Code sessions listed on claude.ai
 //   <root>/Claude/Code-Local/<computer>/<repo> Claude Code sessions on this computer
 //   <root>/ChatGPT/Chat/<project>              ChatGPT chats
+//   <root>/ChatGPT/Codex-Cloud/<Tasks|Work>    Codex tasks run in the cloud (chatgpt.com/codex)
 //   <root>/ChatGPT/Codex-Local/<computer>      Codex threads on this computer
 //   <root>/Lumo/Chat, <root>/Gemini/Chat, <root>/Gemini/AI Studio
 //
@@ -18,6 +19,7 @@ import { normalizePath, TFile, TFolder, type App, type TAbstractFile } from 'obs
 import { computerName } from '../computer';
 import { followRename } from '../follow';
 import type { Settings } from '../settings';
+import { findFile } from '../vaultio';
 
 /** The 0.17–0.24 layout's app folders ("Claude Desktop/Chat", "Claude Desktop (Work)/Code"). */
 export const CLAUDE_APP = 'Claude Desktop';
@@ -29,6 +31,7 @@ export const PLACES = {
 	claudeCodeCloud: 'Claude/Code-Cloud',
 	claudeCodeLocal: 'Claude/Code-Local',
 	chatgptChat: 'ChatGPT/Chat',
+	codexCloud: 'ChatGPT/Codex-Cloud',
 	codexLocal: 'ChatGPT/Codex-Local',
 	lumoChat: 'Lumo/Chat',
 	geminiChat: 'Gemini/Chat',
@@ -49,6 +52,7 @@ export function layoutFolders(root: string, computer = computerName()) {
 		claudeCodeCloud: at(PLACES.claudeCodeCloud),
 		claudeCodeLocal: at(`${PLACES.claudeCodeLocal}/${computer}`),
 		chatgptChat: at(PLACES.chatgptChat),
+		codexCloud: at(PLACES.codexCloud),
 		codexLocal: at(`${PLACES.codexLocal}/${computer}`),
 		lumoChat: at(PLACES.lumoChat),
 		geminiChat: at(PLACES.geminiChat),
@@ -101,6 +105,7 @@ export function layoutMoves(s: Settings, exists: (path: string) => boolean = () 
 		targets.push(
 			{ label: 'ChatGPT chats', setting: a.web.folder, legacy: ['ChatGPT Chat', `${CHATGPT_APP}/Chat`], to: to.chatgptChat, set: (_s, p) => (a.web.folder = p) },
 			{ label: 'Codex threads on this computer', setting: a.desktop.folder, legacy: ['Codex', `${CHATGPT_APP}/Codex`], to: to.codexLocal, set: (_s, p) => (a.desktop.folder = p) },
+			{ label: 'Codex tasks run in the cloud', setting: a.web.codexCloudFolder, to: to.codexCloud, set: (_s, p) => (a.web.codexCloudFolder = p) },
 		);
 	}
 	for (const a of s.lumo) targets.push({ label: 'Lumo chats', setting: a.web.folder, to: to.lumoChat, set: (_s, p) => (a.web.folder = p) });
@@ -127,7 +132,7 @@ export function layoutMoves(s: Settings, exists: (path: string) => boolean = () 
 	return out;
 }
 
-export const folderExists = (app: App) => (path: string): boolean => app.vault.getAbstractFileByPath(normalizePath(path)) instanceof TFolder;
+export const folderExists = (app: App) => (path: string): boolean => findFile(app, normalizePath(path)) instanceof TFolder;
 
 export interface MoveResult {
 	moved: number;
@@ -138,17 +143,17 @@ export interface MoveResult {
 
 /** Removes empty folders at and below `path`, deepest first. Never touches a folder with a file in it. */
 export async function pruneEmpty(app: App, path: string): Promise<void> {
-	const folder = app.vault.getAbstractFileByPath(normalizePath(path));
+	const folder = findFile(app, normalizePath(path));
 	if (!(folder instanceof TFolder)) return;
 	for (const child of [...folder.children]) if (child instanceof TFolder) await pruneEmpty(app, child.path);
 	if (folder.children.length === 0) await app.fileManager.trashFile(folder);
 }
 
 async function moveInto(app: App, s: Settings, src: TAbstractFile, destPath: string, r: MoveResult): Promise<void> {
-	const dest = app.vault.getAbstractFileByPath(destPath);
+	const dest = findFile(app, destPath);
 	if (!dest) {
 		const parent = parentOf(destPath);
-		if (parent && !app.vault.getAbstractFileByPath(parent)) await app.vault.createFolder(parent);
+		if (parent && !findFile(app, parent)) await app.vault.createFolder(parent);
 		const oldPath = src.path;
 		await app.fileManager.renameFile(src, destPath);
 		followRename(s, oldPath, destPath); // also done by the rename event; repeating it changes nothing
@@ -169,7 +174,7 @@ export async function moveToAppLayout(app: App, s: Settings, save: () => Promise
 	const r: MoveResult = { moved: 0, conflicts: [], from: [] };
 	const root = layoutRoot(s.claude[0]!.web.chatFolder);
 	for (const m of layoutMoves(s, folderExists(app), computer)) {
-		const src = app.vault.getAbstractFileByPath(normalizePath(m.from));
+		const src = findFile(app, normalizePath(m.from));
 		// Nested: the old folder is inside the new one (or the other way round) – only switch the setting.
 		const nested = m.to.startsWith(`${m.from}/`) || m.from.startsWith(`${m.to}/`);
 		try {

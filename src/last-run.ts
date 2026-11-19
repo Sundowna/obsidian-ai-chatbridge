@@ -19,6 +19,8 @@ export interface LastRun {
 	leftForLater: number;
 	/** The stop or error reason, or a short extra (Hermes profiles not found). */
 	note?: string;
+	/** The computer that ran it, when that was another one (see computers/merge.ts). */
+	device?: string;
 }
 
 /** The last "Sync all": its own start and end; the runs in between are its parts. */
@@ -78,7 +80,7 @@ export type Tone = 'ok' | 'warn' | 'bad';
 /** One line about a run, and how it went. */
 export function runText(r: LastRun, now = Date.now()): { text: string; tone: Tone } {
 	const how = r.trigger === 'manual' ? '' : ' (automatic)';
-	const head = `${when(r.at, now)}${how}`;
+	const head = `${when(r.at, now)}${r.device ? ` on ${r.device}` : ''}${how}`;
 	const saved = r.newCount + r.changedCount + r.restored;
 	switch (r.outcome) {
 		case 'ok': {

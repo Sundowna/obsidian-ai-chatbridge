@@ -13,6 +13,7 @@ import { cookieHeader, cookieValue, hasLoginFetch, isLoggedIn, loginFetch, login
 import { isChatId, isFileId, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
+import { CodexAppServer } from '../cloud/codex-app-server';
 import { describePage, fallbackCookie, findAccessToken, inventoryIdentity, maskSecrets } from './token';
 
 const ORIGIN = 'https://chatgpt.com';
@@ -55,6 +56,32 @@ export interface Raw {
 function header(headers: Record<string, string>, name: string): string {
 	const k = Object.keys(headers).find((h) => h.toLowerCase() === name);
 	return k ? (headers[k] ?? '') : '';
+}
+
+/**
+ * "Test mobile connection" only: one GET of chatgpt.com/api/auth/session with the pasted
+ * session cookie, sent the way the sync sends its requests. The answer holds a login key, so
+ * it stays in memory: the caller reads the status and type and never shows the text.
+ */
+export async function probeAuthSession(cookie: string, ua: string): Promise<{ status: number; headers: Record<string, string>; text: string }> {
+	let res;
+	try {
+		res = await requestUrl({ url: `${ORIGIN}/api/auth/session`, method: 'GET', headers: { Accept: 'application/json', Cookie: cookie, 'User-Agent': ua, 'OAI-Language': 'en-US' }, throw: false });
+	} catch (e) {
+		let why = e instanceof Error ? e.message : String(e);
+		for (const part of cookie.split('; ')) {
+			const secret = part.slice(part.indexOf('=') + 1);
+			if (secret.length >= 8) why = why.split(secret).join('[hidden]');
+		}
+		throw new Error(`Network error: ${maskSecrets(why)}`);
+	}
+	let text = '';
+	try {
+		text = res.text;
+	} catch {
+		text = '';
+	}
+	return { status: res.status, headers: res.headers, text };
 }
 
 export class GptApi {
@@ -140,6 +167,12 @@ export class GptApi {
 	olderPath(id: string, beforeMessageId: string): string {
 		if (!isChatId(id) || !isMessageId(beforeMessageId)) throw new StopError('Refusing to fetch: ChatGPT chat or message ID has an odd format.');
 		return `/backend-api/conversations/${id}/messages?before=${beforeMessageId}&num_turns=${NUM_TURNS}&include_has_versions=true`;
+	}
+
+	/** Codex's cloud connection (chatgpt.com/codex), with the same login key. Read only. */
+	async codexAppServer(pluginVersion: string): Promise<CodexAppServer> {
+		if (!this.token) throw new StopError('Not connected to ChatGPT yet.');
+		return CodexAppServer.open(this.token, pluginVersion, undefined, 180_000);
 	}
 
 	fileInfoPath(fileId: string, chatId: string): string {

@@ -9,7 +9,7 @@
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with, endorsed by, or supported by Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is ever changed or deleted on the provider's side. The plugin reads the same web endpoints your browser uses, which can change without notice.
 
-**New in 0.33: [AI memory](#ai-memory)** - what Claude, ChatGPT, Claude Code and Codex keep about you, saved as dated snapshots with a privacy filter. **0.31:** better on [macOS and Linux](#windows-macos-and-linux) - the folder picker, `~` paths and where local sessions are found. **0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
+**New in 0.34: [Codex cloud tasks](#codex-cloud-tasks)** - the tasks Codex ran in OpenAI's cloud, started on chatgpt.com/codex or from ChatGPT, saved as notes. And the plugin now loads on your phone: its sync button [asks your computer to sync](#phone-and-tablet). **0.33:** [AI memory](#ai-memory) - what Claude, ChatGPT, Claude Code and Codex keep about you, saved as dated snapshots with a privacy filter. **0.31:** better on [macOS and Linux](#windows-macos-and-linux) - the folder picker, `~` paths and where local sessions are found. **0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
 
 ## Contents
 
@@ -23,8 +23,11 @@
 - [See how the last sync went](#see-how-the-last-sync-went)
 - [Desktop app sessions](#desktop-app-sessions)
 - [Claude Code cloud sessions](#claude-code-cloud-sessions)
+- [Codex cloud tasks](#codex-cloud-tasks)
 - [Hermes Agent](#hermes-agent)
 - [AI memory](#ai-memory)
+- [Several computers](#several-computers)
+- [Phone and tablet](#phone-and-tablet)
 - [Commands](#commands)
 - [Part of the Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite)
 - [Privacy and network use](#privacy-and-network-use)
@@ -55,6 +58,7 @@
 | **Claude** (claude.ai) | Chats per project | Artifacts and uploads |
 | **Claude Code cloud** (claude.ai/code) | Sessions that ran in Anthropic's cloud, one folder per GitHub repository | Pasted images and files Claude wrote |
 | **ChatGPT** | Chats per project, archived chats optional; custom GPT chats go to `Recent` | Generated files and uploads |
+| **Codex cloud** (chatgpt.com/codex) | Tasks that ran in OpenAI's cloud, started on chatgpt.com/codex or from ChatGPT; off until you turn it on | Every prompt and answer, steps counted, file changes as a diff |
 | **Gemini** | Chats | Pictures as links |
 | **Google AI Studio** | Chats and prompts | - |
 | **Proton Lumo** | Chats and projects, decrypted on your computer | Coming |
@@ -105,6 +109,7 @@ AI Chats/
 │               └── Attachments/…      ← images and files you attached
 ├── ChatGPT/
 │   ├── Chat/
+│   ├── Codex-Cloud/Tasks|Work/        ← Codex tasks run in the cloud
 │   └── Codex-Local/
 │       └── Tower/
 ├── Gemini/
@@ -202,7 +207,7 @@ You don't have to catch the notice to know what a sync did. Each account remembe
 - **Overview** - every account card and the Hermes card have a **Last sync** line, e.g. "today 14:02: 3 new, 1 changed, 240 unchanged". Under the totals at the top, one line sums up the last **Sync all** and names any account that had a problem
 - **Each tab** - the sync row of **Web**, **Desktop app**, **AI Studio** and **Hermes** shows that part's last run
 - **The dot** - green: it went fine. Orange: you stopped it, it is waiting out a ChatGPT cooldown, no projects were selected, or Hermes profiles were not found. Red: it failed, with the reason
-- Automatic syncs are marked "(automatic)". Only counts and the stop reason are kept (in `data.json`), never chat text
+- Automatic syncs are marked "(automatic)". Only counts and the stop reason are kept (in the computer's own file in the plugin folder), never chat text
 
 ## Desktop app sessions
 
@@ -223,7 +228,17 @@ Sessions that ran in Anthropic's cloud - on claude.ai/code, or started from the 
 - A session that is still running is saved once it's done. A session that goes on later updates its one note; the version before stays as raw `.json`
 - Sessions you steered from claude.ai but that ran on your computer (Remote Control) are left to **Code Local**, so nothing is saved twice
 - On by default. Turn it off per account with **Claude Code cloud sessions** in the Claude tab
-- Codex cloud tasks are not synced yet
+
+## Codex cloud tasks
+
+Tasks that Codex ran in OpenAI's cloud are saved with the ChatGPT sync, into the **Codex Cloud folder**: those started on chatgpt.com/codex in `ChatGPT/Codex-Cloud/Tasks/`, those started from ChatGPT (on the web, the phone, or a schedule) in `ChatGPT/Codex-Cloud/Work/`.
+
+- **Off until you turn it on**: ChatGPT tab → **Codex cloud tasks**. It uses the ChatGPT login the chat sync already has
+- The note says `app: "Codex (cloud)"`, names the `model:` and where the task was `started_from:`, and links back to it on chatgpt.com. It holds every prompt and Codex's answers, with the steps in between counted (like local Codex threads). Then comes the error if the last turn failed, and - with **Keep Codex's steps** on - the files Codex changed with a folded diff. A diff over 200,000 characters stays in the raw `.json` only
+- A scheduled run is named after its schedule ("Agriland Market Watch"), not after its instructions
+- The raw `.json` keeps the conversation: your messages and Codex's answers, with each run of steps in between counted ("7 commands, 2 tool calls"). Scheduled runs can take thousands of steps with megabytes of output; turn on **Keep Codex's steps** to keep them all anyway (command output and tool results over 50,000 characters are then cut, marked "[cut N characters]"), and to get the changed files as a diff in the note
+- A task that is still running is saved once it is done. A follow-up updates its one note; the version before stays as raw `.json`
+- How it works: Codex on chatgpt.com keeps a live connection to `codex-cloud-backend.chatgpt.com`. The plugin opens the same connection with your ChatGPT login and only reads: the task list, each task's turns and its steps. It refuses to send anything that would start or change a task
 
 ## Hermes Agent
 
@@ -405,10 +420,41 @@ Turn it off to save everything exactly as the AI keeps it; the next sync then wr
 - **Left out:** folders named `Private` (and Claude Code projects with `Private` as a part of their name) are never read, and the memory folder cannot be inside one. Files larger than 2 MB or not text are named, not copied. Codex's use counters and ChatGPT's per-memory status are left out, because they change without the memory changing and would cause a new snapshot each time
 - **If an answer looks different from what the plugin knows,** the read stops and nothing is saved for that account, so a snapshot is never half-written
 
+## Several computers
+
+You can keep one vault on several computers and sync it between them with any file syncing app, even one that copies everything including `.obsidian` (Proton Drive, Syncthing, Obsidian Sync). Whichever computer you are on syncs everything itself; none has to stay switched on for the others.
+
+- **Settings are shared, history is not.** `data.json` holds only what you set, and changes only when you change a setting. What each computer synced goes to a file of its own, `computers/<computer name>.json` in the plugin folder, together with its own folders (extra Claude Code and Codex session folders, Hermes profiles). Two computers never write the same file
+- **No chat is fetched twice.** Before each sync the plugin reads what the other computers saved. A chat Tower saved yesterday is known on the laptop, so it is not fetched again and no second note is written. Claude Code, Codex and Hermes sessions stay with the computer they are on, in its own folder (`Code-Local/<computer>/…`)
+- **One at a time.** While a sync runs, a small file says which computer is syncing. If you start a sync on another computer meanwhile, it asks whether to wait or sync anyway; automatic syncs just wait. The last-sync lines say "on Tower" when another computer ran them, and **General → Computers** lists the others
+- **Each computer signs in once** per account: logins live in that computer's Obsidian, not in the vault
+- **New computer:** let the file syncing app finish copying the vault before the first sync there. A chat whose note has not arrived yet would otherwise be written again, and the syncing app would then keep two copies
+
+## Phone and tablet
+
+The plugin loads in Obsidian on Android and iOS, but a phone does not sync by itself yet: the login windows and the local sessions only exist on a computer. Instead the phone **asks your computer to sync**, through two small files in the vault. Whatever carries your vault between the devices (Syncthing, Obsidian Sync, …) carries them too; there is no other connection and no extra service.
+
+1. On the phone, select the sync icon in the ribbon menu, or run **Sync: here, or ask the computer** (you can add it to the mobile toolbar). The plugin writes `sync-request.json`.
+2. Your computer sees the request once your vault sync has delivered it, runs **Sync all**, and writes `sync-status.json` with what it did: the result and the counts per account, never a login.
+3. The phone tells you when the computer has started and when it is done, and the Overview shows "Last synced by Tower today 14:02 …".
+
+How long step 2 takes depends only on your vault sync: seconds when both devices are online, much longer when the phone's sync app is asleep.
+
+**Setting it up** (General tab, **Sync from another device**):
+
+- **Folder for sync requests** - must be the same on every device, and your vault sync must carry it in both directions. `.json` files need **Sync all other types** if you use Obsidian Sync. Don't use a folder starting with a dot
+- **This device** - a computer **syncs** (writer) by default, a phone or tablet **asks** (requester). A second computer can be set to ask too. The role and the device's name are saved on the device itself, not in the synced settings
+- **Ignore requests older than (hours)** - a request that took longer than this to arrive is not run (default 12)
+
+The computer runs each request once, at most one requested sync every two minutes, and never interrupts a sync that is already running: the request waits for it. Obsidian has to be open on the computer.
+
+**Test mobile connection** is a first step towards syncing on the phone itself: it checks whether the phone can reach claude.ai and ChatGPT with a session key or cookie pasted there, and shows the status, the content type and whether a Cloudflare check page came back. Nothing is saved and no key is shown.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
+| **Sync: here, or ask the computer** | The sync button as a command: a device that syncs runs **Sync all** (or stops the running sync), a device that asks writes a request for your computer. See [Phone and tablet](#phone-and-tablet) |
 | **Sync all chats** | Every account you're logged in to, then the desktop apps and Hermes profiles that are on |
 | **Sync Claude (claude.ai and Claude Code)** | All claude.ai accounts you're logged in to, then Claude Code on this computer for every account that has it on |
 | **Sync ChatGPT (chats and Codex)** | All ChatGPT accounts you're logged in to, then Codex on this computer for every account that has it on |
@@ -424,6 +470,7 @@ Turn it off to save everything exactly as the AI keeps it; the next sync then wr
 | **Merge chat copies into one note (preview first)** | For vaults from before one note per chat: merges each chat's `(updated …)` notes into its first note, keeps earlier versions as raw files and rewrites links. Shows a preview; nothing changes until you confirm |
 | **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |
 | **Diagnose: save claude.ai answers for the open chat** | Saves the raw answers of the open chat, for bug reports |
+| **Test mobile connection** | One request each to claude.ai and ChatGPT with the pasted logins; reports status, content type and whether a Cloudflare check page came back |
 
 ## Part of the Sundowna Second Brain Suite
 
@@ -451,7 +498,7 @@ This plugin needs network access for the web providers. Please read this before 
 - **Gemini and AI Studio:** Google has no API for either, so the plugin opens them in a hidden window with your Google login and reads the same data their own pages load. Requests are signed inside that page the way the page signs its own - no Google token is saved or logged. Google blocks logins from windows inside apps, so the Google login window says it's Firefox
 - **Proton Lumo:** Lumo stores chats end-to-end encrypted. To sync them, the plugin opens Lumo in a hidden window with your login and unlocks your keys for that one sync - the keys stay in memory and are never saved or logged. The chats are then saved **readable** in your vault, so anything that can read your vault can read them
 - **ChatGPT's visual answers:** turned into plain HTML and pictures in your notes - nothing from a chat is ever run, and drawings can't load anything from other websites
-- **What is written:** transcripts, raw JSON, downloaded files and a sync log - only in the vault folders you choose. The sync index in `data.json` holds chat IDs and paths, no chat content and no secrets
+- **What is written:** transcripts, raw JSON, downloaded files and a sync log - only in the vault folders you choose. The sync index (in each computer's own file in the plugin folder, see [Several computers](#several-computers)) holds chat IDs and paths, no chat content and no secrets
 - **Files outside the vault (desktop apps and Hermes only):** the plugin *reads* local files only for what you turn on - for Claude Code and Codex: `~/.claude/projects`, the Claude desktop app's session list and Local Storage (for titles and sidebar groups), `~/.codex/.codex-global-state.json`, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl` and any extra folders you add; for Hermes: the `state.db` of each profile that is on. It never changes them and sends nothing over the network. Hermes snapshots are written to your system's temporary folder and deleted right after reading; if Obsidian has no built-in SQLite, a Python on your computer is started to make them. Hermes tool results can contain file contents, so they are shortened in the notes and steps mentioning a `Private` folder are left out
 - **AI memory, Claude (only for the accounts you turn on):** asks claude.ai for the list of memory files, each file's text, the names of the projects that have memory, and your instructions for Claude, with the same login as the chat sync. Listing and reading memory files are requests that only read (claude.ai asks for them with POST, like its chat view). Nothing is changed there
 - **AI memory, ChatGPT (only for the accounts you turn on):** asks chatgpt.com for the memory summary, the saved memories and the custom instructions, with the same login as the chat sync. It changes nothing there (see [AI memory](#ai-memory) for the one request that is not a GET). Saved memories can hold names and email addresses; the privacy filter does not replace those
@@ -461,7 +508,7 @@ This plugin needs network access for the web providers. Please read this before 
 ## Requirements
 
 - Obsidian **1.11.4** or newer
-- **Desktop only** (Windows, macOS, Linux) - the login windows need Electron, and local sessions are read from your computer's disk
+- **Syncing needs a computer** (Windows, macOS, Linux) - the login windows need Electron, and local sessions are read from your computer's disk. On Android and iOS the plugin can ask your computer to sync: see [Phone and tablet](#phone-and-tablet)
 
 ### Windows, macOS and Linux
 

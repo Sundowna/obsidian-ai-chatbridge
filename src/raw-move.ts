@@ -9,10 +9,10 @@ import { baseRoot, dirOf, masterRaw, projectRoots, rawMoves, type RawMove, type 
 import { DEFAULT_RECENT, plainFolder } from './select';
 import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount, Settings } from './settings';
 import type { ProjectCatalog } from './project-catalog';
-import { ensureFolder } from './vaultio';
+import { ensureFolder, findFile } from './vaultio';
 import { versionFiles } from './versions';
 
-const fileExists = (app: App) => (path: string): boolean => app.vault.getAbstractFileByPath(normalizePath(path)) instanceof TFile;
+const fileExists = (app: App) => (path: string): boolean => findFile(app, normalizePath(path)) instanceof TFile;
 
 const namesIn = (catalog: ProjectCatalog | undefined) => {
 	const byId = new Map((catalog?.rows ?? []).map((r) => [r.id, r.name]));
@@ -39,11 +39,16 @@ export function webRawMoves(app: App, provider: Provider, account: ClaudeAccount
 	} else {
 		const g = (account as ChatgptAccount | LumoAccount).web;
 		r = roots(rawRoot, [g.folder, g.rawFolder]);
+		if (provider === 'chatgpt') {
+			const c = (account as ChatgptAccount).web;
+			r.push(...roots(rawRoot, [c.codexCloudFolder, c.codexCloudRawFolder]));
+		}
 		const base = plainFolder(g.folder);
 		if (base) r.push(...projectRoots(g, base, g.rawFolder, names, recent, rawRoot));
 	}
 	const chats: SavedChat[] = Object.values(w.index).map((e) => ({ md: e.md, raws: [e.json, ...(e.older ?? []), ...versionFiles(e)] }));
-	if (provider === 'claude') chats.push(...Object.values((account as ClaudeAccount).web.cloudIndex ?? {}).flatMap((e) => (e.md ? [{ md: e.md, raws: [e.json, ...versionFiles(e)] }] : [])));
+	const cloud = provider === 'claude' ? (account as ClaudeAccount).web.cloudIndex : provider === 'chatgpt' ? (account as ChatgptAccount).web.codexCloudIndex : undefined;
+	chats.push(...Object.values(cloud ?? {}).flatMap((e) => (e.md ? [{ md: e.md, raws: [e.json, ...versionFiles(e)] }] : [])));
 	return rawMoves(chats, r, fileExists(app));
 }
 
@@ -88,9 +93,9 @@ export interface RawMoveResult {
 export async function moveRawFiles(app: App, settings: Settings, moves: readonly RawMove[], save: () => Promise<void>): Promise<RawMoveResult> {
 	const r: RawMoveResult = { moved: 0, skipped: [] };
 	for (const m of moves) {
-		const src = app.vault.getAbstractFileByPath(normalizePath(m.from));
+		const src = findFile(app, normalizePath(m.from));
 		const to = normalizePath(m.to);
-		if (!(src instanceof TFile) || app.vault.getAbstractFileByPath(to)) {
+		if (!(src instanceof TFile) || findFile(app, to)) {
 			r.skipped.push(m.from);
 			continue;
 		}

@@ -2,12 +2,33 @@
 // replaces a file's content and is only for the one-note-per-chat rule (versions.ts), which
 // keeps the earlier version first.
 
-import { App, normalizePath, TFile } from 'obsidian';
+import { App, normalizePath, Platform, TAbstractFile, TFile, TFolder } from 'obsidian';
+
+const fold = (s: string): string => s.normalize('NFC').toLowerCase();
+// macOS and iOS (APFS) and Windows (NTFS) see "A.md" and "a.md" as one file; Linux and Android do not.
+const caseInsensitiveFs = (): boolean => Platform.isMacOS || Platform.isWin || Platform.isIosApp;
+
+/**
+ * Like vault.getAbstractFileByPath, but finds the file the file system would see under this name:
+ * the same name in the other Unicode form (NFC/NFD, e.g. names written by Syncthing on macOS),
+ * and on case-insensitive systems a name that differs only in letter case. Without this, a name
+ * looks free, vault.create then fails with "File already exists" and the sync stops.
+ */
+export function findFile(app: App, path: string): TAbstractFile | null {
+	const p = normalizePath(path);
+	const hit = app.vault.getAbstractFileByPath(p) ?? app.vault.getAbstractFileByPath(p.normalize('NFD'));
+	if (hit || !p || !caseInsensitiveFs()) return hit;
+	const i = p.lastIndexOf('/');
+	const parent = i < 0 ? app.vault.getRoot() : findFile(app, p.slice(0, i));
+	if (!(parent instanceof TFolder)) return null;
+	const name = fold(p.slice(i + 1));
+	return parent.children.find((c) => fold(c.name) === name) ?? null;
+}
 
 /** Creates the file, or replaces the content of the file already there. */
 export async function writeOver(app: App, path: string, data: string | ArrayBuffer): Promise<void> {
 	const p = normalizePath(path);
-	const file = app.vault.getAbstractFileByPath(p);
+	const file = findFile(app, p);
 	if (file === null) {
 		if (typeof data === 'string') await app.vault.create(p, data);
 		else await app.vault.createBinary(p, data);
@@ -23,14 +44,14 @@ export async function ensureFolder(app: App, folder: string): Promise<void> {
 	let cur = '';
 	for (const p of parts) {
 		cur = cur ? `${cur}/${p}` : p;
-		if (!app.vault.getAbstractFileByPath(cur)) await app.vault.createFolder(cur);
+		if (!findFile(app, cur)) await app.vault.createFolder(cur);
 	}
 }
 
 function taken(app: App, folder: string, rawFolder: string, stem: string): boolean {
 	return (
-		app.vault.getAbstractFileByPath(normalizePath(`${rawFolder}/${stem}.json`)) !== null ||
-		app.vault.getAbstractFileByPath(normalizePath(`${folder}/${stem}.md`)) !== null
+		findFile(app, normalizePath(`${rawFolder}/${stem}.json`)) !== null ||
+		findFile(app, normalizePath(`${folder}/${stem}.md`)) !== null
 	);
 }
 
@@ -51,7 +72,7 @@ export function freeStem(app: App, folder: string, stem: string, uuid: string, r
 
 /** A file name in `folder` that is not taken yet: "x.py", then "x (2).py", "x (3).py", … */
 export function freeFileName(app: App, folder: string, fileName: string, numbered: (n: string, i: number) => string): string {
-	const free = (n: string) => app.vault.getAbstractFileByPath(normalizePath(`${folder}/${n}`)) === null;
+	const free = (n: string) => findFile(app, normalizePath(`${folder}/${n}`)) === null;
 	if (free(fileName)) return fileName;
 	for (let i = 2; i < 1000; i++) {
 		const n = numbered(fileName, i);
@@ -63,7 +84,7 @@ export function freeFileName(app: App, folder: string, fileName: string, numbere
 /** Creates a new file. Throws if it already exists – never overwrites. */
 export async function createNew(app: App, path: string, data: string | ArrayBuffer): Promise<void> {
 	const p = normalizePath(path);
-	if (app.vault.getAbstractFileByPath(p)) throw new Error(`Refusing to overwrite ${p}`);
+	if (findFile(app, p)) throw new Error(`Refusing to overwrite ${p}`);
 	if (typeof data === 'string') await app.vault.create(p, data);
 	else await app.vault.createBinary(p, data);
 }
