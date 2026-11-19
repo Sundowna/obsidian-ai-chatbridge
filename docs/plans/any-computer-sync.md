@@ -1,6 +1,14 @@
 # Plan: any computer can sync
 
-Written 19.11.2026. Not started. Nothing in the code has changed yet.
+Written 19.11.2026. **Built the same day as 0.35.0** on branch `any-computer-sync`. Not released, not installed in Brain; checked live in TAlpha_v0.2 with a separate Obsidian and no logins.
+
+What changed from this plan while building:
+- **No Rename button.** The computer's name is its network name, the same name the `Code-Local/<computer>` folders already use. A second name could drift away from those folders.
+- **The phone part was already released** in 0.34.0 ("Sync from your phone, run by your computer"). Nothing was left to finish. A phone request now waits while another computer is busy.
+- **Walter's answers (19.11.2026):**
+  - Login cookies stay on each computer. The README confirms that pasted ones live in Obsidian's secret storage on that computer.
+  - Hermes runs only where it is installed. Hermes and Claude Code history is never combined between computers.
+  - Proton Drive is reported to keep both copies of a clash, with "Name clash" and a date in one name. That is user reports, not Proton documentation.
 
 Before building, read [FEATURES.md](../../FEATURES.md) and follow its rule. The settings screen and the sync flow change, so no listed behaviour may be dropped. Update FEATURES.md with the new ones.
 
