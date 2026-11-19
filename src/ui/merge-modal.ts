@@ -15,12 +15,11 @@ const KINDS: { kind: CopyKind; name: string; desc: string }[] = [
 ];
 
 export class MergeModal extends Modal {
-	private preview: MergePreview;
+	private preview: MergePreview = { groups: [], skipped: [] };
 	private readonly on: Record<CopyKind, boolean> = { updated: true, transcript: false, recovered: false };
 
 	constructor(app: App, private readonly plugin: AIChatBridge) {
 		super(app);
-		this.preview = previewMerge(app, plugin.settings);
 	}
 
 	private selected(): PreviewGroup[] {
@@ -30,7 +29,18 @@ export class MergeModal extends Modal {
 	onOpen(): void {
 		this.modalEl.addClass('ccs-merge-modal');
 		this.titleEl.setText('Merge chat copies into one note');
-		this.render();
+		// Canvases are read from disk for their links, so the preview takes a moment.
+		this.contentEl.createEl('p', { cls: 'setting-item-description', text: 'Reading the vault…' });
+		void previewMerge(this.app, this.plugin.settings).then(
+			(p) => {
+				this.preview = p;
+				this.render();
+			},
+			(e: unknown) => {
+				this.contentEl.empty();
+				this.contentEl.createEl('p', { text: `Could not read the vault: ${e instanceof Error ? e.message : String(e)}` });
+			},
+		);
 	}
 
 	private render(): void {
@@ -64,7 +74,7 @@ export class MergeModal extends Modal {
 		const versions = chosen.reduce((n, g) => n + g.olderRaws.length + g.olderNotes.length, 0);
 		const links = chosen.reduce((n, g) => n + linkCount(g), 0);
 		const sources = new Set(chosen.flatMap((g) => [...g.links.keys()])).size;
-		el.createEl('p', { cls: 'ccs-merge-total', text: `Selected: ${chosen.length} chats. ${notes} notes merge away, up to ${versions} earlier versions are kept as raw files, ${links} links in ${sources} notes are rewritten.` });
+		el.createEl('p', { cls: 'ccs-merge-total', text: `Selected: ${chosen.length} chats. ${notes} notes merge away, up to ${versions} earlier versions are kept as raw files, ${links} links in ${sources} notes or canvases are rewritten.` });
 
 		const list = el.createDiv({ cls: 'ccs-merge-list' });
 		for (const g of chosen.slice(0, SHOWN)) {
@@ -78,7 +88,7 @@ export class MergeModal extends Modal {
 			for (const p of g.remove) ul.createEl('li', { text: `Merged, then to the trash: ${nameOf(p)}` });
 			for (const o of [...g.olderRaws, ...g.olderNotes]) ul.createEl('li', { text: `Earlier version kept: ${nameOf(o.path)}` });
 			if (g.fileMoves.length) ul.createEl('li', { text: `${g.fileMoves.length} saved files move to this note's folder` });
-			for (const [source, refs] of g.links) ul.createEl('li', { text: `${Math.max(1, refs.length)} link(s) rewritten in: ${source}` });
+			for (const [source, refs] of g.links) ul.createEl('li', refs.length ? { text: `${refs.length} link(s) rewritten in: ${source}` } : { cls: 'ccs-merge-warn', text: `Links to check by hand in: ${source} (not a note or canvas it can read)` });
 			for (const n of g.notes) ul.createEl('li', { cls: 'ccs-merge-warn', text: n });
 		}
 		if (chosen.length > SHOWN) list.createEl('p', { cls: 'setting-item-description', text: `…and ${chosen.length - SHOWN} more. Save the preview as a note to see all of them.` });

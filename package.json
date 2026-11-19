@@ -21,7 +21,7 @@
 		"test:memory": "esbuild scripts/test-memory.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-memory.cjs && node scripts/.test-memory.cjs",
 		"test:versions": "esbuild scripts/test-versions.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-versions.cjs && node scripts/.test-versions.cjs",
 		"test:claude": "esbuild scripts/test-claude-sync.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-claude-sync.cjs && node scripts/.test-claude-sync.cjs",
-		"test:merge": "esbuild scripts/test-merge.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-merge.cjs && node scripts/.test-merge.cjs",
+		"test:merge": "esbuild scripts/test-merge.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-merge.cjs && node scripts/.test-merge.cjs",
 		"test:cloud": "esbuild scripts/test-cloud.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-cloud.cjs && node scripts/.test-cloud.cjs",
 		"test:codex-cloud": "esbuild scripts/test-codex-cloud.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-codex-cloud.cjs && node scripts/.test-codex-cloud.cjs",
 		"test:mobile": "esbuild scripts/test-mobile.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-mobile.cjs && node scripts/.test-mobile.cjs",

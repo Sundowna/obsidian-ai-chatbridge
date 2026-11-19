@@ -8,6 +8,7 @@ import { getLinkpath, normalizePath, TFile, TFolder, type App } from 'obsidian';
 import { KIND_FOLDER, numbered } from './files';
 import { followRename } from './follow';
 import { appendLog } from './log';
+import { canvasLinkpaths, canvasLinks, rewriteCanvas, type CanvasRef } from './merge-canvas';
 import { copyKind, dirOf, extOf, nameOf, planMerge, rewriteLinks, stemOf, type CopyKind, type FoundNote, type KnownChat, type LinkRef, type MergeGroup, type MergePlan } from './merge';
 import { dailyNoteName, localStamp } from './naming';
 import { masterRaw, mirrorRaw, rawLink } from './raw-folders';
@@ -100,10 +101,11 @@ export interface MergePreview {
 	skipped: MergePlan['skipped'];
 }
 
-/** Links anywhere in the vault that point at one of these files, grouped by the note holding them. */
-function linksTo(app: App, targets: ReadonlySet<string>): Map<string, LinkRef[]> {
+/** Links anywhere in the vault that point at one of these files, grouped by the file holding them. */
+function linksTo(app: App, targets: ReadonlySet<string>, canvases: readonly CanvasText[]): Map<string, LinkRef[]> {
 	const out = new Map<string, LinkRef[]>();
 	for (const [source, dests] of Object.entries(app.metadataCache.resolvedLinks)) {
+		if (extOf(source) === '.canvas') continue; // read below, from the canvas itself
 		if (!Object.keys(dests).some((d) => targets.has(d))) continue;
 		const file = fileAt(app, source);
 		if (!file) continue;
@@ -113,9 +115,42 @@ function linksTo(app: App, targets: ReadonlySet<string>): Map<string, LinkRef[]>
 			const dest = app.metadataCache.getFirstLinkpathDest(getLinkpath(l.link), source)?.path;
 			if (dest && targets.has(dest)) refs.push({ original: l.original, from: dest });
 		}
-		// A canvas (or anything else without a link list) is named so it can be reported.
+		// Anything else without a link list (an Excalidraw drawing, say) is named so it can be reported.
 		out.set(source, refs);
 	}
+	for (const [path, refs] of canvasesLinking(app, targets, canvases)) out.set(path, refs);
+	return out;
+}
+
+/**
+ * Canvases with a file node or a text-node link to one of these files. A canvas that cannot be
+ * read as JSON Canvas is listed with no links (reported, left as it is) when Obsidian counts a
+ * link from it or its text names one of the files.
+ */
+export function canvasesLinking(app: App, targets: ReadonlySet<string>, canvases: readonly CanvasText[]): Map<string, LinkRef[]> {
+	const out = new Map<string, LinkRef[]>();
+	for (const { path, text } of canvases) {
+		const refs = canvasLinks(text, targets, (linkpath) => app.metadataCache.getFirstLinkpathDest(linkpath, path)?.path ?? null);
+		if (refs) {
+			if (refs.length) out.set(path, refs);
+			continue;
+		}
+		if (!text.trim()) continue; // a new, empty canvas
+		const counted = Object.keys(app.metadataCache.resolvedLinks[path] ?? {}).some((d) => targets.has(d));
+		if (counted || [...targets].some((t) => text.includes(stemOf(t)))) out.set(path, []);
+	}
+	return out;
+}
+
+export interface CanvasText {
+	path: string;
+	text: string;
+}
+
+/** Every canvas in the vault with its text, read once. */
+async function readCanvases(app: App): Promise<CanvasText[]> {
+	const out: CanvasText[] = [];
+	for (const file of app.vault.getFiles()) if (extOf(file.path) === '.canvas') out.push({ path: file.path, text: await app.vault.cachedRead(file) });
 	return out;
 }
 
@@ -135,19 +170,21 @@ function savedFileMoves(app: App, g: MergeGroup): { from: string; to: string }[]
 }
 
 /** What would be merged. Reads only. */
-export function previewMerge(app: App, s: Settings): MergePreview {
+export async function previewMerge(app: App, s: Settings): Promise<MergePreview> {
 	const known = knownChats(s);
 	const plan = planMerge(findNotes(app), known, (p) => findFile(app, normalizePath(p)) !== null);
-	const groups: PreviewGroup[] = plan.groups.map((g) => {
+	const canvases = await readCanvases(app);
+	const groups: PreviewGroup[] = [];
+	for (const g of plan.groups) {
 		const fileMoves = savedFileMoves(app, g);
 		const raws = [g.mainRaw, ...g.olderRaws.map((o) => o.path)].flatMap((raw) => (raw ? [raw, ...olderParts(app, raw).map((f) => f.path)] : []));
-		const links = linksTo(app, new Set([...g.remove, ...fileMoves.map((m) => m.from), ...raws]));
+		const links = linksTo(app, new Set([...g.remove, ...fileMoves.map((m) => m.from), ...raws]), canvases);
 		// Links inside the notes that go away do not need fixing, and the note that stays is written anew.
 		for (const gone of [...g.remove, g.target]) links.delete(gone);
 		// A note that only links a raw file which keeps its place needs nothing either.
 		if (g.mainRaw && g.mainRaw === g.targetRaw && !g.olderRaws.length) for (const [source, refs] of links) if (refs.length && refs.every((x) => raws.includes(x.from))) links.delete(source);
-		return { ...g, links, fileMoves };
-	});
+		groups.push({ ...g, links, fileMoves });
+	}
 	return { groups, skipped: plan.skipped };
 }
 
@@ -214,6 +251,65 @@ function freeVersion(app: App, targetRaw: string, at: string, parts: number): nu
 		if (names.every((p) => findFile(app, p) === null)) return n;
 	}
 	throw new Error(`No free file name for an earlier version of ${targetRaw}`);
+}
+
+/**
+ * Points a canvas's file nodes and text-node links at the merged files. JSON in, JSON out, the
+ * rest of the canvas untouched; written only if something changed. A canvas that is not JSON
+ * Canvas (any more) is reported and left as it is.
+ */
+async function rewriteCanvasFile(app: App, file: TFile, refs: readonly CanvasRef[], pathOf: (from: string) => string | null, linktextOf: (from: string) => string | null, r: Pick<MergeResult, 'linksFixed' | 'linksLeft'>): Promise<void> {
+	const unreadable = () => r.linksLeft.push(`${file.path}: a canvas that could not be read, check by hand`);
+	const before = rewriteCanvas(await app.vault.read(file), refs, pathOf, linktextOf);
+	if (!before) return void unreadable();
+	if (before.changed) {
+		let out: ReturnType<typeof rewriteCanvas> = null;
+		await app.vault.process(file, (current) => {
+			out = rewriteCanvas(current, refs, pathOf, linktextOf);
+			return out ? out.text : current;
+		});
+		const done = out as ReturnType<typeof rewriteCanvas>;
+		if (!done) return void unreadable();
+		r.linksFixed += done.changed;
+		for (const f of done.failed) r.linksLeft.push(`${file.path}: ${f.original}`);
+		return;
+	}
+	for (const f of before.failed) r.linksLeft.push(`${file.path}: ${f.original}`);
+}
+
+/**
+ * Step 4 of a merge: rewrites the links found in the preview (`links`, by the file holding them)
+ * so they point where `destOf` says. A file that holds links and has itself moved is found
+ * through `moved`. Notes go through `rewriteLinks`, canvases through `rewriteCanvasFile`;
+ * anything else is reported.
+ */
+export async function fixLinks(app: App, links: ReadonlyMap<string, LinkRef[]>, moved: ReadonlyMap<string, string>, destOf: (from: string) => string, removed: readonly string[], r: Pick<MergeResult, 'linksFixed' | 'linksLeft'>): Promise<void> {
+	for (const [was, refs] of links) {
+		// A saved file that links to the chat has itself just moved.
+		const source = moved.get(was) ?? was;
+		const file = fileAt(app, source);
+		if (!file) continue;
+		if (!refs.length) {
+			r.linksLeft.push(`${source}: links to ${removed.map(nameOf).join(', ')} (${extOf(file.path) === '.canvas' ? 'a canvas that could not be read' : 'not a note'}, check by hand)`);
+			continue;
+		}
+		const linktextOf = (from: string): string | null => {
+			const dest = fileAt(app, destOf(from));
+			return dest ? app.metadataCache.fileToLinktext(dest, source, true) : null;
+		};
+		if (extOf(file.path) === '.canvas') {
+			await rewriteCanvasFile(app, file, refs as CanvasRef[], (from) => fileAt(app, destOf(from))?.path ?? null, linktextOf, r);
+			continue;
+		}
+		let failed: LinkRef[] = [];
+		await app.vault.process(file, (current) => {
+			const out = rewriteLinks(current, refs, linktextOf);
+			failed = out.failed;
+			r.linksFixed += out.changed;
+			return out.text;
+		});
+		for (const f of failed) r.linksLeft.push(`${source}: ${f.original}`);
+	}
 }
 
 async function mergeOne(app: App, s: Settings, g: PreviewGroup, known: Map<string, Known>, r: MergeResult): Promise<void> {
@@ -332,28 +428,7 @@ async function mergeOne(app: App, s: Settings, g: PreviewGroup, known: Map<strin
 		for (let i = 0; i < 5 && moved.has(to); i++) to = moved.get(to)!;
 		return to === from && g.remove.includes(from) ? g.target : to;
 	};
-	for (const [was, refs] of g.links) {
-		// A saved file that links to the chat has itself just moved.
-		const source = moved.get(was) ?? was;
-		const file = fileAt(app, source);
-		if (!file) continue;
-		if (!refs.length) {
-			r.linksLeft.push(`${source}: links to ${g.remove.map(nameOf).join(', ')} (not a note, check by hand)`);
-			continue;
-		}
-		const linktextOf = (from: string): string | null => {
-			const dest = fileAt(app, destOf(from));
-			return dest ? app.metadataCache.fileToLinktext(dest, source, true) : null;
-		};
-		let failed: LinkRef[] = [];
-		await app.vault.process(file, (current) => {
-			const out = rewriteLinks(current, refs, linktextOf);
-			failed = out.failed;
-			r.linksFixed += out.changed;
-			return out.text;
-		});
-		for (const f of failed) r.linksLeft.push(`${source}: ${f.original}`);
-	}
+	await fixLinks(app, g.links, moved, destOf, g.remove, r);
 
 	// 5. The history points at the one note; then the others go to the trash.
 	if (history) {
@@ -400,6 +475,17 @@ export async function runMerge(app: App, s: Settings, groups: readonly PreviewGr
 			if (hit && !r.linksLeft.includes(line)) r.linksLeft.push(line);
 		}
 	}
+	// Canvases too: a file node or a text link that names a merged note and finds nothing.
+	if (gone.size) {
+		for (const { path, text } of await readCanvases(app)) {
+			for (const linkpath of canvasLinkpaths(text) ?? []) {
+				if (gone.has(linkpath) ? fileAt(app, linkpath) : app.metadataCache.getFirstLinkpathDest(linkpath, path)) continue;
+				const hit = gone.has(linkpath) || stems.has(stemOf(linkpath).toLowerCase()) || stems.has(nameOf(linkpath).toLowerCase());
+				const line = `${path}: ${linkpath}`;
+				if (hit && !r.linksLeft.includes(line)) r.linksLeft.push(line);
+			}
+		}
+	}
 	return r;
 }
 
@@ -426,7 +512,7 @@ export function mergeReportText(groups: readonly PreviewGroup[], skipped: MergeP
 			for (const o of g.olderNotes) out.push(`    - earlier version kept (note text as JSON): \`${nameOf(o.path)}\``);
 			if (g.mainRaw && g.targetRaw && g.mainRaw !== g.targetRaw) out.push(`    - raw file renamed: \`${nameOf(g.mainRaw)}\` → \`${nameOf(g.targetRaw)}\``);
 			if (g.fileMoves.length) out.push(`    - ${g.fileMoves.length} saved files move to the note's own Artifacts/Attachments folder`);
-			for (const [source, refs] of g.links) out.push(`    - ${Math.max(1, refs.length)} link${refs.length > 1 ? 's' : ''} rewritten in \`${source}\``);
+			for (const [source, refs] of g.links) out.push(refs.length ? `    - ${refs.length} link${refs.length > 1 ? 's' : ''} rewritten in \`${source}\`` : `    - links to check by hand in \`${source}\` (not a note or canvas it can read)`);
 			for (const n of g.notes) out.push(`    - note: ${n}`);
 		}
 		out.push('');
