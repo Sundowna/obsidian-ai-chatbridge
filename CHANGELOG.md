@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.36.0 - 2026-11-20
 
 ### New
 - **Include pinned chats** - a switch in the ChatGPT account settings, next to **Include archived chats** ([#32](https://github.com/Sundowna/obsidian-ai-chatbridge/issues/32)). On by default, so pinned chats are synced like the others, as in 0.35.2. Turned off, the pinned lists are not read and pinned chats are left out of the sync; turning it back on reads them in full once
