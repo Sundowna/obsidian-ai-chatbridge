@@ -99,6 +99,8 @@ export interface GptSettings {
 	/** The workspace the login belongs to (not secret); matches Codex sessions to this account. */
 	workspaceId?: string;
 	includeArchived?: boolean;
+	/** Pinned chats sit in lists of their own (issue #32). Missing = on. */
+	includePinned?: boolean;
 	cooldownUntil?: number;
 	resumeAfter429?: { consecutive: number; forceFull: boolean } | null;
 	assetRetries?: Record<string, AssetRetry>;

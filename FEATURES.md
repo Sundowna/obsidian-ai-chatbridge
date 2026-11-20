@@ -114,7 +114,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Project picker: Fetch projects / Refresh list / Fetching… (cta only before first fetch), status with indeterminate bar, error text, "N of M selected · K with own folder", "Fetched … ago", filter box from 9 rows, Select all/Clear become Select shown/Clear shown while filtering, tags **New** and **Not found**, chat counts, warnings (nothing selected, catalog note), per-row transcript and JSON folder lines with greyed default, reset, invalid state; only the picker redraws on a tick
 - [ ] Lumo: project list fetched once per settings opening, full list in memory only, only selected names saved
 - [ ] Claude: Claude Code cloud sessions toggle; Advanced: Session key (secret storage), Organization ID (UUID check)
-- [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Keep Codex's steps toggle (off by default); Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
+- [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Keep Codex's steps toggle (off by default); Include pinned chats (on by default); Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
 - [ ] Gemini: "What is saved" note; Advanced: Google cookies. AI Studio: Sync AI Studio toggle, own folder
 - [ ] Lumo: Encryption note
 - [ ] Desktop app panel: Sync desktop sessions toggle (rest hidden while off), **Sync now**, Code Local / Codex Local folder, Raw session folder (only with Keep the raw session file), Reads from (roots and account matching text), Advanced: Extra session folders
@@ -203,7 +203,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 
 ## 7. Other providers [readme]
 
-- [ ] ChatGPT: projects, pinned chats (own inventory lists, always on), archived optional, custom GPT chats to `Recent`, generated files and uploads, visual answers as HTML and pictures (nothing executed, no remote loads), voice chats as text, incremental sync with weekly full inventory, delayed-file retries
+- [ ] ChatGPT: projects, pinned chats (own inventory lists, on by default; turning it off leaves them out of the inventory), archived optional, custom GPT chats to `Recent`, generated files and uploads, visual answers as HTML and pictures (nothing executed, no remote loads), voice chats as text, incremental sync with weekly full inventory, delayed-file retries
 - [ ] Gemini: chats with shown reasoning, pictures as links. AI Studio: chats and prompts
 - [ ] Gemini: a chat Google sends in an odd shape is skipped, named in the log under "could not read" and tried again next run; the third such chat in one run stops the sync ("could not be verified"), as a format change would
 - [ ] Lumo: chats and projects decrypted in memory, saved readable, no attachments

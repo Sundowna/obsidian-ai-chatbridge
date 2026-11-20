@@ -62,6 +62,7 @@ export function completeInventoryJob(inventory: Inventory, id: string, capturedR
 
 interface ScanOptions {
 	archived: boolean;
+	pinned: boolean;
 	overlapMinutes: number;
 	forceFull: boolean;
 	now: number;
@@ -79,7 +80,8 @@ export interface ScanStats {
 
 /** Each completed page persists discoveries before a separate save advances the list watermark. */
 export async function scanInventory(inventory: Inventory, options: ScanOptions, stats: ScanStats): Promise<void> {
-	const lists: ListKey[] = ['active-normal', 'active-tpp', 'pinned-normal', 'pinned-tpp'];
+	const lists: ListKey[] = ['active-normal', 'active-tpp'];
+	if (options.pinned) lists.push('pinned-normal', 'pinned-tpp');
 	if (options.archived) lists.push('archived-normal', 'archived-tpp');
 	if (options.forceFull && !inventory.manual?.length) {
 		inventory.manual = [...lists];
