@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Pinned ChatGPT chats are synced** - ChatGPT leaves pinned chats out of its normal chat list, so they were never saved, with no error in the log ([#32](https://github.com/Sundowna/obsidian-ai-chatbridge/issues/32)). The inventory now reads the pinned chats as two more lists of their own (normal and TPP), checked incrementally like the others. The first sync after the update reads them in full once. A chat that is unpinned later stays one note
+
 ## 0.35.1 - 2026-11-19
 
 ### Changed

@@ -6,7 +6,8 @@ const MAX_PAGES = 300;
 const WEEK = 7 * 24 * 60 * 60_000;
 export const DEFAULT_OVERLAP_MINUTES = 10;
 
-type ListKey = 'active-normal' | 'active-tpp' | 'archived-normal' | 'archived-tpp';
+// ChatGPT lists pinned ("starred") chats only when asked with is_starred=true, so they get their own lists.
+type ListKey = 'active-normal' | 'active-tpp' | 'pinned-normal' | 'pinned-tpp' | 'archived-normal' | 'archived-tpp';
 
 interface Checkpoint {
 	watermark: number | null;
@@ -64,7 +65,7 @@ interface ScanOptions {
 	overlapMinutes: number;
 	forceFull: boolean;
 	now: number;
-	fetch: (offset: number, tpp: boolean, archived: boolean) => Promise<unknown>;
+	fetch: (offset: number, tpp: boolean, archived: boolean, pinned: boolean) => Promise<unknown>;
 	save: () => Promise<void>;
 	needsCapture: (item: GptListItem) => boolean;
 }
@@ -78,7 +79,7 @@ export interface ScanStats {
 
 /** Each completed page persists discoveries before a separate save advances the list watermark. */
 export async function scanInventory(inventory: Inventory, options: ScanOptions, stats: ScanStats): Promise<void> {
-	const lists: ListKey[] = ['active-normal', 'active-tpp'];
+	const lists: ListKey[] = ['active-normal', 'active-tpp', 'pinned-normal', 'pinned-tpp'];
 	if (options.archived) lists.push('archived-normal', 'archived-tpp');
 	if (options.forceFull && !inventory.manual?.length) {
 		inventory.manual = [...lists];
@@ -100,7 +101,7 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 		for (let page = 0; ; page++) {
 			if (page >= MAX_PAGES) throw new ShapeError('ChatGPT inventory exceeded its page limit.');
 			stats.requests++;
-			const response = checkGptList(await options.fetch(offset, list.endsWith('-tpp'), list.startsWith('archived-')));
+			const response = checkGptList(await options.fetch(offset, list.endsWith('-tpp'), list.startsWith('archived-'), list.startsWith('pinned-')));
 			if (response.offset !== offset) throw new ShapeError('ChatGPT list returned the wrong offset.');
 			let pageNewest = -Infinity;
 			let newestInPage = Infinity;
