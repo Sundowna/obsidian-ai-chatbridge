@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.36.1 - 2026-11-20
 
 ### Fixed
 - **Merge chat copies waits for a running sync** - pressing **Merge N chats** while a sync was running (an automatic sync can start while the preview is open) quietly did nothing apart from a short notice. Now a notice stays up, "A sync is running. The merge starts by itself when it has finished.", and the merge starts as soon as that sync ends. While it waits, the automatic sync, a retry and a phone's request wait their turn. If the merge does not start after all (for example another computer is syncing and you choose to wait), a notice says "The merge did not start. Nothing was changed."
