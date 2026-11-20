@@ -203,7 +203,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 
 ## 7. Other providers [readme]
 
-- [ ] ChatGPT: projects, archived optional, custom GPT chats to `Recent`, generated files and uploads, visual answers as HTML and pictures (nothing executed, no remote loads), voice chats as text, incremental sync with weekly full inventory, delayed-file retries
+- [ ] ChatGPT: projects, pinned chats (own inventory lists, always on), archived optional, custom GPT chats to `Recent`, generated files and uploads, visual answers as HTML and pictures (nothing executed, no remote loads), voice chats as text, incremental sync with weekly full inventory, delayed-file retries
 - [ ] Gemini: chats with shown reasoning, pictures as links. AI Studio: chats and prompts
 - [ ] Gemini: a chat Google sends in an odd shape is skipped, named in the log under "could not read" and tried again next run; the third such chat in one run stops the sync ("could not be verified"), as a format change would
 - [ ] Lumo: chats and projects decrypted in memory, saved readable, no attachments

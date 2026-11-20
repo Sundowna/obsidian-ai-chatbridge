@@ -274,7 +274,7 @@ async function testVoiceReimport() {
 	const connect = GptApi.connect;
 	GptApi.connect = async () => ({
 		inventoryKey: 'account:voice-test',
-		listPath: (offset: number, tpp: boolean, archived: boolean) => 'list:' + [offset, tpp, archived].join(':'),
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
 		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
 		chatPath: () => 'chat',
 		olderPath: () => 'older',
@@ -341,7 +341,7 @@ async function testJsonFolder() {
 	let chatFetches = 0;
 	GptApi.connect = async () => ({
 		inventoryKey: 'account:json-folder-test',
-		listPath: (offset: number, tpp: boolean, archived: boolean) => 'list:' + [offset, tpp, archived].join(':'),
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
 		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
 		chatPath: () => 'chat',
 		olderPath: () => 'older',
@@ -412,7 +412,7 @@ async function main() {
 		calls++;
 		return {
 			inventoryKey: 'account:integration-test',
-			listPath: (offset: number, tpp: boolean, archived: boolean) => 'list:' + [offset, tpp, archived].join(':'),
+			listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
 			projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
 			chatPath: () => 'chat',
 			olderPath: () => 'older',
@@ -444,7 +444,8 @@ async function main() {
 		assert.match(limitedListing.stopped ?? '', /429/);
 		assert.match(limitedListing.stopped ?? '', /listing archived normal chats \(offset 1\)\. Saved 0 chats/);
 		assert(!limitedListing.stopped?.includes('Fixture'));
-		assert.equal(limitedListing.listingRequests, 4);
+		assert.equal(limitedListing.listingRequests, 6);
+		assert(paths.includes('list:0:false:false:pinned') && paths.includes('list:0:true:false:pinned'), 'pinned chats are listed');
 		assert.equal(limitedListing.leftForLater, 1);
 		h.restart();
 		const inventory = h.settings.chatgpt[0]!.web.inventories!.accounts['account:integration-test']!;
@@ -518,7 +519,7 @@ async function main() {
 		fixtureVisible = false;
 		const beforeReconciliation = paths.filter((path) => path === 'chat').length;
 		const reconciled = await runGptSync(h.plugin, h.settings.chatgpt[0]!, undefined, true);
-		assert.equal(reconciled.fullLists, 4);
+		assert.equal(reconciled.fullLists, 6);
 		assert.equal(paths.filter((path) => path === 'chat').length, beforeReconciliation);
 		assert.equal(h.read(journal.json), initial);
 

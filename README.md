@@ -57,7 +57,7 @@
 | --- | --- | --- |
 | **Claude** (claude.ai) | Chats per project | Artifacts and uploads |
 | **Claude Code cloud** (claude.ai/code) | Sessions that ran in Anthropic's cloud, one folder per GitHub repository | Pasted images and files Claude wrote |
-| **ChatGPT** | Chats per project, archived chats optional; custom GPT chats go to `Recent` | Generated files and uploads |
+| **ChatGPT** | Chats per project, pinned chats included, archived chats optional; custom GPT chats go to `Recent` | Generated files and uploads |
 | **Codex cloud** (chatgpt.com/codex) | Tasks that ran in OpenAI's cloud, started on chatgpt.com/codex or from ChatGPT; off until you turn it on | Every prompt and answer, steps counted, file changes as a diff |
 | **Gemini** | Chats | Pictures as links |
 | **Google AI Studio** | Chats and prompts | - |

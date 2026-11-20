@@ -146,10 +146,10 @@ export class GptApi {
 		return t.replace(/Bearer\s+[^\s"']+/gi, 'Bearer [hidden]');
 	}
 
-	/** One page of the chat list. `tpp` = the second list ChatGPT keeps separately. */
-	listPath(offset: number, tpp: boolean, archived = false): string {
+	/** One page of the chat list. `tpp` = the second list ChatGPT keeps separately; pinned chats appear only with `pinned`. */
+	listPath(offset: number, tpp: boolean, archived = false, pinned = false): string {
 		const origin = tpp ? 'conversation_origin=tpp' : 'exclude_conversation_origin=tpp';
-		return `/backend-api/conversations?${origin}&expand=false&hide_snorlax=false&is_archived=${archived}&is_starred=false&limit=20&order=updated&offset=${offset}`;
+		return `/backend-api/conversations?${origin}&expand=false&hide_snorlax=false&is_archived=${archived}&is_starred=${pinned}&limit=20&order=updated&offset=${offset}`;
 	}
 
 	readonly sidebarPath = '/backend-api/gizmos/snorlax/sidebar?conversations_per_gizmo=5&limit=20&owned_only=false';

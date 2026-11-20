@@ -277,11 +277,11 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				if (g.resumeAfter429?.forceFull && inventory.manual?.length) g.resumeAfter429.forceFull = false;
 				return plugin.saveSettings();
 			},
-			fetch: async (offset, tpp, archived) => {
+			fetch: async (offset, tpp, archived, pinned) => {
 				progress(`reading ChatGPT inventory… ${scan.seen.size} chats checked`);
 				await sleep(delayMs);
-				requestStage = `listing ${archived ? 'archived' : 'active'} ${tpp ? 'TPP' : 'normal'} chats (offset ${offset})`;
-				return (await a.get(a.listPath(offset, tpp, archived))).json;
+				requestStage = `listing ${archived ? 'archived' : pinned ? 'pinned' : 'active'} ${tpp ? 'TPP' : 'normal'} chats (offset ${offset})`;
+				return (await a.get(a.listPath(offset, tpp, archived, pinned))).json;
 			},
 		}, scan);
 

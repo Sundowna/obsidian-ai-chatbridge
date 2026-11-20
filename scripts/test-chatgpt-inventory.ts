@@ -17,6 +17,8 @@ function row(id: number, time: number): GptListItem {
 const normal = Array.from({ length: 180 }, (_, i) => row(i, now - i * 120_000));
 const tpp = Array.from({ length: 60 }, (_, i) => row(i + 1000, now - i * 120_000));
 const archived = [row(2000, now - 3_600_000)];
+// Pinned chats come only from the is_starred=true lists (issue #32).
+const pinned = [row(3000, now - 1_800_000)];
 
 async function main() {
 	const jwt = (sub: string, workspace?: string) => 'x.' + Buffer.from(JSON.stringify({
@@ -47,14 +49,14 @@ async function main() {
 				previousSavedJobCount = Object.keys(inventory.queue).length;
 				persisted = structuredClone(storage);
 			},
-			fetch: async (offset, isTpp, isArchived) => {
+			fetch: async (offset, isTpp, isArchived, isPinned) => {
 				startOffsets.push(offset);
 				if (offset === failAtOffset) throw new Error('listing interrupted');
 				if (!isTpp && !isArchived && offset === 18 && moveHeadOnSecondPage) {
 					normalRows = [moveHeadOnSecondPage, ...normalRows];
 					moveHeadOnSecondPage = undefined;
 				}
-				const list = isArchived ? (isTpp ? [] : archived) : isTpp ? tpp : normalRows;
+				const list = isArchived ? (isTpp ? [] : archived) : isPinned ? (isTpp ? [] : pinned) : isTpp ? tpp : normalRows;
 				return { offset, total: list.length, items: list.slice(offset, offset + 20) };
 			},
 		}, stats);
@@ -81,17 +83,19 @@ async function main() {
 
 	failCheckpoint = false;
 	const bootstrap = await scan();
-	assert.equal(bootstrap.requests, 14);
-	assert.equal(bootstrap.fullLists, 2);
-	assert.equal(Object.keys(inventory.queue).length, 240);
+	assert.equal(bootstrap.requests, 16);
+	assert.equal(bootstrap.fullLists, 4);
+	assert.equal(Object.keys(inventory.queue).length, 241);
+	assert.equal(inventory.queue[pinned[0]!.id]?.id, pinned[0]!.id, 'pinned chat is found');
+	assert(inventory.checkpoints['pinned-normal'] && inventory.checkpoints['pinned-tpp']);
 	for (const item of Object.values(inventory.queue)) {
 		captured.add(item.id + '/' + item.update_time);
 		completeInventoryJob(inventory, item.id, item.update_time);
 	}
 	previousSavedJobCount = 0;
 	const quiet = await scan();
-	assert.equal(quiet.requests, 4);
-	assert.equal(quiet.incrementalLists, 2);
+	assert.equal(quiet.requests, 6);
+	assert.equal(quiet.incrementalLists, 4);
 	assert.equal(Object.keys(inventory.queue).length, 0);
 
 	const edited = { ...normal.at(-1)!, update_time: iso(now + 1000) };
@@ -108,20 +112,20 @@ async function main() {
 	[normalRows[1], normalRows[2]] = [normalRows[2]!, normalRows[1]!];
 	const disordered = await scan({ time: now + 1000 });
 	assert.equal(disordered.fullLists, 1);
-	assert.equal(disordered.requests, 12);
+	assert.equal(disordered.requests, 14);
 	assert.equal(inventory.checkpoints['active-normal']?.watermark, null);
 	normalRows.sort((a, b) => Date.parse(b.update_time) - Date.parse(a.update_time));
 
 	const manual = await scan({ force: true, time: now + 2000 });
-	assert.equal(manual.fullLists, 2);
+	assert.equal(manual.fullLists, 4);
 	assert.equal(inventory.manual?.length, 0);
 	const weekly = await scan({ time: now + 2000 + 7 * 86_400_000 });
-	assert.equal(weekly.fullLists, 2);
+	assert.equal(weekly.fullLists, 4);
 
 	const inserted = row(800, now + 3000);
 	moveHeadOnSecondPage = inserted;
 	const moving = await scan({ force: true, time: now + 3000 + 7 * 86_400_000 });
-	assert.equal(moving.seen.size, 241);
+	assert.equal(moving.seen.size, 242);
 	assert(!moving.seen.has(inserted.id));
 	await scan({ time: now + 4000 + 7 * 86_400_000 });
 	assert.equal(inventory.queue[inserted.id]?.id, inserted.id);
@@ -135,10 +139,10 @@ async function main() {
 	assert.equal(Object.keys(inventory.checkpoints).length, 0);
 	assert(inventory.queue[edited.id]);
 	const expanded = await scan({ archive: true });
-	assert.equal(expanded.fullLists, 4);
+	assert.equal(expanded.fullLists, 6);
 	assert.equal(inventory.queue[archived[0]!.id]?.id, archived[0]!.id);
 	assert.equal(inventory.known[archived[0]!.id]?.generation, inventory.generation);
-	console.log(`Inventory tests passed. Quiet run: ${quiet.requests} chat-list requests vs ${bootstrap.requests} for full discovery of 240 rows.`);
+	console.log(`Inventory tests passed. Quiet run: ${quiet.requests} chat-list requests vs ${bootstrap.requests} for full discovery of 241 rows.`);
 }
 
 void main().catch((error: unknown) => {
