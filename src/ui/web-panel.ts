@@ -186,6 +186,15 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 	new Setting(el).setName('Content').setHeading();
 	contentOptions(ctx, el, 'chatgpt', account, g);
 	new Setting(el)
+		.setName('Include pinned chats')
+		.setDesc('Also check pinned conversations during sync. ChatGPT lists them apart from the others.')
+		.addToggle((t) =>
+			t.setValue(g.includePinned ?? true).onChange(async (v) => {
+				g.includePinned = v;
+				await save();
+			}),
+		);
+	new Setting(el)
 		.setName('Include archived chats')
 		.setDesc('Also check archived conversations during sync.')
 		.addToggle((t) =>

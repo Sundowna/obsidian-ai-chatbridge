@@ -38,10 +38,10 @@ async function main() {
 	let failCheckpoint = false;
 	let moveHeadOnSecondPage: GptListItem | undefined;
 	let previousSavedJobCount = 0;
-	const scan = async ({ force = false, archive = false, time = now } = {}) => {
+	const scan = async ({ force = false, archive = false, pin = true, time = now } = {}) => {
 		const stats: ScanStats = { requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set() };
 		await scanInventory(inventory, {
-			forceFull: force, archived: archive, overlapMinutes: 10, now: time,
+			forceFull: force, archived: archive, pinned: pin, overlapMinutes: 10, now: time,
 			needsCapture: (item) => !captured.has(item.id + '/' + item.update_time),
 			save: async () => {
 				if (failCheckpoint && inventory.checkpoints['active-normal']) throw new Error('checkpoint write interrupted');
@@ -142,6 +142,16 @@ async function main() {
 	assert.equal(expanded.fullLists, 6);
 	assert.equal(inventory.queue[archived[0]!.id]?.id, archived[0]!.id);
 	assert.equal(inventory.known[archived[0]!.id]?.generation, inventory.generation);
+
+	// Include pinned chats off: the pinned lists are not requested at all.
+	inventory = accountInventory(storage, 'account:c', 'scope:no-pinned');
+	previousSavedJobCount = 0;
+	startOffsets = [];
+	const unpinned = await scan({ pin: false });
+	assert.equal(unpinned.fullLists, 2);
+	assert(!unpinned.seen.has(pinned[0]!.id));
+	assert.equal(inventory.checkpoints['pinned-normal'], undefined);
+	assert.equal(inventory.queue[pinned[0]!.id], undefined);
 	console.log(`Inventory tests passed. Quiet run: ${quiet.requests} chat-list requests vs ${bootstrap.requests} for full discovery of 241 rows.`);
 }
 

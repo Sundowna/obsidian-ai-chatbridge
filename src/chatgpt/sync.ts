@@ -247,10 +247,13 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		result.projectsCut = cut;
 		const recent = g.recentFolderName || DEFAULT_RECENT;
 		const filters = g.onlyProjects ? [...new Set(g.projects.map((name) => name.trim().toLowerCase()).filter(Boolean))].sort() : [];
+		const includePinned = g.includePinned !== false;
+		// Pinned chats off adds a fifth entry, so the default (on) keeps the scope older versions saved.
 		const scope = JSON.stringify([
 			g.includeArchived === true, filters, filters.length ? recent.toLowerCase() : '',
 			projectList.filter((p) => filters.includes(p.name.toLowerCase()) || filters.includes(p.id.toLowerCase()))
 				.map((p) => p.id).sort(),
+			...(includePinned ? [] : ['no-pinned']),
 		]);
 		const inventory = accountInventory(g.inventories ??= { accounts: {} }, a.inventoryKey, scope);
 		if (g.chatProgress && (g.chatProgress.inventoryKey !== a.inventoryKey || g.chatProgress.scope !== scope)) {
@@ -269,6 +272,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		fullStillRequested = false;
 		await scanInventory(inventory, {
 			archived: g.includeArchived === true,
+			pinned: includePinned,
 			overlapMinutes: g.overlapMinutes ?? DEFAULT_OVERLAP_MINUTES,
 			forceFull: reconcile,
 			now: Date.now(),
