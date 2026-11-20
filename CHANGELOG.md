@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Merge chat copies waits for a running sync** - pressing **Merge N chats** while a sync was running (an automatic sync can start while the preview is open) quietly did nothing apart from a short notice. Now a notice stays up, "A sync is running. The merge starts by itself when it has finished.", and the merge starts as soon as that sync ends. While it waits, the automatic sync, a retry and a phone's request wait their turn. If the merge does not start after all (for example another computer is syncing and you choose to wait), a notice says "The merge did not start. Nothing was changed."
+- **A running merge is not stopped by the Sync button** - the Sync ribbon button, a click on the status bar and **Stop all** used to stop a running merge part-way. Now they only show how to stop it: with the command **Stop the running sync**, which still stops it between two chats
+- **A stopped merge says where it stopped** - the report note starts with "Stopped after N of M chats", the log line says the same, and so does the notice. An error outside a single chat is reported the same way instead of leaving no report
+
 ## 0.36.0 - 2026-11-20
 
 ### New

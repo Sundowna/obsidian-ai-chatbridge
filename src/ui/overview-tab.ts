@@ -135,7 +135,7 @@ function heroButtons(ctx: PanelContext, parent: HTMLElement): void {
 		}
 		draw();
 	});
-	stop.addEventListener('click', () => plugin.requestStop());
+	stop.addEventListener('click', () => plugin.pressStop());
 	sync.addEventListener('click', () => {
 		if (asks()) void plugin.remote.ask();
 		else if (!plugin.busy) void plugin.syncAll('manual').then(ctx.refresh);

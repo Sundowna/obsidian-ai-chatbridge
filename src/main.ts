@@ -8,7 +8,8 @@ import { folderExists, layoutMoves, moveToAppLayout, pruneEmpty } from './deskto
 import { masterRaw, mirrorRaw } from './raw-folders';
 import { allRawMoves, moveRawFiles } from './raw-move';
 import { refreshIndex, type ReindexResult } from './reindex';
-import { mergeReportText, runMerge, writeMergeReport, type MergePreview, type MergeResult, type PreviewGroup } from './merge-run';
+import { mergeLogLine, mergeReportText, runMerge, writeMergeReport, type MergePreview, type MergeResult, type PreviewGroup } from './merge-run';
+import { mayStartWhileMergeWaits, MERGE_NOT_STARTED_TEXT, MERGE_NOT_STOPPED_TEXT, MERGE_WAITING_TEXT, startMergeWhenIdle } from './merge-wait';
 import { MergeModal } from './ui/merge-modal';
 import { runSync } from './sync';
 import { diagnoseActiveChat } from './diagnose';
@@ -72,6 +73,12 @@ export default class AIChatBridge extends Plugin {
 	private ribbonEl: HTMLElement | null = null;
 	/** Stop was asked for: the running sync ends after its current chat. */
 	private stopRequested = false;
+	/** "Merge N chats" was pressed during a sync: it starts when that sync ends (merge-wait.ts). */
+	private mergeWaiting = false;
+	/** The merge is running: the Sync button and the status bar do not stop it, only the Stop command does. */
+	private merging = false;
+	/** Waiting for the running sync to end (the waiting merge). */
+	private idleWaiters: (() => void)[] = [];
 	/** Which account (or desktop app) is syncing right now. */
 	private current: { provider?: Provider; id?: string; hermes?: boolean; memory?: boolean } | null = null;
 	private progress: SyncProgress | null = null;
@@ -99,9 +106,9 @@ export default class AIChatBridge extends Plugin {
 		if (adopted) await this.saveSettings();
 		registerLayoutIcons(this);
 		this.statusEl = this.addStatusBarItem();
-		// While a sync runs, selecting the status bar text stops it.
+		// While a sync runs, selecting the status bar text stops it (a merge only says how to stop it).
 		this.registerDomEvent(this.statusEl, 'click', () => {
-			if (this.syncing) this.requestStop();
+			if (this.syncing) this.pressStop();
 		});
 		this.ribbonEl = this.addRibbonIcon('refresh-cw', this.idleSyncLabel(), () => this.pressSync());
 		this.ribbonEl.addClass('ccs-ribbon');
@@ -262,6 +269,7 @@ export default class AIChatBridge extends Plugin {
 		// A running sync stops before its next chat (it may still be fetching one).
 		this.stopRequested = true;
 		this.remote.stop();
+		this.wakeIdleWaiters(); // a waiting merge gives up and says so
 		this.clearGptResumeTimer();
 		this.statusEl?.setText('');
 		closeLoginWindows();
@@ -563,6 +571,10 @@ export default class AIChatBridge extends Plugin {
 
 	/** Shows what "Merge chat copies into one note" would do. Reads only. */
 	openMergePreview(): void {
+		if (this.mergeWaiting || this.merging) {
+			new Notice(this.merging ? 'The merge is running. Open the preview again when it has finished.' : MERGE_WAITING_TEXT);
+			return;
+		}
 		if (this.running) {
 			new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is running. Merge the copies when it has finished.');
 			return;
@@ -575,22 +587,83 @@ export default class AIChatBridge extends Plugin {
 	 * note, and writes a report note saying what was done and which links could not be fixed.
 	 */
 	async mergeCopies(groups: readonly PreviewGroup[], skipped: MergePreview['skipped']): Promise<MergeResult | null> {
+		if (this.mergeWaiting || this.merging) {
+			new Notice(this.merging ? 'The merge is already running.' : MERGE_WAITING_TEXT);
+			return null;
+		}
 		let result: MergeResult | null = null;
-		await this.guarded('manual', async () => {
-			const notice = new Notice('AI ChatBridge: merging chat copies…', 0);
-			try {
-				const r = await runMerge(this.app, this.settings, groups, () => this.saveSettings(), (done, total, name) => notice.setMessage(`AI ChatBridge: merging ${done + 1} of ${total}: ${name}`), () => this.stopRequested);
-				await this.saveSettings();
-				const problems = r.linksLeft.length + r.failed.length;
-				r.report = await writeMergeReport(this.app, this.settings, 'merge report', mergeReportText(groups, skipped, r),
-					`**Merged chat copies:** ${r.merged} chats into one note each, ${r.notesTrashed} notes to the trash, ${r.versionsKept} earlier versions kept, ${r.linksFixed} links rewritten${problems ? `, ${problems} to check` : ''}`);
-				new Notice(`AI ChatBridge: merged ${r.merged} chats. ${r.notesTrashed} notes went to the trash, ${r.linksFixed} links were rewritten.${problems ? ` ${problems} things need a look:` : ''} See ${r.report}`, 20_000);
-				result = r;
-			} finally {
-				notice.hide();
-			}
-		});
+		let wait: Notice | null = null;
+		const hideWait = () => {
+			wait?.hide();
+			wait = null;
+		};
+		this.mergeWaiting = true;
+		this.busyChanged();
+		try {
+			const ran = await startMergeWhenIdle({
+				running: () => this.running,
+				unloaded: () => this.unloaded,
+				idle: () => new Promise<void>((resolve) => this.idleWaiters.push(resolve)),
+				waiting: () => {
+					wait = new Notice(MERGE_WAITING_TEXT, 0);
+				},
+				start: async () => {
+					let ran = false;
+					await this.guarded('manual', async () => {
+						ran = true;
+						hideWait();
+						this.mergeWaiting = false;
+						this.merging = true;
+						this.busyChanged();
+						try {
+							result = await this.runMergeNow(groups, skipped);
+						} finally {
+							this.merging = false;
+						}
+					}, { merge: true });
+					return ran;
+				},
+			});
+			if (!ran) new Notice(`AI ChatBridge: ${MERGE_NOT_STARTED_TEXT}`, 15_000);
+		} finally {
+			hideWait();
+			const held = this.mergeWaiting;
+			this.mergeWaiting = false;
+			this.merging = false;
+			this.busyChanged();
+			// A retry held back while the merge waited may go now.
+			if (held && !this.running) this.scheduleGptResume();
+		}
 		return result;
+	}
+
+	/** The merge itself, inside the sync guard: progress notice, report note and log line, also when stopped. */
+	private async runMergeNow(groups: readonly PreviewGroup[], skipped: MergePreview['skipped']): Promise<MergeResult> {
+		const notice = new Notice('AI ChatBridge: merging chat copies…', 0);
+		let at = 0;
+		try {
+			let r: MergeResult;
+			try {
+				r = await runMerge(this.app, this.settings, groups, () => this.saveSettings(), (done, total, name) => {
+					at = done;
+					notice.setMessage(`AI ChatBridge: merging ${done + 1} of ${total}: ${name}`);
+					this.statusEl?.setText(`AI ChatBridge: merging chat copies, ${done + 1} of ${total}`);
+				}, () => this.stopRequested);
+			} catch (e) {
+				// Something outside a single chat went wrong: still say how far it got.
+				const message = e instanceof Error ? e.message : String(e);
+				console.error('AI ChatBridge: the merge ended with an error', message);
+				r = { merged: 0, notesTrashed: 0, versionsKept: 0, linksFixed: 0, filesMoved: 0, linksLeft: [], left: [], failed: [`The merge ended with an error: ${message}`], stopped: `at chat ${at + 1} of ${groups.length} by an error` };
+			}
+			await this.saveSettings();
+			const problems = r.linksLeft.length + r.failed.length;
+			r.report = await writeMergeReport(this.app, this.settings, 'merge report', mergeReportText(groups, skipped, r), mergeLogLine(r));
+			const head = r.stopped ? `the merge stopped ${r.stopped}; run it again for the rest. Merged ${r.merged} chats.` : `merged ${r.merged} chats.`;
+			new Notice(`AI ChatBridge: ${head} ${r.notesTrashed} notes went to the trash, ${r.linksFixed} links were rewritten.${problems ? ` ${problems} things need a look:` : ''} See ${r.report}`, 20_000);
+			return r;
+		} finally {
+			notice.hide();
+		}
 	}
 
 	/** Finds chats moved outside Obsidian and points the sync history at them. */
@@ -614,7 +687,7 @@ export default class AIChatBridge extends Plugin {
 	/** The Sync button (ribbon, command): a Writer syncs or stops its sync, a Requester asks. */
 	pressSync(): void {
 		if (this.remote.role === 'requester') void this.remote.ask();
-		else if (this.syncing) this.requestStop();
+		else if (this.syncing) this.pressStop();
 		else void this.syncAll('manual');
 	}
 
@@ -693,7 +766,7 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	/** One sync at a time. (A source that stopped with an error is skipped by runOne, not here.) */
-	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>) {
+	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>, opts: { merge?: boolean } = {}) {
 		if (this.unloaded) return;
 		// A phone or tablet cannot sync by itself yet: it has no login windows and must not write
 		// beside the computer that does. There the sync button asks the computer (remote/).
@@ -701,8 +774,10 @@ export default class AIChatBridge extends Plugin {
 			if (trigger === 'manual') new Notice('A phone or tablet cannot sync by itself yet. Use the sync button to ask your computer.', 10_000);
 			return;
 		}
+		// A merge waiting for the running sync goes next; only a sync started by hand may go first.
+		if (!opts.merge && !mayStartWhileMergeWaits(trigger, this.mergeWaiting)) return;
 		if (this.running) {
-			if (trigger === 'manual') new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is already running.');
+			if (trigger === 'manual' && !opts.merge) new Notice(this.fetchingList ? 'The project list is still loading. Try again when it has finished.' : 'A sync is already running.');
 			return;
 		}
 		// Another computer syncing this vault right now would write the same notes. You may still
@@ -713,6 +788,7 @@ export default class AIChatBridge extends Plugin {
 			if (!(await this.syncAnyway(other))) return;
 		}
 		if (this.running || this.unloaded) return; // something started while we looked
+		if (!opts.merge && !mayStartWhileMergeWaits(trigger, this.mergeWaiting)) return;
 		this.clearGptResumeTimer();
 		this.running = true;
 		this.stopRequested = false;
@@ -734,7 +810,15 @@ export default class AIChatBridge extends Plugin {
 			this.busyChanged();
 			this.scheduleGptResume();
 			if (this.externalPending) void this.onExternalSettingsChange();
+			this.wakeIdleWaiters();
 		}
+	}
+
+	/** The running sync has ended: a waiting merge may start. */
+	private wakeIdleWaiters(): void {
+		const waiters = this.idleWaiters;
+		this.idleWaiters = [];
+		for (const fn of waiters) fn();
 	}
 
 	/** Asks whether to sync while another computer is syncing. */
@@ -809,6 +893,18 @@ export default class AIChatBridge extends Plugin {
 		this.busyChanged();
 	}
 
+	/**
+	 * The Sync button, the status bar and **Stop all**: stop a sync, but not a running merge, which
+	 * a press meant as "sync" would cut off part-way. The Stop command still stops a merge.
+	 */
+	pressStop(): void {
+		if (this.merging) {
+			new Notice(MERGE_NOT_STOPPED_TEXT, 15_000);
+			return;
+		}
+		this.requestStop();
+	}
+
 	/** Calls `fn` whenever a sync starts, stops or is asked to stop. Returns the way to stop listening. */
 	onBusyChange(fn: () => void): () => void {
 		this.busyListeners.add(fn);
@@ -819,12 +915,12 @@ export default class AIChatBridge extends Plugin {
 		const running = this.syncing;
 		if (this.ribbonEl) {
 			setIcon(this.ribbonEl, running ? 'square' : 'refresh-cw');
-			this.ribbonEl.setAttr('aria-label', running ? (this.stopRequested ? 'Stopping the sync…' : 'Stop sync') : this.idleSyncLabel());
+			this.ribbonEl.setAttr('aria-label', running ? (this.stopRequested ? 'Stopping the sync…' : this.merging ? 'Merging chat copies…' : 'Stop sync') : this.idleSyncLabel());
 			this.ribbonEl.toggleClass('is-syncing', running);
 		}
 		const stoppable = running && !this.stopRequested;
 		this.statusEl?.toggleClass('ccs-status-stoppable', stoppable);
-		if (stoppable) this.statusEl?.setAttr('aria-label', 'Select to stop the sync');
+		if (stoppable) this.statusEl?.setAttr('aria-label', this.merging ? 'Merging chat copies' : 'Select to stop the sync');
 		else this.statusEl?.removeAttribute('aria-label');
 		for (const fn of [...this.busyListeners]) {
 			try {
@@ -837,7 +933,7 @@ export default class AIChatBridge extends Plugin {
 
 	/** A sync or a project-list fetch is under way. */
 	get busy(): boolean {
-		return this.running;
+		return this.running || this.mergeWaiting;
 	}
 
 	/** Runs work that must not overlap a sync, such as fetching the project list. */
@@ -854,6 +950,7 @@ export default class AIChatBridge extends Plugin {
 			this.fetchingList = false;
 			this.busyChanged();
 			this.scheduleGptResume();
+			this.wakeIdleWaiters();
 		}
 	}
 

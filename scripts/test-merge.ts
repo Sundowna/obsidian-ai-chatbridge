@@ -5,7 +5,8 @@
 import { TFile, type App } from 'obsidian';
 import { copyKind, planMerge, plainStem, relink, rewriteLinks, type FoundNote, type KnownChat, type LinkRef } from '../src/merge';
 import { canvasLinks, linksInText, rewriteCanvas } from '../src/merge-canvas';
-import { canvasesLinking, fixLinks } from '../src/merge-run';
+import { canvasesLinking, fixLinks, mergeLogLine, mergeReportText, type MergeResult } from '../src/merge-run';
+import { mayStartWhileMergeWaits, startMergeWhenIdle, type MergeStartHost } from '../src/merge-wait';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -221,7 +222,79 @@ const canvasTests = (async () => {
 	expect('merge: broken canvases and other non-note files reported, unchanged', r.linksLeft.length === 3 && r.linksLeft.some((l) => l.startsWith(`${C}/broken.canvas`) && l.includes('a canvas that could not be read')) && r.linksLeft.some((l) => l.startsWith(`${C}/drawing.excalidraw`) && l.includes('not a note')) && r.linksLeft.some((l) => l.startsWith(`${C}/changed since.canvas`)) && files.get(`${C}/changed since.canvas`) === '{"nodes": oops', r.linksLeft.join(' | '));
 })();
 
-void canvasTests.then(() => {
+// --- a merge pressed while a sync runs waits for it -------------------------------------------
+const waitTests = (async () => {
+	// A fake plugin: `syncs` is how many syncs are still to end before the merge's turn.
+	const host = (o: { syncs?: number; refuse?: boolean; unloadWhileWaiting?: boolean; slipIn?: number }) => {
+		const log: string[] = [];
+		let running = (o.syncs ?? 0) > 0;
+		let left = o.syncs ?? 0;
+		let slip = o.slipIn ?? 0;
+		let unloaded = false;
+		const h: MergeStartHost = {
+			running: () => running,
+			unloaded: () => unloaded,
+			waiting: () => log.push('waiting notice'),
+			idle: async () => {
+				log.push('waited');
+				if (o.unloadWhileWaiting) unloaded = true;
+				left--;
+				running = left > 0;
+			},
+			start: async () => {
+				if (slip > 0) {
+					// A sync started by hand got in first: the merge must wait for that one too.
+					slip--;
+					running = true;
+					left = 1;
+					log.push('slipped in');
+					return false;
+				}
+				if (o.refuse) return false;
+				log.push('merged');
+				return true;
+			},
+		};
+		return { h, log };
+	};
+	{
+		const { h, log } = host({});
+		expect('merge wait: idle, starts at once with no waiting notice', (await startMergeWhenIdle(h)) && log.join(',') === 'merged', log.join(','));
+	}
+	{
+		const { h, log } = host({ syncs: 1 });
+		expect('merge wait: a running sync, one notice, then starts by itself', (await startMergeWhenIdle(h)) && log.join(',') === 'waiting notice,waited,merged', log.join(','));
+	}
+	{
+		const { h, log } = host({ syncs: 2 });
+		expect('merge wait: still one notice when it waits twice', (await startMergeWhenIdle(h)) && log.filter((l) => l === 'waiting notice').length === 1 && log.at(-1) === 'merged', log.join(','));
+	}
+	{
+		const { h, log } = host({ syncs: 1, slipIn: 1 });
+		expect('merge wait: a sync started by hand in between is waited for too', (await startMergeWhenIdle(h)) && log.join(',') === 'waiting notice,waited,slipped in,waited,merged', log.join(','));
+	}
+	{
+		const { h, log } = host({ syncs: 1, refuse: true });
+		expect('merge wait: refused (another computer, you said wait) gives false', !(await startMergeWhenIdle(h)) && !log.includes('merged'), log.join(','));
+	}
+	{
+		const { h, log } = host({ syncs: 1, unloadWhileWaiting: true });
+		expect('merge wait: unloaded while waiting gives false, nothing merged', !(await startMergeWhenIdle(h)) && !log.includes('merged'), log.join(','));
+	}
+	{
+		const { h } = host({ syncs: 1, slipIn: 1000 });
+		expect('merge wait: gives up rather than wait for ever', !(await startMergeWhenIdle(h)));
+	}
+	expect('merge wait: automatic, retry and remote syncs wait; a sync by hand may go', !mayStartWhileMergeWaits('auto', true) && !mayStartWhileMergeWaits('resume', true) && mayStartWhileMergeWaits('manual', true) && mayStartWhileMergeWaits('auto', false));
+
+	// --- a stopped merge says where in the report and the log line ---
+	const r: MergeResult = { merged: 12, notesTrashed: 30, versionsKept: 4, linksFixed: 7, filesMoved: 0, linksLeft: [], left: ['stopped after 12 of 111 chats; run the command again for the rest'], failed: [], stopped: 'after 12 of 111 chats' };
+	expect('stopped merge: log line names where', mergeLogLine(r).includes('stopped after 12 of 111 chats') && mergeLogLine(r).startsWith('**Merged chat copies:** 12 chats'), mergeLogLine(r));
+	expect('stopped merge: report starts with where it stopped', mergeReportText([], [], r).startsWith('**Stopped after 12 of 111 chats.**'));
+	expect('finished merge: no stop in the log line', !mergeLogLine({ ...r, stopped: undefined }).includes('stopped'));
+})();
+
+void Promise.all([canvasTests, waitTests]).then(() => {
 	console.log(failures ? `\n${failures} FAILED` : '\nAll merge tests passed.');
 	process.exit(failures ? 1 : 0);
 });

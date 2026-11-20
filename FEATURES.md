@@ -24,13 +24,13 @@ Command IDs are stable API. Never rename.
 - [ ] `sync-ai-memory` Sync AI memory (not part of Sync all)
 - [ ] `reconcile-chatgpt-chats` (full check, not only recent changes)
 - [ ] `cancel-chatgpt-retry`: only offered while a retry waits and nothing runs
-- [ ] `stop-sync`: only offered while a sync runs and no stop was asked yet
+- [ ] `stop-sync`: only offered while a sync runs and no stop was asked yet; the only way to stop a running merge (section 6b)
 - [ ] `refresh-index`, `move-to-app-layout`, `diagnose-chat-downloads`
-- [ ] `merge-chat-copies`: opens the preview; refused with a notice while a sync runs
+- [ ] `merge-chat-copies`: opens the preview; refused with a notice while a sync runs, while a merge waits or while a merge runs
 - [ ] `test-mobile-connection` Test mobile connection: one GET to `claude.ai/api/organizations` and one to `chatgpt.com/api/auth/session` per account, with the pasted login only (secret storage; never the login window). Report dialog with **Copy**: status, content type, Cloudflare check page yes/no, login accepted/refused; "not tested" when nothing is pasted. Writes nothing to the vault or `data.json`; the report (also sent to the console) holds no secret and no answer text
 - [ ] `sync-or-ask` Sync: here, or ask the computer (same as the ribbon icon; see section 10). On mobile `sync-all-chats` does the same
-- [ ] Ribbon icon: on a device that asks, "Ask the computer to sync" and a click writes a request (section 10). On a device that syncs: `refresh-cw` "Sync all chats" when idle; `square` "Stop sync" / "Stopping the sync…" plus class `is-syncing` while running; click toggles sync or stop
-- [ ] Status bar item: click stops a running sync; `ccs-status-stoppable` (hover style) and aria-label only while stoppable
+- [ ] Ribbon icon: on a device that asks, "Ask the computer to sync" and a click writes a request (section 10). On a device that syncs: `refresh-cw` "Sync all chats" when idle; `square` "Stop sync" / "Stopping the sync…" plus class `is-syncing` while running; click toggles sync or stop; while a merge runs the label is "Merging chat copies…" and a click only shows how to stop it (section 6b)
+- [ ] Status bar item: click stops a running sync (not a merge: it shows how to stop it); `ccs-status-stoppable` (hover style) and aria-label only while stoppable; "merging chat copies, N of M" while a merge runs
 
 ## 2. Sync engine, all providers [code: main.ts, sync.ts]
 
@@ -198,7 +198,10 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Canvases [code: merge-canvas.ts]: file nodes get the staying note's full path (`subpath` kept), `[[…]]`, `![[…]]` and `[..](..)` in text nodes rewritten like in a note; ids, order, unknown keys, colours, positions and edges untouched, written back with the file's own indentation (Obsidian: tabs), nothing written if nothing changed; a canvas that moved with the chat is fixed at its new place; the preview counts canvas links like other links (it reads canvases from disk, so it opens with "Reading the vault…")
 - [ ] A canvas that is not valid JSON Canvas, and any other non-note source (e.g. `.excalidraw`), is reported ("check by hand") and left as it is
 - [ ] After the run: unresolved links naming a merged note (in notes and in canvas file nodes and text nodes) are added to the report; report note `AI ChatBridge merge report <stamp>` next to the sync log, plus a log line
-- [ ] Stop between two chats works (Stop sync); the rest can be merged by running it again
+- [ ] Stop between two chats works with the command **Stop the running sync** (and on unload); the rest can be merged by running it again. The Sync ribbon button, `pressSync()`, the status-bar click and **Stop all** do not stop a merge: they show "Merging chat copies: it finishes by itself in a few minutes. To stop it anyway, run the command 'Stop the running sync'."
+- [ ] A stopped merge still writes its report (starts with "**Stopped after N of M chats.**") and log line ("…; stopped after N of M chats, run it again for the rest") and says so in its notice; an error outside one chat is reported the same way ("by an error")
+- [ ] **Merge N chats** pressed while a sync runs [code: merge-wait.ts]: persistent notice "A sync is running. The merge starts by itself when it has finished.", then the merge starts as soon as that sync ends. While it waits, the automatic sync, sync on startup, ChatGPT retry and another device's request do not start (`busy` is true); a sync started by hand may go first and is waited for too
+- [ ] A merge that does not start after all (another computer syncing and you chose to wait, plugin unloaded, …): notice "AI ChatBridge: The merge did not start. Nothing was changed."
 - [ ] History after a merge: `md`, raw file, `older`, `versions`, `noteHash` set; ChatGPT `view` = `md`
 
 ## 7. Other providers [readme]

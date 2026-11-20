@@ -202,6 +202,8 @@ export interface MergeResult {
 	left: string[];
 	/** Chats that could not be merged, with the error. */
 	failed: string[];
+	/** Stopped part-way: where, in plain words ("after 12 of 111 chats"). */
+	stopped?: string;
 	report?: string;
 }
 
@@ -453,7 +455,8 @@ export async function runMerge(app: App, s: Settings, groups: readonly PreviewGr
 	const gone = new Map<string, string>();
 	for (const [i, g] of groups.entries()) {
 		if (stop()) {
-			r.left.push(`stopped after ${i} of ${groups.length} chats; run the command again for the rest`);
+			r.stopped = `after ${i} of ${groups.length} chats`;
+			r.left.push(`stopped ${r.stopped}; run the command again for the rest`);
 			break;
 		}
 		progress(i, groups.length, stemOf(g.target));
@@ -489,12 +492,20 @@ export async function runMerge(app: App, s: Settings, groups: readonly PreviewGr
 	return r;
 }
 
+/** The merge's line in the sync log. Says where it stopped when it was stopped. */
+export function mergeLogLine(r: MergeResult): string {
+	const problems = r.linksLeft.length + r.failed.length;
+	const stopped = r.stopped ? `; stopped ${r.stopped}, run it again for the rest` : '';
+	return `**Merged chat copies:** ${r.merged} chats into one note each, ${r.notesTrashed} notes to the trash, ${r.versionsKept} earlier versions kept, ${r.linksFixed} links rewritten${problems ? `, ${problems} to check` : ''}${stopped}`;
+}
+
 const KIND_TEXT: Record<CopyKind, string> = { updated: '"(updated …)" notes', recovered: '"(recovered)" notes', transcript: '"(transcript …)" copies' };
 
 /** The preview or the result as a note's text: what merges into what. */
 export function mergeReportText(groups: readonly PreviewGroup[], skipped: MergePlan['skipped'], result?: MergeResult): string {
 	const out: string[] = [];
 	if (result) {
+		if (result.stopped) out.push(`**Stopped ${result.stopped}.** The chats below that were not merged yet are unchanged; run the merge again for them.`, '');
 		out.push(`Merged ${result.merged} chats: ${result.notesTrashed} notes moved to the trash, ${result.versionsKept} earlier versions kept as raw files, ${result.linksFixed} links rewritten, ${result.filesMoved} saved files moved.`, '');
 		if (result.failed.length) out.push('## Could not be merged', '', ...result.failed.map((l) => `- ${l}`), '');
 		if (result.linksLeft.length) out.push('## Links that could not be fixed', '', ...result.linksLeft.map((l) => `- ${l.replace(/\[\[/g, '`[[').replace(/\]\]/g, ']]`')}`), '');
