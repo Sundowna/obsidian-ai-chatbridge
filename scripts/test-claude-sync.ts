@@ -19,8 +19,21 @@ const ORG = '11111111-1111-4111-8111-111111111111';
 const CHAT = '22222222-2222-4222-8222-222222222222';
 const PROJECT = { name: '2nd Brain', uuid: '33333333-3333-4333-8333-333333333333' };
 
-const files = new Map<string, string>();
+/** Path -> content; every write moves that path's modified time on, like a real disk. */
+const times = new Map<string, number>();
+let clock = 0;
+class StampedMap extends Map<string, string> {
+	override set(key: string, value: string): this {
+		times?.set(key, ++clock);
+		return super.set(key, value);
+	}
+}
+const files = new StampedMap();
 const folders = new Set<string>();
+/** Paths read through the adapter: shows which raw files a sync opened. */
+const reads: string[] = [];
+const PLUGIN_DIR = '.obsidian/plugins/ai-chatbridge';
+let buildTime = 1;
 const vault = {
 	getAbstractFileByPath: (p: string) => (files.has(p) ? new TFile(p, { size: files.get(p)!.length }) : folders.has(p) ? {} : null),
 	createFolder: async (p: string) => void folders.add(p),
@@ -29,7 +42,13 @@ const vault = {
 		files.set(p, d);
 	},
 	process: async (f: { path: string }, fn: (d: string) => string) => void files.set(f.path, fn(files.get(f.path) ?? '')),
-	adapter: { read: async (p: string) => files.get(p) ?? '' },
+	adapter: {
+		read: async (p: string) => { reads.push(p); return files.get(p) ?? ''; },
+		stat: async (p: string): Promise<{ type: string; size: number; mtime: number } | null> => {
+			if (p === `${PLUGIN_DIR}/main.js`) return { type: 'file', size: 1000, mtime: buildTime };
+			return files.has(p) ? { type: 'file', size: files.get(p)!.length, mtime: times.get(p)! } : null;
+		},
+	} as { read: (p: string) => Promise<string>; stat?: unknown },
 	...readWrite(files),
 };
 
@@ -37,6 +56,7 @@ const settings = normalizeSettings({ maxChatsPerRun: 0, logPath: 'log.md' }).set
 const account = settings.claude[0]!;
 Object.assign(account.web, { orgId: ORG, secretId: 'key', chatFolder: 'AI/Claude/Chat', downloadFiles: false, cloudSessions: false });
 const plugin = {
+	manifest: { dir: PLUGIN_DIR, version: 'test' },
 	app: { vault, fileManager: { processFrontMatter: async () => undefined }, secretStorage: { getSecret: () => 'sk-test' } },
 	settings,
 	saveSettings: async () => undefined,
@@ -45,10 +65,16 @@ const plugin = {
 let updated = '2026-11-06T10:00:00Z';
 let project: typeof PROJECT | null = PROJECT;
 let turns = ['First question', 'First answer'];
+const FILE = '55555555-5555-4555-8555-555555555555';
+let attach = false;
 const chat = () => ({
 	uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated,
-	chat_messages: turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z' })),
+	chat_messages: turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z',
+		...(attach && i === 0 ? { attachments: [{ file_uuid: FILE, file_name: 'notes.txt', size_bytes: 5 }] } : {}) })),
 });
+let fileFetches = 0;
+ClaudeApi.prototype.getFile = async () => { fileFetches++; return new TextEncoder().encode('notes').buffer; };
+ClaudeApi.prototype.readConversation = async () => ({});
 const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).buffer;
 // An archived chat: only in claude.ai's archived list (with the first chat again, to check it is kept once).
 const ARCHIVED = '44444444-4444-4444-8444-444444444444';
@@ -118,6 +144,35 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	const archivedMd = 'AI/Claude/Chat/Recent/2026-10-01 Old garden plan.md';
 	expect('archived on: both lists read', listed.some((p) => p.includes('archived=false')) && listed.some((p) => p.includes('archived=true')), listed.join(' | '));
 	expect('archived on: archived chat saved in its normal folder, chat in both lists kept once', r6.listed === 2 && r6.newCount === 1 && r6.unchanged === 1 && files.get(archivedMd)?.includes('Archived question') === true, `${JSON.stringify({ listed: r6.listed, newCount: r6.newCount, unchanged: r6.unchanged, stopped: r6.stopped })} ${notes().join(' | ')}`);
+
+	// Quick check: an unchanged chat's .json is not read again once a full check found its files there.
+	const raw = account.web.index[CHAT]!.json;
+	const rawReads = async () => {
+		reads.length = 0;
+		const r = await runSync(plugin, account);
+		return { r, read: reads.filter((p) => p === raw).length };
+	};
+	account.web.downloadFiles = true;
+	attach = true;
+	updated = '2026-11-09T08:00:00Z';
+	const q1 = await runSync(plugin, account);
+	const saved = account.web.fileIndex[FILE];
+	expect('quick: the continued chat and its file are saved', q1.changedCount === 1 && !!saved && files.has(saved) && fileFetches === 1, JSON.stringify({ changed: q1.changedCount, saved, fileFetches, stopped: q1.stopped }));
+	const q2 = await rawReads();
+	expect('quick: the first check of the saved chat reads its .json', q2.read === 1 && !!account.web.index[CHAT]!.quick, String(q2.read));
+	const q3 = await rawReads();
+	expect('quick: then its .json is not read, nothing fetched', q3.read === 0 && fileFetches === 1 && q3.r.backfilledChats === 0, String(q3.read));
+	files.delete(saved!);
+	const q4 = await rawReads();
+	expect('quick: a deleted file brings the full check back and is fetched again', q4.read === 1 && fileFetches === 2 && files.has(account.web.fileIndex[FILE]!), JSON.stringify({ read: q4.read, fileFetches }));
+	expect('quick: then quiet again', (await rawReads()).read === 0);
+	buildTime++;
+	expect('quick: a new plugin build reads it once more', (await rawReads()).read === 1);
+	expect('quick: and then not', (await rawReads()).read === 0);
+	files.set(raw, files.get(raw)!.replace('First question', 'First question, changed on disk'));
+	expect('quick: a raw file changed on disk is read again', (await rawReads()).read === 1);
+	delete vault.adapter.stat;
+	expect('quick: a vault that cannot tell file times always reads it', (await rawReads()).read === 1 && (await rawReads()).read === 1);
 
 	console.log(failures ? `\n${failures} FAILED` : '\nAll Claude sync tests passed.');
 	process.exit(failures ? 1 : 0);

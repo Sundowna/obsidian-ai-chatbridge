@@ -212,11 +212,27 @@ async function testAutomaticResume() {
 	}
 }
 
+/** A Map whose every write moves that path's modified time on, like a real disk. */
+class StampedMap<V> extends Map<string, V> {
+	clock = 0;
+	times = new Map<string, number>();
+	override set(key: string, value: V): this {
+		this.times?.set(key, ++this.clock);
+		return super.set(key, value);
+	}
+}
+
 function harness() {
 	const entries = new Map<string, TFile | TFolder>();
-	const contents = new Map<string, ArrayBuffer>();
+	const contents = new StampedMap<ArrayBuffer>();
+	/** The plugin's own main.js: a new build moves its time on. */
+	const manifest = { dir: '.obsidian/plugins/ai-chatbridge', version: 'test' };
+	let buildTime = 1;
+	/** Raw pages read by path: shows which chats the sync opened. */
+	const reads: string[] = [];
 	const settings = structuredClone({ ...DEFAULT_SETTINGS, logPath: 'Logs/sync.md' });
-	settings.chatgpt[0]!.web = { ...DEFAULT_GPT, folder: 'Chats', includeArchived: true };
+	// A deep copy: the defaults' index objects must not carry one test's chats into the next.
+	settings.chatgpt[0]!.web = { ...structuredClone(DEFAULT_GPT), folder: 'Chats', includeArchived: true };
 	let saved = structuredClone(settings);
 	let crashOnOlder = false;
 	/** Paths whose content was replaced (the one-note rule), in order. */
@@ -245,13 +261,22 @@ function harness() {
 		readBinary: async (file: TFile) => contents.get(file.path)!,
 		modify: async (file: TFile, text: string) => { rewritten.push(file.path); contents.set(file.path, bytes(text)); },
 		modifyBinary: async (file: TFile, content: ArrayBuffer) => { rewritten.push(file.path); contents.set(file.path, content); },
-		adapter: { readBinary: async (path: string) => contents.get(path)!, read: async (path: string) => read(path) },
+		adapter: {
+			readBinary: async (path: string) => { reads.push(path); return contents.get(path)!; },
+			read: async (path: string) => { reads.push(path); return read(path); },
+			stat: async (path: string) => {
+				if (path === `${manifest.dir}/main.js`) return { type: 'file', size: 1000, mtime: buildTime };
+				if (!(entries.get(path) instanceof TFile) || !contents.has(path)) return null;
+				return { type: 'file', size: contents.get(path)!.byteLength, mtime: contents.times.get(path)! };
+			},
+		},
 	};
 	const plugin = {
-		settings, app: { vault, fileManager: { processFrontMatter: async () => {}, trashFile: async (file: TFile) => { entries.delete(file.path); contents.delete(file.path); } } },
+		manifest, settings, app: { vault, fileManager: { processFrontMatter: async () => {}, trashFile: async (file: TFile) => { entries.delete(file.path); contents.delete(file.path); } } },
 		saveSettings: async () => { saved = structuredClone(settings); },
 	} as unknown as AIChatBridge;
-	return { settings, entries, contents, plugin, read, rewritten,
+	return { settings, entries, contents, plugin, read, rewritten, reads,
+		newBuild: () => { buildTime++; },
 		interrupt: () => { crashOnOlder = true; },
 		restart: () => { Object.assign(settings.chatgpt[0]!.web, structuredClone(saved.chatgpt[0]!.web)); },
 	};
@@ -386,6 +411,121 @@ async function testJsonFolder() {
 	}
 }
 
+/**
+ * An unchanged saved chat is checked without reading its raw pages once a full check found
+ * nothing to do; any change it depends on (file, raw page, note, build) brings the full check back.
+ */
+async function testQuickCheck() {
+	const h = harness();
+	h.settings.chatgpt[0]!.web.downloadFiles = true;
+	const connect = GptApi.connect;
+	let chatFetches = 0;
+	let fileFetches = 0;
+	GptApi.connect = async () => ({
+		inventoryKey: 'account:quick-check-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: () => 'chat',
+		olderPath: () => 'older',
+		redact: (value: string) => value,
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: [{ id, title: 'Fixture', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat') { chatFetches++; return raw(top); }
+			if (path === 'older') return raw(older);
+			throw new Error('Unexpected request ' + path);
+		},
+		sandboxBytes: async () => { fileFetches++; return bytes('%PDF-1.7 fixture'); },
+	} as unknown as GptApi);
+	const sync = () => runGptSync(h.plugin, h.settings.chatgpt[0]!);
+	const pagesRead = async () => {
+		const entry = h.settings.chatgpt[0]!.web.index[id]!;
+		const pages = [entry.json, ...(entry.older ?? [])];
+		h.reads.length = 0;
+		const r = await sync();
+		assert.equal(r.stopped, undefined);
+		return { r, read: h.reads.filter((p) => pages.includes(p)).length };
+	};
+	try {
+		const first = await sync();
+		assert.equal(first.newCount, 1, first.stopped);
+		assert.equal(first.filesSaved, 1);
+		const entry = () => h.settings.chatgpt[0]!.web.index[id]!;
+		assert.equal(entry().older?.length, 1, 'a chat of two raw pages');
+
+		// The first check of a saved chat is a full one; it remembers what it depended on.
+		const full = await pagesRead();
+		assert.equal(full.read, 2, 'both raw pages read once');
+		assert(entry().quick, 'the check is remembered');
+		const quiet = await pagesRead();
+		assert.equal(quiet.read, 0, 'then the raw pages are not read');
+		assert.equal(quiet.r.refreshedViews + quiet.r.filesSaved + quiet.r.restored.length, 0);
+		assert.equal(chatFetches, 1, 'and nothing is fetched');
+
+		// A saved file deleted: full check, fetched again, then quiet.
+		const pdf = Object.values(h.settings.chatgpt[0]!.web.fileIndex)[0]!;
+		const folder = h.entries.get(pdf.slice(0, pdf.lastIndexOf('/')));
+		if (folder instanceof TFolder) folder.children = folder.children.filter((f) => f.path !== pdf);
+		h.entries.delete(pdf);
+		const refetch = await pagesRead();
+		assert.equal(refetch.read, 2);
+		assert.equal(fileFetches, 2, 'the deleted file is fetched again');
+		assert.equal(refetch.r.filesSaved, 1);
+		assert.equal((await pagesRead()).read, 0);
+
+		// A note you edited: same as before the shortcut, it is left alone and nothing is read.
+		const edited = h.read(entry().md) + '\nMy own line.\n';
+		h.contents.set(entry().md, bytes(edited));
+		const afterEdit = await pagesRead();
+		assert.equal(afterEdit.read, 0);
+		assert.equal(afterEdit.r.refreshedViews, 0);
+		assert.equal(h.read(entry().md), edited, 'your edit stays');
+
+		// A new plugin build: every chat is checked fully once.
+		h.newBuild();
+		const build = await pagesRead();
+		assert.equal(build.read, 2, 'a new build reads the raw pages again');
+		assert.equal(build.r.refreshedViews, 0, 'same layout: the note is not rewritten');
+		assert.equal((await pagesRead()).read, 0);
+
+		// The note drawn differently now (as after a layout change): redrawn.
+		entry().viewHash = 'older-layout';
+		const redraw = await pagesRead();
+		assert.equal(redraw.read, 2);
+		assert.equal(redraw.r.refreshedViews, 1, 'the note is brought up to date');
+		assert.equal(redraw.r.edits.copies.length, 1, 'your edited version saved as a copy first, as before');
+		assert.equal((await pagesRead()).read, 0);
+
+		// An older raw page changed on disk: its fingerprint no longer matches, so the chat is fetched again.
+		const olderPage = entry().older![0]!;
+		h.contents.set(olderPage, bytes(h.read(olderPage).replace('Older text', 'Older text, changed')));
+		const fetches = chatFetches;
+		const changed = await pagesRead();
+		assert(changed.read >= 2, 'the raw pages are read (and compared once more before they are replaced)');
+		assert.equal(chatFetches, fetches + 1, 'fetched again');
+		assert.equal(changed.r.restored.length, 1);
+		assert.equal((await pagesRead()).read, 0);
+
+		// The note deleted: written again from the raw pages.
+		const md = entry().md;
+		h.entries.delete(md);
+		const restore = await pagesRead();
+		assert.equal(restore.read, 2);
+		assert(h.entries.has(md), 'the note is back');
+		assert.equal((await pagesRead()).read, 0);
+
+		// A vault that cannot tell file times: always the full check.
+		const adapter = h.plugin.app.vault.adapter as { stat?: unknown };
+		delete adapter.stat;
+		assert.equal((await pagesRead()).read, 2);
+		assert.equal((await pagesRead()).read, 2);
+		console.log('Quick check passed: unchanged chats are not read again; a deleted file or note, a changed raw page, a new build or a stale note brings the full check back; your edits are left alone.');
+	} finally {
+		GptApi.connect = connect;
+	}
+}
+
 async function main() {
 	assert.equal(retryDeadline('120', 1000), 121000);
 	assert.equal(retryDeadline('invalid', 1000), 601000);
@@ -396,6 +536,7 @@ async function main() {
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();
 	await testJsonFolder();
+	await testQuickCheck();
 	let calls = 0;
 	let sandboxCalls = 0;
 	let listingLimit = true;
