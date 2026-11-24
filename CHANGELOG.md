@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- **Active Context** - for a vault with a handover note, **General → Active Context** (off until you turn it on) keeps it up to date: after every sync a **Live sessions** list of the chats active in the last 48 hours, with a link and your last request; once a day the 7-day archive pass into `Handoff archive/_YYYY-MM.md`; and a question under "Waiting for Walter" for a "Now" line that stayed 3 days. New commands **Update Active Context now** and **Hand over a chat to another AI**, which copies a ready message for the next AI
+
 ## 0.37.0 - 2026-11-24
 
 ### New

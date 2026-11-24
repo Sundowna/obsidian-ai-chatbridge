@@ -223,6 +223,8 @@ export interface Settings {
 	memory: MemorySettings;
 	/** Asking another device to sync through files in the vault (see remote/protocol.ts). */
 	remote: RemoteSettings;
+	/** Keeping the vault's Active Context note up to date (see handoff/). */
+	handoff: HandoffSettings;
 	/** What the last sync of each account surface did (see last-run.ts). */
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
@@ -310,6 +312,35 @@ export interface RemoteSettings {
 	maxAgeHours: number;
 }
 
+/** Active Context upkeep: Live sessions after each sync, the 7-day archive pass and stale "Now" lines once a day. */
+export interface HandoffSettings {
+	enabled: boolean;
+	/** Vault path of the Active Context note. */
+	file: string;
+	/** Folder of the monthly archive files. */
+	archiveFolder: string;
+	/** Live sessions: chats active in the last this many hours. */
+	liveHours: number;
+	/** "Recently done" keeps this many days; older entries move to the archive. */
+	keepDays: number;
+	/** A "Now" line still there after this many days is flagged under "Waiting for Walter" (0 = never). */
+	staleDays: number;
+	/** Day (YYYY-MM-DD) the daily pass last ran. */
+	lastDaily?: string;
+	/** "Now" lines seen so far: line key -> first day seen. */
+	nowSeen: Record<string, { first: string; flagged?: boolean }>;
+}
+
+export const DEFAULT_HANDOFF: HandoffSettings = {
+	enabled: false,
+	file: '90 System/Memory/Active Context.md',
+	archiveFolder: '90 System/Memory/Handoff archive',
+	liveHours: 48,
+	keepDays: 7,
+	staleDays: 3,
+	nowSeen: {},
+};
+
 export const DEFAULT_REMOTE: RemoteSettings = {
 	folder: '00 Inbox/Mobile/ChatBridge',
 	maxAgeHours: DEFAULT_MAX_AGE_HOURS,
@@ -344,6 +375,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	hermes: DEFAULT_HERMES,
 	memory: DEFAULT_MEMORY,
 	remote: DEFAULT_REMOTE,
+	handoff: DEFAULT_HANDOFF,
 	lastRuns: {},
 };
 

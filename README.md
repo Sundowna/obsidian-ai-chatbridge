@@ -452,6 +452,16 @@ The computer runs each request once, at most one requested sync every two minute
 
 **Test mobile connection** is a first step towards syncing on the phone itself: it checks whether the phone can reach claude.ai and ChatGPT with a session key or cookie pasted there, and shows the status, the content type and whether a Cloudflare check page came back. Nothing is saved and no key is shown.
 
+## Active Context
+
+For a vault where AIs keep a handover note (the Second Brain's `90 System/Memory/Active Context.md`), turn on **General → Active Context**. The plugin then:
+
+- writes a **Live sessions** list into the note after every sync: the chats active in the last 48 hours, newest first, each with a link to its transcript and your last request. When one account hits its limit, the next AI finds the chat there. The list sits between two markers and is replaced each time, so don't edit it;
+- once a day, moves "Recently done" lines older than 7 days to the monthly archive (`Handoff archive/_YYYY-MM.md`), word for word, as the vault's `archive-handoff.py` does;
+- asks under "Waiting for Walter" about a "Now" line that has stayed for 3 days: finish it, move it to Recently done, or drop it.
+
+**Hand over a chat to another AI** puts a ready message on the clipboard: which chat, where its transcript is in the vault, when it was last synced, and your last request. Paste it into the other account or Codex.
+
 ## Commands
 
 | Command | What it does |
@@ -472,6 +482,8 @@ The computer runs each request once, at most one requested sync every two minute
 | **Merge chat copies into one note (preview first)** | For vaults from before one note per chat: merges each chat's `(updated …)` notes into its first note, keeps earlier versions as raw files and rewrites links. Shows a preview; nothing changes until you confirm |
 | **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |
 | **Diagnose: save claude.ai answers for the open chat** | Saves the raw answers of the open chat, for bug reports |
+| **Update Active Context now (live sessions, archive, stale lines)** | Runs the Active Context upkeep now. See [Active Context](#active-context) |
+| **Hand over a chat to another AI (copies a ready message)** | Pick a recent chat; a message for the next AI (where the transcript is, how fresh it is, your last request) goes to the clipboard |
 | **Test mobile connection** | One request each to claude.ai and ChatGPT with the pasted logins; reports status, content type and whether a Cloudflare check page came back |
 
 ## Part of the Sundowna Second Brain Suite
