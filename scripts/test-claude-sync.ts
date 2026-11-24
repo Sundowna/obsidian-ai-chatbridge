@@ -7,6 +7,7 @@ import { ClaudeApi } from '../src/api';
 import { normalizeSettings } from '../src/migrate';
 import { localStamp } from '../src/naming';
 import { runSync } from '../src/sync';
+import { followRename } from '../src/follow';
 import { readWrite } from './fake-vault';
 
 let failures = 0;
@@ -171,6 +172,41 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	expect('quick: and then not', (await rawReads()).read === 0);
 	files.set(raw, files.get(raw)!.replace('First question', 'First question, changed on disk'));
 	expect('quick: a raw file changed on disk is read again', (await rawReads()).read === 1);
+	// Audit 2026-11-24: the shortcut must give the same result as the full check in the two cases
+	// the folder check (chatFileDeleted) cannot see.
+	// (1) The note moved to another folder, then a saved file deleted from the old one: the full
+	//     check fetches it again (it is missing), so the quick check must not skip the chat.
+	expect('quick: quiet before the move', (await rawReads()).read === 0);
+	const oldMd = account.web.index[CHAT]!.md;
+	const movedMd = `AI/Claude/Moved/${oldMd.split('/').pop()}`;
+	folders.add('AI/Claude/Moved');
+	files.set(movedMd, files.get(oldMd)!);
+	files.delete(oldMd);
+	followRename(settings, oldMd, movedMd);
+	const fetchesBeforeMove = fileFetches;
+	const moved = await rawReads();
+	expect('quick: a moved note alone changes nothing (as the full check)', moved.read === 0 && fileFetches === fetchesBeforeMove && account.web.index[CHAT]!.md === movedMd, JSON.stringify({ read: moved.read, fileFetches }));
+	files.delete(account.web.fileIndex[FILE]!);
+	const afterMoveDelete = await rawReads();
+	expect('quick: after the move, a deleted saved file is still fetched again', afterMoveDelete.read === 1 && fileFetches === fetchesBeforeMove + 1 && files.has(account.web.fileIndex[FILE]!), JSON.stringify({ read: afterMoveDelete.read, fileFetches, path: account.web.fileIndex[FILE] }));
+	expect('quick: and then quiet again', (await rawReads()).read === 0);
+	// (2) The chat view could not be read: the full check asks for it again next run, so the
+	//     shortcut must not skip the chat until it was read once.
+	let viewAnswer: unknown = null;
+	let views = 0;
+	ClaudeApi.prototype.readConversation = async () => { views++; return viewAnswer; };
+	updated = '2026-11-10T08:00:00Z';
+	const unread = await rawReads();
+	expect('quick: a continued chat whose chat view could not be read is saved', unread.r.changedCount === 1 && unread.r.viewNotRead.length === 1, JSON.stringify({ changed: unread.r.changedCount, viewNotRead: unread.r.viewNotRead }));
+	const viewsBefore = views;
+	await rawReads();
+	await rawReads();
+	expect('quick: the chat view is asked for again on every run until it is read', views === viewsBefore + 2, `${views - viewsBefore} of 2`);
+	viewAnswer = {};
+	await rawReads();
+	const viewsRead = views;
+	expect('quick: once read, the chat is quiet again', (await rawReads()).read === 0 && views === viewsRead);
+
 	delete vault.adapter.stat;
 	expect('quick: a vault that cannot tell file times always reads it', (await rawReads()).read === 1 && (await rawReads()).read === 1);
 
