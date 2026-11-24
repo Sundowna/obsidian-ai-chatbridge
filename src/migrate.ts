@@ -192,6 +192,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			handoff: { ...DEFAULT_HANDOFF, ...saved.handoff, nowSeen: { ...(saved.handoff?.nowSeen ?? {}) } },
 			lastRuns: { ...(saved.lastRuns ?? {}) },
 			lastAll: saved.lastAll,
+			systemNames: saved.systemNames,
 		},
 	};
 }

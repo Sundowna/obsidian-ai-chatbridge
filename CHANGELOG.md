@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+### Changed
+- **System files start with "_"** - the sync log is now `_ai-chatbridge-log.md`, reports are `_ai-chatbridge-merge-report-….md` and the diagnostics folder is `_ai-chatbridge-diagnostics`, so they are easy to leave out of the graph. Your existing ones are renamed once when you update, through Obsidian, so links keep working; a log you named yourself keeps its name
+
 ### New
-- **Active Context** - for a vault with a handover note, **General → Active Context** (off until you turn it on) keeps it up to date: after every sync a **Live sessions** list of the chats active in the last 48 hours, with a link and your last request; once a day the 7-day archive pass into `Handoff archive/_YYYY-MM.md`; and a question under "Waiting for Walter" for a "Now" line that stayed 3 days. New commands **Update Active Context now** and **Hand over a chat to another AI**, which copies a ready message for the next AI
+- **Active Context** - for a vault with a handover note, **General → Active Context** (off until you turn it on; choose a handoff folder, the note is made there if you have none) keeps it up to date: after every sync a **Live sessions** list of the chats active in the last 48 hours, with a link and your last request; once a day the 7-day archive pass into `Handoff archive/_YYYY-MM.md`; and a question under "Waiting for Walter" for a "Now" line that stayed 3 days. New commands **Update Active Context now** and **Hand over a chat to another AI**, which copies a ready message for the next AI; also on the right-click menu of a synced chat note
 
 ## 0.37.0 - 2026-11-24
 

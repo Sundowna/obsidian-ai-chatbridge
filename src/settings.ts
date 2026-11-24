@@ -229,6 +229,8 @@ export interface Settings {
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
 	lastAll?: LastAll;
+	/** System file renames done in this vault (see system-names.ts). */
+	systemNames?: number;
 }
 
 /** Where a new vault's chats go: the layout below "AI Chats" (see desktop/layout.ts). */
@@ -315,10 +317,8 @@ export interface RemoteSettings {
 /** Active Context upkeep: Live sessions after each sync, the 7-day archive pass and stale "Now" lines once a day. */
 export interface HandoffSettings {
 	enabled: boolean;
-	/** Vault path of the Active Context note. */
-	file: string;
-	/** Folder of the monthly archive files. */
-	archiveFolder: string;
+	/** Folder of the handoff: holds "Active Context.md" and the "Handoff archive" folder. */
+	folder: string;
 	/** Live sessions: chats active in the last this many hours. */
 	liveHours: number;
 	/** "Recently done" keeps this many days; older entries move to the archive. */
@@ -331,10 +331,14 @@ export interface HandoffSettings {
 	nowSeen: Record<string, { first: string; flagged?: boolean }>;
 }
 
+export const HANDOFF_NOTE = 'Active Context.md';
+export const HANDOFF_ARCHIVE = 'Handoff archive';
+export const handoffNote = (h: Pick<HandoffSettings, 'folder'>): string => normalizePath(`${h.folder}/${HANDOFF_NOTE}`);
+export const handoffArchive = (h: Pick<HandoffSettings, 'folder'>): string => normalizePath(`${h.folder}/${HANDOFF_ARCHIVE}`);
+
 export const DEFAULT_HANDOFF: HandoffSettings = {
 	enabled: false,
-	file: '90 System/Memory/Active Context.md',
-	archiveFolder: '90 System/Memory/Handoff archive',
+	folder: '_AI Handoff',
 	liveHours: 48,
 	keepDays: 7,
 	staleDays: 3,
@@ -363,7 +367,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	delaySeconds: 1.5,
 	intervalMinutes: 0,
 	syncOnStartup: false,
-	logPath: 'AI Chats/AI ChatBridge log.md',
+	logPath: 'AI Chats/_ai-chatbridge-log.md',
 	rawRootOn: true,
 	rawRoot: '80 Archive/raw',
 	editedNotes: 'copy',

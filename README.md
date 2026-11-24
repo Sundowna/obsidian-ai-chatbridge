@@ -454,13 +454,17 @@ The computer runs each request once, at most one requested sync every two minute
 
 ## Active Context
 
-For a vault where AIs keep a handover note (the Second Brain's `90 System/Memory/Active Context.md`), turn on **General → Active Context**. The plugin then:
+When you switch between AIs (one account hits its limit, you continue in another or in Codex), the next AI needs to know where things stand. Turn on **General → Active Context** and choose a **Handoff folder** (default `_AI Handoff`). The plugin keeps a note `Active Context.md` there, made with five empty parts (Plan, Now, Waiting for you, Next up, Recently done) if you don't have one yet. Ask your AIs to read it first and keep "Now" and "Recently done" current. The plugin then:
 
 - writes a **Live sessions** list into the note after every sync: the chats active in the last 48 hours, newest first, each with a link to its transcript and your last request. When one account hits its limit, the next AI finds the chat there. The list sits between two markers and is replaced each time, so don't edit it;
-- once a day, moves "Recently done" lines older than 7 days to the monthly archive (`Handoff archive/_YYYY-MM.md`), word for word, as the vault's `archive-handoff.py` does;
-- asks under "Waiting for Walter" about a "Now" line that has stayed for 3 days: finish it, move it to Recently done, or drop it.
+- once a day, moves "Recently done" lines older than 7 days to the monthly archive (`Handoff archive/_YYYY-MM.md`), word for word;
+- asks under "Waiting for you" about a "Now" line that has stayed for 3 days: finish it, move it to Recently done, or drop it.
 
-**Hand over a chat to another AI** puts a ready message on the clipboard: which chat, where its transcript is in the vault, when it was last synced, and your last request. Paste it into the other account or Codex.
+**Hand over a chat to another AI** puts a ready message on the clipboard: which chat, where its transcript is in the vault, when it was last synced, and your last request. Paste it into the other account or Codex. Right-click a synced chat note for **Hand over this chat**.
+
+### System files start with "_"
+
+The plugin's own files are named so you can leave them out of the graph and searches: the log `_ai-chatbridge-log.md`, reports `_ai-chatbridge-merge-report-….md` and the folder `_ai-chatbridge-diagnostics`. When you update from an older version, the old ones are renamed once, through Obsidian, so links keep working. A log you named yourself keeps its name.
 
 ## Commands
 

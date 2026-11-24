@@ -1,12 +1,27 @@
-// "Hand over a chat": pick a synced chat, get a ready message for the next AI on the clipboard.
+// "Hand over a chat": pick a synced chat (or right-click its note), get a ready message for the
+// next AI on the clipboard.
 
 import { App, FileSystemAdapter, Notice, Platform, SuggestModal } from 'obsidian';
 import { ago, allChats, handoverText, noteTitle, type LiveItem } from '../handoff/core';
 import { askOf } from '../handoff/run';
-import type { Settings } from '../settings';
+import { handoffNote, type Settings } from '../settings';
 
 /** How many recent chats the picker offers. */
 export const HANDOVER_CHOICES = 20;
+
+/** Builds the hand-over message for this chat and puts it on the clipboard. */
+export async function copyHandover(app: App, settings: Settings, item: LiveItem): Promise<void> {
+	const adapter = app.vault.adapter;
+	const full = adapter instanceof FileSystemAdapter ? `${adapter.getBasePath()}/${item.md}` : undefined;
+	const absolute = full && Platform.isWin ? full.replace(/\//g, '\\') : full;
+	const text = handoverText(item, await askOf(app, item), Date.now(), handoffNote(settings.handoff), absolute);
+	try {
+		await navigator.clipboard.writeText(text);
+		new Notice('Hand-over message copied. Paste it into the other AI.');
+	} catch {
+		new Notice(`Could not copy. The message is:\n\n${text}`, 30_000);
+	}
+}
 
 export class HandoverModal extends SuggestModal<LiveItem> {
 	private readonly items: LiveItem[];
@@ -29,17 +44,6 @@ export class HandoverModal extends SuggestModal<LiveItem> {
 	}
 
 	onChooseSuggestion(item: LiveItem): void {
-		void (async () => {
-			const adapter = this.app.vault.adapter;
-			const full = adapter instanceof FileSystemAdapter ? `${adapter.getBasePath()}/${item.md}` : undefined;
-			const absolute = full && Platform.isWin ? full.replace(/\//g, '\\') : full;
-			const text = handoverText(item, await askOf(this.app, item), Date.now(), this.settings.handoff.file, absolute);
-			try {
-				await navigator.clipboard.writeText(text);
-				new Notice('Hand-over message copied. Paste it into the other AI.');
-			} catch {
-				new Notice(`Could not copy. The message is:\n\n${text}`, 30_000);
-			}
-		})();
+		void copyHandover(this.app, this.settings, item);
 	}
 }

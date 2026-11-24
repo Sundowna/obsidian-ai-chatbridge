@@ -1,7 +1,7 @@
 // Active Context upkeep, as plain text in and text out (no Obsidian here, see run.ts):
 // - the "Live sessions" block: chats active in the last hours, with a link and your last request;
 // - the 7-day archive pass (port of the vault's 90 System/Tools/archive-handoff.py);
-// - lines that stay in "Now" too long are flagged under "Waiting for Walter";
+// - lines that stay in "Now" too long are flagged under "Waiting for …" (Walter, you…);
 // - the hand-over message for another AI.
 // Tested by scripts/test-handoff.ts.
 
@@ -55,6 +55,7 @@ export function allChats(s: Settings): LiveItem[] {
 	for (const a of s.chatgpt) {
 		fromIndex(withAccount('ChatGPT', s.chatgpt, a), a.web.index, out);
 		fromIndex(withAccount('Codex', s.chatgpt, a), a.desktop.index, out);
+		fromIndex(withAccount('Codex cloud', s.chatgpt, a), a.web.codexCloudIndex, out);
 	}
 	for (const a of s.lumo) fromIndex(withAccount('Lumo', s.lumo, a), a.web.index, out);
 	for (const a of s.gemini) {
@@ -65,6 +66,12 @@ export function allChats(s: Settings): LiveItem[] {
 	out.sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated));
 	const seen = new Set<string>();
 	return out.filter((i) => (seen.has(i.md) ? false : (seen.add(i.md), true)));
+}
+
+/** The synced chat whose transcript note this is, or null. */
+export function chatOfNote(s: Settings, path: string): LiveItem | null {
+	if (!path.toLowerCase().endsWith('.md')) return null;
+	return allChats(s).find((i) => i.md === path) ?? null;
 }
 
 export const MAX_LIVE = 10;
@@ -174,7 +181,7 @@ export function splitOld(context: string, today: string, days: number): { keep: 
 			continue;
 		}
 		const m = /(20\d\d-\d\d-\d\d)/.exec(title);
-		if (!PARTS.has(key) && m && m[1]! < cutoff) moved.push({ date: m[1]!, kind: 'section', body: sec.replace(/\n+$/, '') });
+		if (!PARTS.has(key) && !key.startsWith('waiting for') && m && m[1]! < cutoff) moved.push({ date: m[1]!, kind: 'section', body: sec.replace(/\n+$/, '') });
 		else keep.push(sec);
 	}
 	return { keep: back(keep.join(''), nl), moved };
@@ -182,8 +189,6 @@ export function splitOld(context: string, today: string, days: number): { keep: 
 
 /** New archive files start with "_" (system files, easy to leave out of the graph). */
 export const archiveFileName = (month: string): string => `_${month}.md`;
-/** The name archive-handoff.py used, still read and added to when it exists. */
-export const legacyArchiveFileName = (month: string): string => `${month}.md`;
 
 export function setFrontmatter(text: string, key: string, value: string): string {
 	return text.replace(new RegExp(`^${key}: [^\\r\\n]*`, 'm'), `${key}: ${value}`);
@@ -246,7 +251,7 @@ export function lineKey(line: string): string {
 
 /**
  * Remembers when each "Now" line was first seen; a line still there after `staleDays` gets one
- * question under "Waiting for Walter". Lines gone from "Now" are forgotten.
+ * question under "Waiting for …" (made as "Waiting for you" if missing). Lines gone from "Now" are forgotten.
  */
 export function flagStale(context: string, seen: Record<string, SeenLine>, today: string, staleDays: number): { text: string; seen: Record<string, SeenLine>; flagged: number } {
 	const next: Record<string, SeenLine> = {};
@@ -264,7 +269,7 @@ export function flagStale(context: string, seen: Record<string, SeenLine>, today
 	if (!flags.length) return { text: context, seen: next, flagged: 0 };
 	const nl = nlOf(context);
 	const t = lf(context);
-	const w = sectionOf(t, /Waiting for Walter\b/);
+	const w = sectionOf(t, /Waiting for\b/);
 	let out: string;
 	if (w) {
 		const sec = t.slice(w.start, w.end);
@@ -273,11 +278,36 @@ export function flagStale(context: string, seen: Record<string, SeenLine>, today
 		const gap = body.includes('\n') ? '\n' : '\n\n'; // a heading on its own gets a blank line first
 		out = t.slice(0, w.start) + body + gap + flags.join('\n') + tail + t.slice(w.end);
 	} else {
-		const section = `## Waiting for Walter\n\n${flags.join('\n')}\n\n`;
+		const section = `## Waiting for you\n\n${flags.join('\n')}\n\n`;
 		const n = /^## Next up\b/m.exec(t);
 		out = n ? t.slice(0, n.index) + section + t.slice(n.index) : `${t.replace(/\n*$/, '')}\n\n${section}`;
 	}
 	return { text: back(out, nl), seen: next, flagged: flags.length };
+}
+
+/** A new Active Context note: the five parts, empty, with what goes where. */
+export function newContextNote(today: string): string {
+	return [
+		'---',
+		'type: handoff',
+		`created: ${today}`,
+		`updated: ${today}`,
+		'---',
+		'',
+		"> [!info] Where the work stands now. Every AI reads this first and keeps it short: update the parts, don't add long sections.",
+		'> **Now** is what is in progress (one line per piece of work, replaced as it moves on). Finished work moves to **Recently done** as `- YYYY-MM-DD · what was done`; after 7 days AI ChatBridge moves it to the Handoff archive.',
+		'',
+		'## Plan',
+		'',
+		'## Now',
+		'',
+		'## Waiting for you',
+		'',
+		'## Next up',
+		'',
+		'## Recently done (last 7 days)',
+		'',
+	].join('\n');
 }
 
 /** "just now", "12 min ago", "3 h ago", "2 days ago". */

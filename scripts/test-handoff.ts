@@ -8,10 +8,11 @@ import { execFileSync } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { TFile } from 'obsidian';
+import { TFile, TFolder } from 'obsidian';
 import {
 	addToArchive,
 	allChats,
+	chatOfNote,
 	daysBefore,
 	flagStale,
 	handoverText,
@@ -27,9 +28,10 @@ import {
 	type SeenLine,
 } from '../src/handoff/core';
 import { dailyUpkeep, updateLive } from '../src/handoff/run';
+import { DIAGNOSTICS_FOLDER, newReportName, numbered, renameOldSystemFiles, reportBase, SYSTEM_NAMES_VERSION } from '../src/system-names';
 import { localDate } from '../src/naming';
 import { normalizeSettings } from '../src/migrate';
-import type { Settings } from '../src/settings';
+import { handoffArchive, handoffNote, type Settings } from '../src/settings';
 import { readWrite } from './fake-vault';
 
 let failures = 0;
@@ -179,7 +181,10 @@ const CONTEXT = [
 	const changed = flagStale(r.text.replace('- Agent speed-up', '- Agent speed-up, now faster'), again.seen, '2026-11-30', 3);
 	expect('a line that is gone from "Now" is forgotten, a changed line counts as new', Object.keys(changed.seen).length === 2 && Object.values(changed.seen).some((v) => v.first === '2026-11-30' && !v.flagged));
 	const noWaiting = flagStale(CONTEXT.replace(/## Waiting for Walter\n\n- \[ \] Something to decide\n\n/, ''), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
-	expect('without a "Waiting for Walter" section one is made before "Next up"', /## Waiting for Walter\n\n- \[ \] Still in \*\*Now\*\* since 2026-11-01[^\n]*\n\n## Next up/.test(noWaiting.text), noWaiting.text);
+	expect('without a "Waiting for …" section, "## Waiting for you" is made before "Next up"', /## Waiting for you\n\n- \[ \] Still in \*\*Now\*\* since 2026-11-01[^\n]*\n\n## Next up/.test(noWaiting.text), noWaiting.text);
+	const other = flagStale(CONTEXT.replace('## Waiting for Walter', '## Waiting for Anna'), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
+	expect('any "## Waiting for <name>" section takes the question', other.text.includes('- [ ] Something to decide\n- [ ] Still in **Now**') && !other.text.includes('Waiting for you'));
+	expect('a dated "Waiting for …" heading is never archived', splitOld(CONTEXT.replace('## Waiting for Walter', '## Waiting for you 2026-01-01'), '2026-11-24', 7).keep.includes('Something to decide'));
 	const crlf = flagStale(CONTEXT.replace(/\n/g, '\r\n'), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
 	expect('Windows line endings are kept when flagging', crlf.flagged === 1 && !/[^\r]\n/.test(crlf.text));
 }
@@ -193,13 +198,30 @@ const CONTEXT = [
 }
 
 // --- In a vault -------------------------------------------------------------------------------
-function fakeApp(files: Map<string, string>) {
-	const folders = new Set<string>();
+/** A vault of text files; folders come from the paths. A rename moves a file or a whole folder. */
+function fakeApp(files: Map<string, string>, extraFolders: string[] = []) {
+	const made = new Set<string>(extraFolders);
 	let writes = 0;
 	const rw = readWrite(files);
+	const named = (p: string) => Object.assign(new TFile(p, { size: 0 }), { name: p.split('/').pop()! });
+	const isFolder = (p: string) => made.has(p) || [...files.keys()].some((f) => f.startsWith(`${p}/`));
+	const folder = (p: string): TFolder => {
+		const f = new TFolder(p);
+		const kids = new Set<string>();
+		for (const k of [...files.keys(), ...made]) {
+			if (p && !k.startsWith(`${p}/`)) continue;
+			const rest = p ? k.slice(p.length + 1) : k;
+			kids.add(p ? `${p}/${rest.split('/')[0]}` : rest.split('/')[0]!);
+		}
+		f.children = [...kids].map((k) => (files.has(k) ? named(k) : new TFolder(k)));
+		return f;
+	};
+	const get = (p: string) => (files.has(p) ? named(p) : isFolder(p) ? folder(p) : null);
+	const renames: string[] = [];
 	const vault = {
-		getAbstractFileByPath: (p: string) => (files.has(p) ? new TFile(p, { size: 0 }) : folders.has(p) ? {} : null),
-		createFolder: async (p: string) => void folders.add(p),
+		getAbstractFileByPath: get,
+		getRoot: () => folder(''),
+		createFolder: async (p: string) => void made.add(p),
 		create: async (p: string, d: string) => {
 			if (files.has(p)) throw new Error('exists');
 			writes++;
@@ -211,17 +233,45 @@ function fakeApp(files: Map<string, string>) {
 			await rw.modify(f, d);
 		},
 	};
-	return { app: { vault } as never, writes: () => writes };
+	const moveKey = (k: string, from: string, to: string) => (k === from || k.startsWith(`${from}/`) ? to + k.slice(from.length) : null);
+	const fileManager = {
+		renameFile: async (f: { path: string }, to: string) => {
+			if (get(to)) throw new Error('taken ' + to);
+			renames.push(`${f.path} -> ${to}`);
+			for (const k of [...files.keys()]) {
+				const n = moveKey(k, f.path, to);
+				if (n) {
+					files.set(n, files.get(k)!);
+					files.delete(k);
+				}
+			}
+			for (const k of [...made]) {
+				const n = moveKey(k, f.path, to);
+				if (n) {
+					made.delete(k);
+					made.add(n);
+				}
+			}
+		},
+	};
+	return { app: { vault, fileManager } as never, writes: () => writes, renames };
 }
 
 async function vaultTests(): Promise<void> {
 	const s = settings();
-	const ctxPath = s.handoff.file;
+	s.handoff.folder = '90 System/Memory';
+	const ctxPath = handoffNote(s.handoff);
+	const arch = handoffArchive(s.handoff);
+	expect('the note and the archive live in the handoff folder', ctxPath === '90 System/Memory/Active Context.md' && arch === '90 System/Memory/Handoff archive');
+	expect('new vaults get the folder "_AI Handoff"', normalizeSettings({}).settings.handoff.folder === '_AI Handoff');
 	const files = new Map<string, string>([
 		[ctxPath, CONTEXT],
 		['AI Chats/Claude/Chat/Plugin work.md', '## Human · x\n\nLet us build the plugin part first\n\n## Claude · y\n\nOK'],
 		['AI Chats/Claude/Code/Hook work.md', '## You · x\n\nShow me the hook\n'],
-		[`${s.handoff.archiveFolder}/2026-10.md`, '---\ntype: handoff-archive\nmonth: 2026-10\nupdated: 2026-10-31\nunread: false\n---\n\nOlder text\n'],
+		[`${arch}/2026-10.md`, '---\ntype: handoff-archive\nmonth: 2026-10\nupdated: 2026-10-31\nunread: false\n---\n\nOlder text\n'],
+		[`${arch}/2026-09.md`, 'September, from the script'],
+		[`${arch}/_2026-09.md`, 'September, already there'],
+		[`${arch}/notes.md`, 'not a month file'],
 	]);
 	const { app, writes } = fakeApp(files);
 	expect('updateLive: says when the note is missing', !(await updateLive(fakeApp(new Map()).app, s, NOW)));
@@ -234,11 +284,12 @@ async function vaultTests(): Promise<void> {
 
 	const r = await dailyUpkeep(app, s.handoff, '2026-11-24');
 	const ctx = files.get(ctxPath)!;
-	const nov = files.get(`${s.handoff.archiveFolder}/_2026-11.md`);
-	const oct = files.get(`${s.handoff.archiveFolder}/2026-10.md`)!;
-	expect('daily: 3 entries moved, archive files written', r.found && r.moved === 3 && r.archives.length === 2, JSON.stringify(r));
-	expect('daily: a new month file starts with "_"', !!nov && nov.includes('## Old session 2026-11-10') && nov.includes('one day too old') && !files.has(`${s.handoff.archiveFolder}/2026-11.md`));
-	expect('daily: an existing month file without "_" is added to, not replaced', oct.startsWith('---\ntype: handoff-archive') && oct.includes('Older text') && oct.includes('- 2026-10-30 · last month') && !files.has(`${s.handoff.archiveFolder}/_2026-10.md`));
+	const nov = files.get(`${arch}/_2026-11.md`);
+	const oct = files.get(`${arch}/_2026-10.md`);
+	expect('daily: 3 entries moved, archive files written', r.found && !r.created && r.moved === 3 && r.archives.length === 2, JSON.stringify(r));
+	expect('daily: a new month file starts with "_"', !!nov && nov.includes('## Old session 2026-11-10') && nov.includes('one day too old') && !files.has(`${arch}/2026-11.md`));
+	expect('daily: an old month file "2026-10.md" is renamed to "_2026-10.md" and added to', !files.has(`${arch}/2026-10.md`) && !!oct && oct.startsWith('---\ntype: handoff-archive') && oct.includes('Older text') && oct.includes('- 2026-10-30 · last month'));
+	expect('daily: an old month file whose "_" name is taken stays; other files are left alone', files.get(`${arch}/2026-09.md`) === 'September, from the script' && files.get(`${arch}/_2026-09.md`) === 'September, already there' && files.has(`${arch}/notes.md`));
 	expect('daily: moved lines leave the note, the rest stays, the Live sessions block too', !ctx.includes('one day too old') && !ctx.includes('Old session') && ctx.includes('2026-11-23 · new thing') && ctx.includes(LIVE_START));
 	expect('daily: "updated" in the note is today, last run and seen lines remembered', ctx.includes('updated: 2026-11-24') && s.handoff.lastDaily === '2026-11-24' && Object.keys(s.handoff.nowSeen).length === 2);
 	const again = await dailyUpkeep(app, s.handoff, '2026-11-24');
@@ -246,7 +297,65 @@ async function vaultTests(): Promise<void> {
 	s.handoff.staleDays = 0;
 	const later = await dailyUpkeep(app, s.handoff, '2026-12-30');
 	expect('daily: stale check off (0) asks nothing', later.flagged === 0 && !files.get(ctxPath)!.includes('Still in **Now**'));
-	expect('daily: missing note is reported, nothing written', !(await dailyUpkeep(fakeApp(new Map()).app, s.handoff, '2026-11-24')).found);
+
+	// A vault without the note: it is made with the five parts, and the upkeep works on it.
+	const empty = new Map<string, string>();
+	const n = normalizeSettings({}).settings.handoff;
+	const made = await dailyUpkeep(fakeApp(empty).app, n, '2026-11-24');
+	const note = empty.get('_AI Handoff/Active Context.md') ?? '';
+	expect('daily: a missing note is made with the five empty parts', made.found && made.created && ['## Plan', '## Now', '## Waiting for you', '## Next up', '## Recently done (last 7 days)'].every((h) => note.includes(`\n${h}\n`)) && note.includes('created: 2026-11-24'));
+	const busy = note.replace('## Now\n', '## Now\n\n- Something in progress\n');
+	const asked = flagStale(busy, flagStale(busy, {}, '2026-11-01', 3).seen, '2026-11-24', 3).text;
+	expect('a made note: the stale question goes under "Waiting for you"', /## Waiting for you\n\n- \[ \] Still in \*\*Now\*\* since 2026-11-01/.test(asked), asked);
+	expect('a made note has nothing to archive', splitOld(note, '2026-11-24', 7).moved.length === 0);
+	const blocked = fakeApp(new Map(), ['_AI Handoff/Active Context.md']);
+	expect('daily: a folder where the note should be is reported, nothing written', !(await dailyUpkeep(blocked.app, n, '2026-11-24')).found && blocked.writes() === 0);
+}
+
+// --- System file names: "_ai-chatbridge-…", renamed once from the old names ---------------------
+async function systemNameTests(): Promise<void> {
+	expect('new default log is "AI Chats/_ai-chatbridge-log.md"', normalizeSettings({}).settings.logPath === 'AI Chats/_ai-chatbridge-log.md');
+	expect('report names: lower case with dashes, after the log', reportBase('AI Chats/_ai-chatbridge-log.md', 'merge report', '2026-11-20 1658') === 'AI Chats/_ai-chatbridge-merge-report-2026-11-20-1658' && numbered('x', 1) === 'x.md' && numbered('x', 2) === 'x-2.md');
+	expect('diagnostics folder is "AI Chats/_ai-chatbridge-diagnostics"', DIAGNOSTICS_FOLDER === 'AI Chats/_ai-chatbridge-diagnostics');
+	expect('old report names map to new ones; other names do not', newReportName('AI ChatBridge merge report 2026-11-20 1658.md') === '_ai-chatbridge-merge-report-2026-11-20-1658.md' && newReportName('AI ChatBridge merge preview 2026-11-16 0927 2.md') === '_ai-chatbridge-merge-preview-2026-11-16-0927-2.md' && newReportName('AI ChatBridge log.md') === null && newReportName('My merge report 2026-11-20 1658.md') === null);
+
+	const files = new Map<string, string>([
+		['AI Chats/AI ChatBridge log.md', 'log with [[AI ChatBridge merge report 2026-11-20 1658]]'],
+		['AI Chats/AI ChatBridge merge report 2026-11-20 1658.md', 'report'],
+		['AI Chats/AI ChatBridge merge preview 2026-11-16 0927.md', 'preview'],
+		['AI Chats/AI ChatBridge merge preview 2026-11-16 0927 2.md', 'second preview'],
+		['AI Chats/_ai-chatbridge-merge-preview-2026-11-16-0927.md', 'taken already'],
+		['AI Chats/AI ChatBridge diagnostics/2026-11-01 summary.md', 'diag'],
+		['AI Chats/Claude/Chat/AI ChatBridge merge report 2026-11-20 1658.md', 'a chat with that name elsewhere'],
+	]);
+	const s = normalizeSettings({ logPath: 'AI Chats/AI ChatBridge log.md' }).settings;
+	expect('an older vault has the rename still to do', (s.systemNames ?? 0) < SYSTEM_NAMES_VERSION);
+	const { app, renames } = fakeApp(files);
+	expect('renames run once', await renameOldSystemFiles(app, s));
+	expect('the log is renamed and the setting follows', files.get('AI Chats/_ai-chatbridge-log.md')?.startsWith('log') === true && !files.has('AI Chats/AI ChatBridge log.md') && s.logPath === 'AI Chats/_ai-chatbridge-log.md');
+	expect('reports next to the log are renamed, numbered ones keep their number', files.get('AI Chats/_ai-chatbridge-merge-report-2026-11-20-1658.md') === 'report' && files.get('AI Chats/_ai-chatbridge-merge-preview-2026-11-16-0927-2.md') === 'second preview');
+	expect('a report whose new name is taken stays as it is', files.get('AI Chats/AI ChatBridge merge preview 2026-11-16 0927.md') === 'preview' && files.get('AI Chats/_ai-chatbridge-merge-preview-2026-11-16-0927.md') === 'taken already');
+	expect('the diagnostics folder is renamed with what is in it', files.get('AI Chats/_ai-chatbridge-diagnostics/2026-11-01 summary.md') === 'diag' && !files.has('AI Chats/AI ChatBridge diagnostics/2026-11-01 summary.md'));
+	expect('files elsewhere (chat notes) are never touched', files.has('AI Chats/Claude/Chat/AI ChatBridge merge report 2026-11-20 1658.md'));
+	expect('renames go through Obsidian, so links follow', renames.length === 4, renames.join('; '));
+	expect('the second start does nothing', s.systemNames === SYSTEM_NAMES_VERSION && !(await renameOldSystemFiles(app, s)) && renames.length === 4);
+
+	const own = normalizeSettings({ logPath: 'Logs/My sync log.md' }).settings;
+	const ownFiles = new Map([['Logs/My sync log.md', 'x']]);
+	await renameOldSystemFiles(fakeApp(ownFiles).app, own);
+	expect('a log you named yourself keeps its name', own.logPath === 'Logs/My sync log.md' && ownFiles.has('Logs/My sync log.md'));
+	const gone = normalizeSettings({ logPath: 'AI Chats/AI ChatBridge log.md' }).settings;
+	await renameOldSystemFiles(fakeApp(new Map()).app, gone);
+	expect('an old log name with no file yet just points to the new name', gone.logPath === 'AI Chats/_ai-chatbridge-log.md');
+	const both = normalizeSettings({ logPath: 'AI Chats/AI ChatBridge log.md' }).settings;
+	const bothFiles = new Map([['AI Chats/AI ChatBridge log.md', 'old'], ['AI Chats/_ai-chatbridge-log.md', 'new']]);
+	await renameOldSystemFiles(fakeApp(bothFiles).app, both);
+	expect('when the new log name is taken, both stay and the log keeps its old name', both.logPath === 'AI Chats/AI ChatBridge log.md' && bothFiles.get('AI Chats/AI ChatBridge log.md') === 'old' && bothFiles.get('AI Chats/_ai-chatbridge-log.md') === 'new');
+
+	const c = settings();
+	c.chatgpt[0]!.web.codexCloudIndex = { t: { updated: hoursAgo(0.2), md: 'AI Chats/ChatGPT/Codex Cloud/Task.md', json: 't.json', synced: hoursAgo(0.1) } };
+	expect('Codex cloud tasks are live sessions too', liveSessions(c, NOW, 48)[0]?.label === 'Codex cloud');
+	expect('right-click: a synced chat note is found by its path, other notes are not', chatOfNote(c, 'AI Chats/Claude/Code/Hook work.md')?.label === 'Claude Code' && chatOfNote(c, 'Notes/Hook work.md') === null && chatOfNote(c, 'AI Chats/Claude/Chat/x.json') === null);
 }
 
 // --- Same result as archive-handoff.py ----------------------------------------------------------
@@ -292,6 +401,7 @@ async function parityTests(): Promise<void> {
 
 void (async () => {
 	await vaultTests();
+	await systemNameTests();
 	await parityTests();
 	console.log(failures ? `\n${failures} FAILED` : '\nAll handoff tests passed.');
 	process.exit(failures ? 1 : 0);

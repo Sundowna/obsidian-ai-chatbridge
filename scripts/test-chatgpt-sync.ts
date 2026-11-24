@@ -52,7 +52,7 @@ async function testAutomaticResume() {
 	};
 	const load = async () => {
 		const p = Object.assign(new AIChatBridge(), {
-			app: { ...h.plugin.app, workspace: { onLayoutReady: (fn: () => void) => fn() },
+			app: { ...h.plugin.app, workspace: { onLayoutReady: (fn: () => void) => fn(), on: () => ({}) },
 				// Device storage (role, device name): nothing saved, so this is a computer that syncs itself.
 				loadLocalStorage: () => null, saveLocalStorage: () => {},
 				vault: { ...h.plugin.app.vault, on: () => ({}) } },
