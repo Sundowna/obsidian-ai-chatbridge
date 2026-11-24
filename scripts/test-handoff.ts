@@ -390,10 +390,11 @@ async function parityTests(): Promise<void> {
 		expect('same Active Context as archive-handoff.py', setFrontmatter(keep, 'updated', today) === pyContext);
 		const months = [...new Set(moved.map((m) => m.date.slice(0, 7)))];
 		const same = months.every((month) => {
-			const py = readFileSync(`${dir}/90 System/Memory/Handoff archive/${month}.md`, 'utf8');
+			const at = `${dir}/90 System/Memory/Handoff archive/`;
+			const py = readFileSync(existsSync(`${at}_${month}.md`) ? `${at}_${month}.md` : `${at}${month}.md`, 'utf8');
 			return addToArchive(null, month, moved.filter((m) => m.date.startsWith(month)), today, 'Active Context', '\r\n') === py;
 		});
-		expect('same month files as archive-handoff.py (only the name differs: "_")', same, months.join(', '));
+		expect('same month files as archive-handoff.py', same, months.join(', '));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
