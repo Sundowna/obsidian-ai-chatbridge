@@ -63,6 +63,7 @@ export interface Chat {
 	created_at: string;
 	updated_at: string;
 	project_uuid?: string;
+	is_archived?: boolean;
 	current_leaf_message_uuid?: string;
 	chat_messages: ChatMessage[];
 }
@@ -101,6 +102,8 @@ export interface IndexEntry extends NoteState {
 	quick?: QuickCheck;
 	/** Local filing information, independent of the provider's body revision. */
 	archive?: ArchivedPlacement;
+	/** Latest known archive status. Null means the provider observations conflict. */
+	archiveObservation?: boolean | null;
 	archiveMove?: ArchiveMove;
 	/** A move changed the links. Remember the new rendering without replacing the note. */
 	archiveViewMoved?: boolean;

@@ -10,6 +10,7 @@ import { localStamp } from '../src/naming';
 import { runSync } from '../src/sync';
 import { followRename } from '../src/follow';
 import { readWrite } from './fake-vault';
+import { restoreSavedChats, separateSavedChats } from '../src/archive-local';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -50,7 +51,16 @@ const vault = {
 			if (p === `${PLUGIN_DIR}/main.js`) return { type: 'file', size: 1000, mtime: buildTime };
 			return files.has(p) ? { type: 'file', size: files.get(p)!.length, mtime: times.get(p)! } : null;
 		},
-	} as { read: (p: string) => Promise<string>; stat?: unknown },
+		exists: async (p: string) => folders.has(p) || files.has(p),
+		list: async (p: string) => {
+			const child = (path: string) => path.startsWith(p + '/') && !path.slice(p.length + 1).includes('/');
+			return { folders: [...folders].filter(child), files: [...files.keys()].filter(child) };
+		},
+		rmdir: async (p: string, recursive: boolean) => {
+			if (recursive || [...folders, ...files.keys()].some((path) => path.startsWith(p + '/'))) throw new Error('folder is not empty');
+			folders.delete(p);
+		},
+	},
 	...readWrite(files),
 };
 
@@ -179,10 +189,15 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 		const manualArchive = 'AI/Claude/Chat/Archived/_External/Projects/Custom/Vault plan (mine).md';
 		expect('separation: existing chat moves with its name and edits', reconciled.archive?.moved === 1 && saved.md === manualArchive && files.get(manualArchive)?.includes('My edit') === true, JSON.stringify(reconciled.archive));
 		expect('separation: the unrelated project note stays', files.get(projectNote) === 'Keep this decision');
-		currentMembership = 'active';
 		account.web.separateArchived = false;
-		expect('separation: turning it off keeps the notes in place', (await runSync(plugin, account)).archive === undefined && saved.md === manualArchive);
+		const target = { kind: 'claude', account } as const;
+		const listRequestsBefore = listed.length;
+		const restored = await restoreSavedChats(plugin, target, () => {});
+		expect('separation: turning it off restores original folders and clears the empty archive', restored.report.moved === 2 && saved.md === manual && files.has(archivedMd) && !folders.has('AI/Claude/Chat/Archived'));
 		account.web.separateArchived = true;
+		const local = await separateSavedChats(plugin, target, () => {});
+		expect('separation: re-enabling uses last known status without a provider request', local.report.moved === 2 && !local.unresolved && listed.length === listRequestsBefore && saved.md === manualArchive);
+		currentMembership = 'active';
 		const returned = await runSync(plugin, account);
 		expect('separation: unchanged unarchive restores the manual folder', returned.archive?.moved === 1 && files.has(manual) && !files.has(manualArchive));
 		expect('separation: archive changes cause no body requests', bodyRequests === beforeBodies);
@@ -273,7 +288,7 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	const viewsRead = views;
 	expect('quick: once read, the chat is quiet again', (await rawReads()).read === 0 && views === viewsRead);
 
-	delete vault.adapter.stat;
+	Reflect.deleteProperty(vault.adapter, 'stat');
 	expect('quick: a vault that cannot tell file times always reads it', (await rawReads()).read === 1 && (await rawReads()).read === 1);
 
 	console.log(failures ? `\n${failures} FAILED` : '\nAll Claude sync tests passed.');

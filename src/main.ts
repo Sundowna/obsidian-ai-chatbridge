@@ -37,13 +37,14 @@ import { chatOfNote } from './handoff/core';
 import { renameOldSystemFiles } from './system-names';
 import { localDate } from './naming';
 import { DESKTOP_ALL, DESKTOP_EVERY_ACCOUNT, HERMES, MEMORY, runKey, type LastRun, type RunOutcome } from './last-run';
+import { hasArchiveToRestore, restoreSavedChats, separateSavedChats, type ArchiveTarget } from './archive-local';
+import { archiveSummary } from './archive-move';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
 
 /** One run of one thing: an account's website, or the desktop apps. */
 type Target =
-	| { kind: 'claude'; account: ClaudeAccount }
-	| { kind: 'chatgpt'; account: ChatgptAccount; forceFull?: boolean }
+	| ArchiveTarget & { forceFull?: boolean }
 	| { kind: 'lumo'; account: LumoAccount }
 	| { kind: 'gemini'; account: GeminiAccount }
 	| { kind: 'studio'; account: GeminiAccount }
@@ -545,32 +546,76 @@ export default class AIChatBridge extends Plugin {
 		await this.guarded('manual', () => this.runSurface(provider, account, surface));
 	}
 
-	/** Start archive filing through the usual sync, waiting for the current run or cooldown if needed. */
-	async syncArchivedNow(provider: 'claude' | 'chatgpt', id: string): Promise<void> {
+	private archiveTarget(provider: ArchiveTarget['kind'], id: string): ArchiveTarget | undefined {
+		if (provider === 'chatgpt') {
+			const account = this.settings.chatgpt.find((a) => a.id === id);
+			return account && { kind: provider, account };
+		}
+		const account = this.settings.claude.find((a) => a.id === id);
+		return account && { kind: provider, account };
+	}
+
+	async syncArchivedNow(provider: ArchiveTarget['kind'], id: string): Promise<void> {
+		await this.changeArchiveNow(provider, id, false);
+	}
+
+	async restoreArchivedNow(provider: ArchiveTarget['kind'], id: string): Promise<void> {
+		await this.changeArchiveNow(provider, id, true);
+	}
+
+	/** Both settings actions operate on vault files under the same guard as a web sync. */
+	private async changeArchiveNow(provider: ArchiveTarget['kind'], id: string, restoring: boolean): Promise<void> {
 		if (this.unloaded || Platform.isMobile) return;
 		if (this.running) new Notice('The archive check will start after the current operation.');
 		while (this.running && !this.unloaded) await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
-		if (this.unloaded) return;
-		const account = this.settings[provider].find((a) => a.id === id);
-		if (!account?.web.includeArchived || !account.web.separateArchived) return;
-		if (provider === 'chatgpt') {
-			const gpt = (account as ChatgptAccount).web;
-			const deadline = gpt.cooldownUntil ?? 0;
-			if (deadline > Date.now()) {
-				gpt.resumeAfter429 = { consecutive: gpt.resumeAfter429?.consecutive ?? 1, forceFull: true };
-				await this.saveSettings();
-				this.scheduleGptResume();
-				new Notice(`The archive check will run with the ChatGPT retry after ${formatClock(deadline)}.`);
-				return;
-			}
-		}
 		await this.guarded('manual', async () => {
-			const current = this.settings[provider].find((a) => a.id === id);
-			if (!current?.web.includeArchived || !current.web.separateArchived) return;
-			await this.runOne(provider === 'chatgpt'
-				? { kind: 'chatgpt', account: current as ChatgptAccount, forceFull: true }
-				: { kind: 'claude', account: current as ClaudeAccount }, 'manual');
+			const target = this.archiveTarget(provider, id);
+			const web = target?.account.web;
+			if (!target || !web || (restoring ? web.separateArchived !== false : !web.includeArchived || !web.separateArchived)) return;
+			const label = this.targetLabel(target);
+			const progress = new SyncProgress(label, this.statusEl, true, undefined, () => this.requestStop());
+			this.current = { provider, id };
+			this.progress = progress;
+			this.busyChanged();
+			let unresolved = 0;
+			try {
+				const update: typeof progress.update = (...args) => {
+					if (this.stopRequested) throw new StopError(STOPPED_BY_YOU);
+					progress.update(...args);
+				};
+				if (restoring) await this.restoreArchive(target, update);
+				else {
+					const result = await separateSavedChats(this, target, update);
+					unresolved = result.unresolved;
+					new Notice(`${label}: ${archiveSummary(result.report)}.${unresolved ? ` ${unresolved} saved chats need a provider check.` : ''}`, 8000);
+				}
+			} catch (error) {
+				if (!(error instanceof StopError) || !this.stopRequested) throw error;
+				new Notice(`${label}: archive migration stopped. The next sync carries on from there.`);
+				return;
+			} finally {
+				progress.finish();
+				this.progress = null;
+			}
+			if (!unresolved || this.stopRequested || !web.includeArchived || !web.separateArchived) return;
+			if (target.kind === 'chatgpt') {
+				const gpt = target.account.web;
+				const deadline = gpt.cooldownUntil ?? 0;
+				if (deadline > Date.now()) {
+					gpt.resumeAfter429 = { consecutive: gpt.resumeAfter429?.consecutive ?? 1, forceFull: true };
+					await this.saveSettings();
+					new Notice(`The remaining archive check will run with the ChatGPT retry after ${formatClock(deadline)}.`);
+					return;
+				}
+			}
+			await this.runOne({ ...target, forceFull: true }, 'manual');
 		});
+	}
+
+	private async restoreArchive(target: ArchiveTarget, progress: SyncProgress['update']): Promise<void> {
+		const { report, retained } = await restoreSavedChats(this, target, progress);
+		const remaining = retained.length ? ` ${retained.length} archive folders kept because they still contain files or could not be removed.` : '';
+		new Notice(`${this.targetLabel(target)}: ${report.moved} returned, ${report.skipped.length} skipped, ${report.failed.length} failed.${remaining}`, 10_000);
 	}
 
 	/** Everything of one account in one run (the Overview's Sync): website, desktop app, AI Studio. Stop ends it all. */
@@ -1106,6 +1151,15 @@ export default class AIChatBridge extends Plugin {
 		};
 		let r;
 		try {
+			if ((target.kind === 'claude' || target.kind === 'chatgpt') && hasArchiveToRestore(target)) {
+				try {
+					await this.restoreArchive(target, update);
+				} catch (error) {
+					if (!(error instanceof StopError) || !this.stopRequested) throw error;
+					new Notice(`${label}: archive migration stopped. The next sync carries on from there.`);
+					return false;
+				}
+			}
 			r = target.kind === 'claude' ? await runSync(this, target.account, update)
 				: target.kind === 'chatgpt' ? await runGptSync(this, target.account, update, target.forceFull)
 				: target.kind === 'lumo' ? await runLumoSync(this, target.account, update)

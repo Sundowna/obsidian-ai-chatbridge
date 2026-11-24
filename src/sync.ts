@@ -25,7 +25,7 @@ import { CloudShapeError } from './cloud/claude-cloud';
 import { emptyCloudResult, syncClaudeCloud, type CloudSyncResult } from './cloud/sync';
 import { archiveRoot } from './archive-folders';
 import { ArchiveObservations } from './archive-state';
-import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, type ArchiveReport } from './archive-move';
+import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, rememberArchiveObservations, type ArchiveReport } from './archive-move';
 
 const MAX_PAGES = 200; // 6000 chats; a guard against an endless paging loop
 
@@ -66,7 +66,7 @@ const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/,
  * The whole chat list, 30 at a time. With `archived` the archived chats are read too
  * (claude.ai lists them apart) and added to the list; a chat in both is kept once.
  */
-export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn, archived = false, observations?: ArchiveObservations): Promise<ListItem[]> {
+export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn, archived = false, observations?: ArchiveObservations, strict = !!observations): Promise<ListItem[]> {
 	const items: ListItem[] = [];
 	for (const listArchived of archived ? [false, true] : [false]) {
 		let offset = 0;
@@ -75,7 +75,7 @@ export async function listAllChats(api: ClaudeApi, delayMs: number, progress: Pr
 			if (page > 0 || listArchived) await sleep(delayMs);
 			const { json } = await api.get(api.listPath(offset, listArchived));
 			const p = checkListPage(json);
-			if (observations && p.has_more && !p.data.length) throw new ShapeError('Claude chat list ended with more pages expected.');
+			if (strict && p.has_more && !p.data.length) throw new ShapeError('Claude chat list ended with more pages expected.');
 			for (const item of p.data) observations?.add(item.uuid, listArchived);
 			items.push(...p.data);
 			progress(`reading ${listArchived ? 'archived chats' : 'chat list'}… ${items.length} chats`);
@@ -244,12 +244,12 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const api = new ClaudeApi(auth.orgId, getKey);
 
 		// 1. Read the whole chat list, 30 at a time.
-		const observations = s.includeArchived === true && s.separateArchived === true ? new ArchiveObservations() : undefined;
-		if (observations) {
+		const observations = s.includeArchived === true ? new ArchiveObservations() : undefined;
+		if (observations && s.separateArchived === true) {
 			result.archive = emptyArchiveReport();
 			progress('checking archived status…');
 		}
-		const items = await listAllChats(api, delayMs, progress, s.includeArchived === true, observations);
+		const items = await listAllChats(api, delayMs, progress, s.includeArchived === true, observations, !!result.archive);
 		result.listed = items.length;
 
 		// 2. Project filter (uses the project info in the list – no extra requests).
@@ -278,12 +278,14 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			projectRaw: customProjectFolder(item, { ...s, projectFolders: s.projectRawFolders }, recent),
 			active: chatFolders(item, s, folders.chat!, rawSetting.chat, recent, rawRoot),
 		});
-		const archived = (item: ListItem) => targetFor(item) === 'chat' && observations?.get(item.uuid) === true;
-		if (observations && result.archive) {
-			await reconcileArchived(plugin, { items: kept.filter((item) => targetFor(item) === 'chat'), web: s,
-				state: (id) => observations.get(id), filing, progress }, result.archive);
+		const archived = (item: ListItem) => !!result.archive && targetFor(item) === 'chat' && observations?.get(item.uuid) === true;
+		if (observations) {
+			const webChats = kept.filter((item) => targetFor(item) === 'chat');
+			const state = (id: string) => observations.get(id);
+			if (result.archive) await reconcileArchived(plugin, { items: webChats, web: s, state, filing, progress }, result.archive);
+			else await rememberArchiveObservations(plugin, s.index, webChats, state);
 		}
-		const ready = todoAll.filter(({ item, isUpdate }) => !s.index[item.uuid]?.archiveMove && (isUpdate || targetFor(item) !== 'chat' || observations?.get(item.uuid) !== null));
+		const ready = todoAll.filter(({ item, isUpdate }) => !s.index[item.uuid]?.archiveMove && (isUpdate || !result.archive || targetFor(item) !== 'chat' || observations?.get(item.uuid) !== null));
 		const todo = maxChats > 0 ? ready.slice(0, maxChats) : ready;
 		result.leftForLater = todoAll.length - todo.length;
 		/** Transcript and raw folders for a chat, as the settings say today. */
@@ -351,7 +353,9 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 
 			// Remember it right away, so a later stop doesn't lose progress.
 			const archive = before ? before.archive : archived(item) ? { root, active: filing(item).active } : undefined;
-			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash, ...(archive ? { archive } : {}) };
+			const observed = observations?.get(item.uuid);
+			const archiveObservation = observed !== undefined ? observed : typeof chat.is_archived === 'boolean' ? chat.is_archived : before?.archiveObservation;
+			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash, archiveObservation, ...(archive ? { archive } : {}) };
 			await plugin.saveSettings();
 			result.written.push(stemOf(mdPath));
 			if (isUpdate) result.changedCount++;

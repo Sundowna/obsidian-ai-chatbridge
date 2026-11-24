@@ -31,7 +31,7 @@ import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
 import { archiveRoot } from '../archive-folders';
 import { ArchiveObservations } from '../archive-state';
-import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, type ArchiveReport } from '../archive-move';
+import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, rememberArchiveObservations, type ArchiveReport } from '../archive-move';
 import { CodexCloudShapeError } from '../cloud/codex-cloud';
 import { syncCodexCloud } from '../cloud/codex-sync';
 import { emptyCloudResult, type CloudSyncResult } from '../cloud/sync';
@@ -255,6 +255,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		const filters = g.onlyProjects ? [...new Set(g.projects.map((name) => name.trim().toLowerCase()).filter(Boolean))].sort() : [];
 		const includePinned = g.includePinned !== false;
 		const observations = g.includeArchived === true && g.separateArchived === true ? new ArchiveObservations() : undefined;
+		const observeArchive = g.includeArchived === true && !observations ? new ArchiveObservations() : undefined;
 		if (observations) {
 			result.archive = emptyArchiveReport();
 			progress('checking archived status…');
@@ -285,6 +286,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		await scanInventory(inventory, {
 			archived: g.includeArchived === true,
 			archive: observations,
+			observeArchive,
 			pinned: includePinned,
 			overlapMinutes: g.overlapMinutes ?? DEFAULT_OVERLAP_MINUTES,
 			forceFull: reconcile,
@@ -474,10 +476,12 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				}
 			}
 			if (!entry) throw new Error('ChatGPT capture has no saved journal entry.');
+			const observed = observations ? archiveState(item.uuid) : observeArchive?.get(item.uuid);
+			const archiveObservation = observed !== undefined ? observed : typeof chat.is_archived === 'boolean' ? chat.is_archived : before?.archiveObservation;
 			const view = withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md));
 			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, unedited: await asWritten(before), keep: before?.updated_at === item.updated_at ? ['unread'] : [] });
 			recordEdit(result.edits, note, entry.md);
-			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(view), noteHash: note.hash };
+			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(view), noteHash: note.hash, archiveObservation };
 			if (!before && catalogIds.has(item.uuid)) counts.saved++;
 			delete pending[item.uuid];
 			await plugin.saveSettings();
@@ -565,7 +569,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		guardMissing('ChatGPT chats', savedChats.length, savedChats.filter((e) => !exists(e.md) || !exists(e.json)).length);
 		if (observations && result.archive) {
 			await reconcileArchived(plugin, { items: catalog.filter((item) => !pending[item.uuid]), web: g, state: archiveState, filing, progress, rememberView: true }, result.archive);
-		}
+		} else if (observeArchive) await rememberArchiveObservations(plugin, g.index, seenInScope, (id) => observeArchive.get(id));
 		const ready = todo.filter((item) => !g.index[item.uuid]?.archiveMove && (g.index[item.uuid] || pending[item.uuid] || archiveState(item.uuid) !== null));
 		const batch = s.maxChatsPerRun > 0 ? ready.slice(0, s.maxChatsPerRun) : ready;
 

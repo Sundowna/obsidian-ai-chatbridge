@@ -15,9 +15,9 @@ export function archiveSettings(ctx: PanelContext, el: HTMLElement, provider: 'c
 		const cooldown = 'cooldownUntil' in web ? web.cooldownUntil ?? 0 : 0;
 		const waiting = cooldown > Date.now();
 		const body = waiting
-			? `${label} is cooling down until ${new Date(cooldown).toLocaleTimeString()}. You can schedule the archive check for the end of the cooldown or leave it for the next sync.`
-			: `Start a web sync for ${label} to check archive status and move saved chats. The sync can also save new or changed chats.`;
-		new ConfirmModal(ctx.app, 'Separate archived chats', body, waiting ? 'Separate when ready' : 'Separate now', () => {
+			? `Move saved chats using their last known status. Chats with unknown status will be checked after the cooldown ends at ${new Date(cooldown).toLocaleTimeString()}.`
+			: `Move saved chats using their last known status. Only if any status is unknown, sync ${label} to check it. That sync can also save new or changed chats.`;
+		new ConfirmModal(ctx.app, 'Separate archived chats', body, 'Separate now', () => {
 			void plugin.syncArchivedNow(provider, account.id).catch(() => {
 				new Notice('The archive check could not start. Separation will be checked on the next sync.');
 			}).finally(ctx.refresh);
@@ -37,7 +37,7 @@ export function archiveSettings(ctx: PanelContext, el: HTMLElement, provider: 'c
 		}));
 	const separateRow = new Setting(el)
 		.setName('Separate archived chats')
-		.setDesc('File archived chats in a separate folder. Turning this off leaves existing notes where they are.')
+		.setDesc('File archived chats in a separate folder. Turn this off to return the chats to their original folders.')
 		.addToggle((t) => {
 			separate = t.setValue(web.separateArchived === true).setDisabled(web.includeArchived !== true);
 			t.onChange(async (value) => {
@@ -45,7 +45,11 @@ export function archiveSettings(ctx: PanelContext, el: HTMLElement, provider: 'c
 				const current = ++change;
 				web.separateArchived = value;
 				await plugin.saveSettings();
-				if (value && change === current) chooseWhen();
+				if (change !== current) return;
+				if (value) chooseWhen();
+				else void plugin.restoreArchivedNow(provider, account.id).catch(() => {
+					new Notice('Returning archived chats was interrupted. The next sync carries on from there.');
+				}).finally(ctx.refresh);
 			});
 		});
 	separateRow.settingEl.addClass('ccs-sub-setting');

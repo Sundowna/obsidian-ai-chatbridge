@@ -5,7 +5,7 @@ import { KIND_FOLDER } from './files';
 import { followRename } from './follow';
 import type AIChatBridge from './main';
 import type { ProgressFn } from './progress';
-import { dirOf, mirrorRaw, type ChatFolders } from './raw-folders';
+import { dirOf, masterRaw, mirrorRaw, type ChatFolders } from './raw-folders';
 import type { IndexEntry, ListItem } from './types';
 import { ensureFolder, findFile } from './vaultio';
 import { versionFiles } from './versions';
@@ -91,20 +91,20 @@ function assetMoves(app: App, entry: IndexEntry, md: string, fileIndex: Record<s
 	return files;
 }
 
-function planMove(app: App, entry: IndexEntry, filing: ArchiveFiling, archived: boolean, assets: (md: string) => [string, string][]): ArchiveMove {
+function planMove(app: App, entry: IndexEntry, filing: ArchiveFiling | undefined, rawRoot: string | undefined, assets: (md: string) => [string, string][]): ArchiveMove {
 	const note = at(app, entry.md);
 	if (!note || !at(app, entry.json)) throw new BlockedMove('transcript or raw file is missing');
 	const active = { md: dirOf(entry.md), raw: dirOf(entry.json) };
 	const previous = entry.archive;
-	if (archived && subpath(active.md, `${filing.base}/Archived`) !== undefined) throw new BlockedMove('the active folder is inside the reserved Archived folder');
-	const next = archived ? newArchiveFolders({ ...filing, active }) : previous!.active;
-	const md = !archived && subpath(active.md, previous!.root) === undefined ? active.md : next.md;
+	if (filing && subpath(active.md, `${filing.base}/Archived`) !== undefined) throw new BlockedMove('the active folder is inside the reserved Archived folder');
+	const next = filing ? newArchiveFolders({ ...filing, active }) : previous!.active;
+	const md = !filing && subpath(active.md, previous!.root) === undefined ? active.md : next.md;
 	const to = joinFolder(md, nameOf(entry.md));
 	const paths = new Map([[entry.md, to]]);
-	const placement: ArchivedPlacement | undefined = archived ? { root: filing.root, active } : undefined;
+	const placement: ArchivedPlacement | undefined = filing ? { root: filing.root, active } : undefined;
 	for (const from of new Set([entry.json, ...(entry.older ?? []), ...versionFiles(entry)])) {
-		const raw = archived ? rawDestination(from, active, md, next.raw, filing.rawRoot)
-			: filing.rawRoot !== undefined ? mirrorRaw(md, filing.rawRoot)
+		const raw = filing ? rawDestination(from, active, md, next.raw, rawRoot)
+			: rawRoot !== undefined ? mirrorRaw(md, rawRoot)
 				: (previous?.rawOrigins?.[from] ?? rawDestination(from, active, md, next.raw, undefined));
 		const dest = joinFolder(raw, nameOf(from));
 		if (placement && raw !== dirOf(from)) (placement.rawOrigins ??= {})[dest] = dirOf(from);
@@ -168,16 +168,42 @@ interface ReconcileOptions {
 	rememberView?: boolean;
 }
 
+export interface ArchiveCandidate {
+	entry: IndexEntry;
+	name: string;
+	/** The filing destination for an archived chat. Omit when returning it to its active folder. */
+	filing?: ArchiveFiling;
+}
+
+export async function rememberArchiveObservations(plugin: AIChatBridge, index: ReconcileOptions['web']['index'], items: ListItem[], state: ReconcileOptions['state']): Promise<void> {
+	let changed = false;
+	for (const { uuid } of items) {
+		const entry = index[uuid];
+		const archived = state(uuid);
+		if (entry && archived !== undefined && entry.archiveObservation !== archived) {
+			entry.archiveObservation = archived;
+			changed = true;
+		}
+	}
+	if (changed) await plugin.saveSettings();
+}
+
 export async function reconcileArchived(plugin: AIChatBridge, { items, web, state, filing, progress, rememberView = false }: ReconcileOptions, report: ArchiveReport): Promise<void> {
 	progress('checking archived status…');
+	await rememberArchiveObservations(plugin, web.index, items, state);
 	const candidates = items.flatMap((item) => {
 		const archived = state(item.uuid);
 		if (archived === null) report.skipped.push(`${item.name} (conflicting archive status)`);
 		const entry = web.index[item.uuid];
 		if (!entry || typeof archived !== 'boolean') return [];
-		return entry.archiveMove || archived !== !!entry.archive ? [{ item, entry, archived }] : [];
+		return entry.archiveMove || archived !== !!entry.archive ? [{ entry, name: item.name, filing: archived ? filing(item) : undefined }] : [];
 	});
+	await moveArchivedChats(plugin, web, candidates, progress, report, rememberView);
+}
+
+export async function moveArchivedChats(plugin: AIChatBridge, web: ReconcileOptions['web'], candidates: ArchiveCandidate[], progress: ProgressFn, report: ArchiveReport, rememberView: boolean, restoring = false): Promise<void> {
 	if (!candidates.length) return;
+	const rawRoot = masterRaw(plugin.settings);
 	const linkedByOthers = new Map<string, Set<string>>();
 	const indexedPaths = new Set(Object.values(web.fileIndex));
 	for (const [source, links] of Object.entries(plugin.app.metadataCache?.resolvedLinks ?? {})) {
@@ -189,18 +215,19 @@ export async function reconcileArchived(plugin: AIChatBridge, { items, web, stat
 	}
 	const otherAssets = new Set([...plugin.settings.claude, ...plugin.settings.chatgpt]
 		.filter((a) => a.web !== web).flatMap((a) => Object.values(a.web.fileIndex).map(pathKey)));
-	for (const [i, { item, entry, archived }] of candidates.entries()) {
-		const phase = `moving archived chats ${i + 1} of ${candidates.length}`;
+	for (const [i, { name, entry, filing }] of candidates.entries()) {
+		const phase = `${restoring ? 'returning archived chats' : 'moving archived chats'} ${i + 1} of ${candidates.length}`;
 		progress(phase, i, candidates.length, phase);
 		try {
-			if (!entry.archiveMove) {
-				entry.archiveMove = planMove(plugin.app, entry, filing(item), archived, (md) => assetMoves(plugin.app, entry, md, web.fileIndex, otherAssets, linkedByOthers));
+			if (entry.archiveMove) await finishMove(plugin, entry, entry.archiveMove, rememberView);
+			if (!!entry.archive !== !!filing) {
+				entry.archiveMove = planMove(plugin.app, entry, filing, rawRoot, (md) => assetMoves(plugin.app, entry, md, web.fileIndex, otherAssets, linkedByOthers));
 				await plugin.saveSettings();
+				await finishMove(plugin, entry, entry.archiveMove, rememberView);
 			}
-			await finishMove(plugin, entry, entry.archiveMove, rememberView);
 			report.moved++;
 		} catch (error) {
-			const detail = `${item.name} (${error instanceof Error ? error.message : String(error)})`;
+			const detail = `${name} (${error instanceof Error ? error.message : String(error)})`;
 			(error instanceof BlockedMove ? report.skipped : report.failed).push(detail);
 		}
 	}

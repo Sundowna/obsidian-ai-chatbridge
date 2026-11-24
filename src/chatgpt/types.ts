@@ -69,6 +69,7 @@ export interface GptChat {
 	create_time: number;
 	update_time: number;
 	gizmo_id: string | null;
+	is_archived?: boolean;
 	messages: GptMessage[];
 	current_node?: string;
 	/** start_cursor = oldest message loaded; has_previous_page = older messages exist. */

@@ -73,6 +73,7 @@ interface ScanOptions {
 	save: () => Promise<void>;
 	needsCapture: (item: GptListItem) => boolean;
 	archive?: ArchiveObservations;
+	observeArchive?: ArchiveObservations;
 }
 
 export interface ScanStats {
@@ -136,7 +137,7 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 					discovered++;
 				}
 				stats.seen.add(item.id);
-				options.archive?.add(item.id, list.startsWith('archived-'), typeof item.is_archived === 'boolean' ? item.is_archived : undefined);
+				(options.archive ?? options.observeArchive)?.add(item.id, list.startsWith('archived-'), typeof item.is_archived === 'boolean' ? item.is_archived : undefined);
 				const known = inventory.known[item.id];
 				if (!known || compareRevision(item.update_time, known.item.update_time) >= 0) {
 					const archived = known?.generation === inventory.generation ? known.archived : undefined;
