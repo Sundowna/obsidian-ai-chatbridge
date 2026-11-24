@@ -1,6 +1,7 @@
 import { ShapeError } from '../schema';
 import { checkGptList } from './schema';
 import type { GptListItem } from './types';
+import type { ArchiveObservations } from '../archive-state';
 
 const MAX_PAGES = 300;
 const WEEK = 7 * 24 * 60 * 60_000;
@@ -19,7 +20,8 @@ export interface Inventory {
 	generation: number;
 	checkpoints: Partial<Record<ListKey, Checkpoint>>;
 	manual?: ListKey[];
-	known: Record<string, { item: GptListItem; generation: number }>;
+	known: Record<string, { item: GptListItem; generation: number; archived?: boolean | null }>;
+	archiveReady?: boolean;
 	queue: Record<string, GptListItem>;
 }
 
@@ -42,6 +44,7 @@ export function accountInventory(state: Inventories, key: string, scope: string)
 		inventory.generation++;
 		inventory.checkpoints = {};
 		delete inventory.manual;
+		delete inventory.archiveReady;
 	}
 	return inventory;
 }
@@ -69,6 +72,7 @@ interface ScanOptions {
 	fetch: (offset: number, tpp: boolean, archived: boolean, pinned: boolean) => Promise<unknown>;
 	save: () => Promise<void>;
 	needsCapture: (item: GptListItem) => boolean;
+	archive?: ArchiveObservations;
 }
 
 export interface ScanStats {
@@ -83,6 +87,15 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 	const lists: ListKey[] = ['active-normal', 'active-tpp'];
 	if (options.pinned) lists.push('pinned-normal', 'pinned-tpp');
 	if (options.archived) lists.push('archived-normal', 'archived-tpp');
+	if (options.archive && inventory.archiveReady && (options.forceFull || inventory.manual?.length || lists.some((list) => {
+		const checkpoint = inventory.checkpoints[list];
+		return !checkpoint || options.now - checkpoint.fullAt >= WEEK;
+	}))) {
+		// If a full archive check is interrupted, a later incremental scan must not miss the
+		// old rows from a list whose checkpoint was already saved before the interruption.
+		inventory.archiveReady = false;
+		await options.save();
+	}
 	if (options.forceFull && !inventory.manual?.length) {
 		inventory.manual = [...lists];
 		await options.save();
@@ -91,7 +104,8 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 	const overlap = (Number.isFinite(configured) ? Math.max(1, Math.min(1440, configured)) : DEFAULT_OVERLAP_MINUTES) * 60_000;
 	for (const list of lists) {
 		const previous = inventory.checkpoints[list];
-		let full = !previous || options.now - previous.fullAt >= WEEK || inventory.manual?.includes(list) === true;
+		let full = !previous || options.now - previous.fullAt >= WEEK || inventory.manual?.includes(list) === true ||
+			(!!options.archive && !inventory.archiveReady);
 		const cutoff = !full && previous?.watermark != null ? previous.watermark - overlap : -Infinity;
 		let ordered = true;
 		let reliableTime = true;
@@ -105,6 +119,7 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 			stats.requests++;
 			const response = checkGptList(await options.fetch(offset, list.endsWith('-tpp'), list.startsWith('archived-'), list.startsWith('pinned-')));
 			if (response.offset !== offset) throw new ShapeError('ChatGPT list returned the wrong offset.');
+			if (options.archive && !response.items.length && offset < response.total) throw new ShapeError('ChatGPT list ended before its reported total.');
 			let pageNewest = -Infinity;
 			let newestInPage = Infinity;
 			let discovered = 0;
@@ -121,9 +136,14 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 					discovered++;
 				}
 				stats.seen.add(item.id);
+				options.archive?.add(item.id, list.startsWith('archived-'), typeof item.is_archived === 'boolean' ? item.is_archived : undefined);
 				const known = inventory.known[item.id];
 				if (!known || compareRevision(item.update_time, known.item.update_time) >= 0) {
-					inventory.known[item.id] = { item, generation: inventory.generation };
+					const archived = known?.generation === inventory.generation ? known.archived : undefined;
+					inventory.known[item.id] = { item, generation: inventory.generation, ...(archived === undefined ? {} : { archived }) };
+				} else if (options.archive && known.generation !== inventory.generation) {
+					// Scope changed, but the observed row is temporarily older than its saved revision.
+					inventory.known[item.id] = { item: known.item, generation: inventory.generation };
 				}
 				const job = inventory.queue[item.id];
 				if (options.needsCapture(item) && (!job || compareRevision(item.update_time, job.update_time) >= 0)) {
@@ -154,5 +174,11 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 		}
 		if (full) stats.fullLists++;
 		else stats.incrementalLists++;
+	}
+	// Commit evidence only after every requested list succeeded, including the opposing lists.
+	if (options.archive) {
+		for (const id of stats.seen) inventory.known[id]!.archived = options.archive.get(id);
+		inventory.archiveReady = true;
+		await options.save();
 	}
 }

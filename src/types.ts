@@ -2,6 +2,7 @@
 // Only the fields we actually use are listed; everything else is kept untouched
 // in the raw .json file anyway.
 
+import type { ArchivedPlacement, ArchiveMove } from './archive-folders';
 import type { QuickCheck } from './quick-check';
 
 export interface ProjectRef {
@@ -98,4 +99,9 @@ export interface IndexEntry extends NoteState {
 	viewHash?: string;
 	/** What the last full check of this unchanged chat depended on (quick-check.ts). */
 	quick?: QuickCheck;
+	/** Local filing information, independent of the provider's body revision. */
+	archive?: ArchivedPlacement;
+	archiveMove?: ArchiveMove;
+	/** A move changed the links. Remember the new rendering without replacing the note. */
+	archiveViewMoved?: boolean;
 }

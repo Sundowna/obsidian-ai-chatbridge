@@ -3,6 +3,7 @@
 
 /** One entry of GET /backend-api/conversations?…&offset=N */
 export interface GptListItem {
+	is_archived?: boolean;
 	id: string;
 	title: string | null;
 	/** ISO date, e.g. "2026-10-27T13:14:06.272528Z" */

@@ -24,6 +24,20 @@ export function followRename(s: Settings, oldPath: string, newPath: string): num
 
 	const followIndex = (entries: IndexEntry[], fileIndex: Record<string, string>): void => {
 		for (const entry of entries) {
+			const archive = entry.archive;
+			if (archive) {
+				const fixArchivePath = (path: string): string => {
+					const next = fix(path);
+					if (next !== path) changed++;
+					return next;
+				};
+				archive.root = fixArchivePath(archive.root);
+				archive.active.md = fixArchivePath(archive.active.md);
+				archive.active.raw = fixArchivePath(archive.active.raw);
+				if (archive.rawOrigins) {
+					archive.rawOrigins = Object.fromEntries(Object.entries(archive.rawOrigins).map(([path, folder]) => [fixArchivePath(path), fixArchivePath(folder)]));
+				}
+			}
 			for (const key of ['json', 'md', 'view'] as const) {
 				const previous = entry[key];
 				if (!previous) continue;

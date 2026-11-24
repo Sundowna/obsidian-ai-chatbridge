@@ -23,6 +23,9 @@ import type { ProgressFn } from './progress';
 import type { ListItem } from './types';
 import { CloudShapeError } from './cloud/claude-cloud';
 import { emptyCloudResult, syncClaudeCloud, type CloudSyncResult } from './cloud/sync';
+import { archiveRoot } from './archive-folders';
+import { ArchiveObservations } from './archive-state';
+import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, type ArchiveReport } from './archive-move';
 
 const MAX_PAGES = 200; // 6000 chats; a guard against an endless paging loop
 
@@ -53,6 +56,7 @@ export interface SyncResult {
 	nothingSelected?: boolean;
 	/** Claude Code cloud sessions (claude.ai/code); also counted in the totals above. */
 	cloud?: CloudSyncResult;
+	archive?: ArchiveReport;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -62,7 +66,7 @@ const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/,
  * The whole chat list, 30 at a time. With `archived` the archived chats are read too
  * (claude.ai lists them apart) and added to the list; a chat in both is kept once.
  */
-export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn, archived = false): Promise<ListItem[]> {
+export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn, archived = false, observations?: ArchiveObservations): Promise<ListItem[]> {
 	const items: ListItem[] = [];
 	for (const listArchived of archived ? [false, true] : [false]) {
 		let offset = 0;
@@ -71,6 +75,8 @@ export async function listAllChats(api: ClaudeApi, delayMs: number, progress: Pr
 			if (page > 0 || listArchived) await sleep(delayMs);
 			const { json } = await api.get(api.listPath(offset, listArchived));
 			const p = checkListPage(json);
+			if (observations && p.has_more && !p.data.length) throw new ShapeError('Claude chat list ended with more pages expected.');
+			for (const item of p.data) observations?.add(item.uuid, listArchived);
 			items.push(...p.data);
 			progress(`reading ${listArchived ? 'archived chats' : 'chat list'}… ${items.length} chats`);
 			if (!p.has_more || p.data.length === 0) break;
@@ -238,7 +244,12 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const api = new ClaudeApi(auth.orgId, getKey);
 
 		// 1. Read the whole chat list, 30 at a time.
-		const items = await listAllChats(api, delayMs, progress, s.includeArchived === true);
+		const observations = s.includeArchived === true && s.separateArchived === true ? new ArchiveObservations() : undefined;
+		if (observations) {
+			result.archive = emptyArchiveReport();
+			progress('checking archived status…');
+		}
+		const items = await listAllChats(api, delayMs, progress, s.includeArchived === true, observations);
 		result.listed = items.length;
 
 		// 2. Project filter (uses the project info in the list – no extra requests).
@@ -250,11 +261,9 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const todoAll = pickTodo(kept, s.index);
 		result.unchanged = kept.length - todoAll.length;
 		const maxChats = plugin.settings.maxChatsPerRun;
-		const todo = maxChats > 0 ? todoAll.slice(0, maxChats) : todoAll;
-		result.leftForLater = todoAll.length - todo.length;
 
 		// Before anything is written: many saved chats missing means a wrong sync history, not deletions.
-		const savedChats = Object.values(s.index);
+		const savedChats = Object.values(s.index).filter((entry) => !entry.archiveMove);
 		guardMissing('claude.ai chats', savedChats.length, savedChats.filter((e) => !exists(e.md) || !exists(e.json)).length);
 
 		// 4. Make sure the folders exist: both base folders, and (if mirroring)
@@ -262,13 +271,28 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const folders = { chat: cleanFolder(s.chatFolder), code: cleanFolder(s.codeFolder) };
 		if (!folders.chat || !folders.code) throw new StopError('The Chat or Code Cloud folder setting is empty or invalid.');
 		const rawSetting = { chat: s.chatRawFolder, code: s.codeRawFolder };
+		const rawRoot = masterRaw(plugin.settings);
+		const root = archiveRoot(plugin.settings, 'claude', account.id, folders.chat);
+		const filing = (item: ListItem) => ({
+			base: folders.chat!, root, projectSubfolders: s.projectSubfolders, rawSetting: rawSetting.chat, rawRoot,
+			projectRaw: customProjectFolder(item, { ...s, projectFolders: s.projectRawFolders }, recent),
+			active: chatFolders(item, s, folders.chat!, rawSetting.chat, recent, rawRoot),
+		});
+		const archived = (item: ListItem) => targetFor(item) === 'chat' && observations?.get(item.uuid) === true;
+		if (observations && result.archive) {
+			await reconcileArchived(plugin, { items: kept.filter((item) => targetFor(item) === 'chat'), web: s,
+				state: (id) => observations.get(id), filing, progress }, result.archive);
+		}
+		const ready = todoAll.filter(({ item, isUpdate }) => !s.index[item.uuid]?.archiveMove && (isUpdate || targetFor(item) !== 'chat' || observations?.get(item.uuid) !== null));
+		const todo = maxChats > 0 ? ready.slice(0, maxChats) : ready;
+		result.leftForLater = todoAll.length - todo.length;
 		/** Transcript and raw folders for a chat, as the settings say today. */
 		const foldersOf = (item: ListItem) => {
 			const target = targetFor(item);
-			return chatFolders(item, s, folders[target]!, rawSetting[target], recent, masterRaw(plugin.settings));
+			return archived(item) ? newArchiveFolders(filing(item)) : chatFolders(item, s, folders[target]!, rawSetting[target], recent, rawRoot);
 		};
 		// Chats with a project folder of their own need no subfolder in the base folders.
-		const projectNames = s.projectSubfolders ? projectFolderNames(kept.filter((item) => customProjectFolder(item, s, recent) === null), recent) : [];
+		const projectNames = s.projectSubfolders ? projectFolderNames(kept.filter((item) => !archived(item) && customProjectFolder(item, s, recent) === null), recent) : [];
 		for (const base of [folders.chat, folders.code]) {
 			await ensureFolder(app, base);
 			for (const name of projectNames) {
@@ -326,7 +350,8 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			recordEdit(result.edits, note, mdPath);
 
 			// Remember it right away, so a later stop doesn't lose progress.
-			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash };
+			const archive = before ? before.archive : archived(item) ? { root, active: filing(item).active } : undefined;
+			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash, ...(archive ? { archive } : {}) };
 			await plugin.saveSettings();
 			result.written.push(stemOf(mdPath));
 			if (isUpdate) result.changedCount++;
@@ -341,7 +366,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		progress('checking older chats…');
 		for (const item of kept) {
 			const entry = s.index[item.uuid];
-			if (!entry || done.has(item.uuid)) continue;
+			if (!entry || entry.archiveMove || done.has(item.uuid)) continue;
 			const jsonOk = exists(entry.json);
 			const mdOk = exists(entry.md);
 			if (jsonOk && mdOk) continue;
@@ -416,7 +441,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			let quickUnsaved = 0;
 			for (const item of kept) {
 				const entry = s.index[item.uuid];
-				if (!entry || done.has(item.uuid) || !exists(entry.json)) continue;
+				if (!entry || entry.archiveMove || done.has(item.uuid) || !exists(entry.json)) continue;
 				// Files live next to the transcript (the raw .json may have a folder of its own).
 				const folder = dirOf(exists(entry.md) ? entry.md : entry.json);
 				const stem = stemOf(entry.json);
@@ -505,6 +530,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 	const parts = [`${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
+	if (r.archive) parts.push(...archiveLog(r.archive));
 	if (r.filteredOut) parts.push(`${r.filteredOut} skipped (other projects)`);
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion: ${r.restored.map((w) => `[[${w}]]`).join(', ')}`);

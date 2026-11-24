@@ -93,6 +93,7 @@ export function allEntries(s: Settings): IndexedPaths[] {
 	for (const a of s.gemini) webIndexes.push(a.studio.index);
 	for (const index of webIndexes) {
 		for (const [id, e] of Object.entries(index)) {
+			if (e.archiveMove) continue; // The relocation journal owns these paths until the move finishes.
 			out.push({
 				id,
 				md: e.md,

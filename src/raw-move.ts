@@ -4,8 +4,9 @@
 import { normalizePath, TFile, type App } from 'obsidian';
 import type { DesktopAccount } from './accounts';
 import { followRename } from './follow';
+import { archivedRaw, pathKey } from './archive-folders';
 import type { Provider } from './login';
-import { baseRoot, dirOf, masterRaw, projectRoots, rawMoves, type RawMove, type RawRoot, type SavedChat } from './raw-folders';
+import { baseRoot, dirOf, masterRaw, mirrorRaw, projectRoots, rawMoves, rawTarget, type RawMove, type RawRoot, type SavedChat } from './raw-folders';
 import { DEFAULT_RECENT, plainFolder } from './select';
 import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount, Settings } from './settings';
 import type { ProjectCatalog } from './project-catalog';
@@ -46,10 +47,28 @@ export function webRawMoves(app: App, provider: Provider, account: ClaudeAccount
 		const base = plainFolder(g.folder);
 		if (base) r.push(...projectRoots(g, base, g.rawFolder, names, recent, rawRoot));
 	}
-	const chats: SavedChat[] = Object.values(w.index).map((e) => ({ md: e.md, raws: [e.json, ...(e.older ?? []), ...versionFiles(e)] }));
+	const entries = Object.values(w.index).filter((e) => !e.archiveMove);
+	const bundle = (e: typeof entries[number]): SavedChat => ({ md: e.md, raws: [e.json, ...(e.older ?? []), ...versionFiles(e)] });
+	const chats = entries.filter((e) => !e.archive).map(bundle);
 	const cloud = provider === 'claude' ? (account as ClaudeAccount).web.cloudIndex : provider === 'chatgpt' ? (account as ChatgptAccount).web.codexCloudIndex : undefined;
 	chats.push(...Object.values(cloud ?? {}).flatMap((e) => (e.md ? [{ md: e.md, raws: [e.json, ...versionFiles(e)] }] : [])));
-	return rawMoves(chats, r, fileExists(app));
+	const exists = fileExists(app);
+	const base = plainFolder('chatFolder' in w ? w.chatFolder : w.folder);
+	const rawSetting = 'chatFolder' in w ? w.chatRawFolder : w.rawFolder;
+	const projectOverrides = new Set(w.onlyProjects && w.customProjectFolders
+		? Object.values(w.projectRawFolders ?? {}).map((p) => pathKey(plainFolder(p) ?? '')) : []);
+	const archived = entries.flatMap((e) => {
+		if (!e.archive || !base) return [];
+		const chat = bundle(e);
+		const md = dirOf(e.md);
+		const activeMd = e.archive.active.md;
+		const activeRawPath = rawTarget({ md: `${activeMd}/chat.md`, raws: [] }, e.json, r);
+		const activeRaw = activeRawPath === null ? e.archive.active.raw : dirOf(activeRawPath);
+		const raw = rawRoot !== undefined ? mirrorRaw(md, rawRoot)
+			: archivedRaw({ md: activeMd, raw: activeRaw }, md, base, e.archive.root, rawSetting, rawRoot, projectOverrides.has(pathKey(activeRaw)));
+		return rawMoves([chat], [{ md, raw }], exists);
+	});
+	return [...rawMoves(chats, r, exists), ...archived];
 }
 
 /** Gemini chats or AI Studio prompts. */

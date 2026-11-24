@@ -2,8 +2,9 @@
 // and the version before is kept as raw JSON. No network: ClaudeApi.get answers from fixtures.
 // Run: npm run test:claude
 
-import { TFile } from 'obsidian';
-import { ClaudeApi } from '../src/api';
+import { TFile, TFolder } from 'obsidian';
+import { ClaudeApi, StopError } from '../src/api';
+import { addAccount } from '../src/accounts';
 import { normalizeSettings } from '../src/migrate';
 import { localStamp } from '../src/naming';
 import { runSync } from '../src/sync';
@@ -36,7 +37,7 @@ const reads: string[] = [];
 const PLUGIN_DIR = '.obsidian/plugins/ai-chatbridge';
 let buildTime = 1;
 const vault = {
-	getAbstractFileByPath: (p: string) => (files.has(p) ? new TFile(p, { size: files.get(p)!.length }) : folders.has(p) ? {} : null),
+	getAbstractFileByPath: (p: string) => (files.has(p) ? new TFile(p, { size: files.get(p)!.length }) : folders.has(p) ? new TFolder(p) : null),
 	createFolder: async (p: string) => void folders.add(p),
 	create: async (p: string, d: string) => {
 		if (files.has(p)) throw new Error('exists ' + p);
@@ -58,7 +59,15 @@ const account = settings.claude[0]!;
 Object.assign(account.web, { orgId: ORG, secretId: 'key', chatFolder: 'AI/Claude/Chat', downloadFiles: false, cloudSessions: false });
 const plugin = {
 	manifest: { dir: PLUGIN_DIR, version: 'test' },
-	app: { vault, fileManager: { processFrontMatter: async () => undefined }, secretStorage: { getSecret: () => 'sk-test' } },
+	app: { vault, fileManager: {
+		processFrontMatter: async () => undefined,
+		renameFile: async (f: TFile, to: string) => {
+			if (files.has(to)) throw new Error('exists ' + to);
+			files.set(to, files.get(f.path)!);
+			files.delete(f.path);
+			f.path = to;
+		},
+	}, secretStorage: { getSecret: () => 'sk-test' } },
 	settings,
 	saveSettings: async () => undefined,
 } as never;
@@ -84,13 +93,16 @@ const archivedChat = {
 	chat_messages: [{ uuid: 'a0', sender: 'human', text: 'Archived question', content: [{ type: 'text', text: 'Archived question' }], created_at: '2026-10-01T09:00:00Z' }],
 };
 const listed: string[] = [];
+let currentMembership: 'active' | 'archived' | 'both' = 'both';
+let bodyRequests = 0;
 ClaudeApi.prototype.get = async function (path: string) {
 	const current = { uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, project };
 	if (path.includes('chat_conversations_v2')) listed.push(path);
+	else bodyRequests++;
 	const json = path.includes('chat_conversations_v2')
 		? path.includes('archived=true')
-			? { data: [{ uuid: ARCHIVED, name: archivedChat.name, created_at: archivedChat.created_at, updated_at: archivedChat.updated_at, project: null }, current], has_more: false }
-			: { data: [current], has_more: false }
+			? { data: [{ uuid: ARCHIVED, name: archivedChat.name, created_at: archivedChat.created_at, updated_at: archivedChat.updated_at, project: null }, ...(currentMembership === 'active' ? [] : [current])], has_more: false }
+			: { data: currentMembership === 'archived' ? [] : [current], has_more: false }
 		: path.includes(ARCHIVED) ? archivedChat : chat();
 	return { json, bytes: bytes(json) };
 };
@@ -145,6 +157,60 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	const archivedMd = 'AI/Claude/Chat/Recent/2026-10-01 Old garden plan.md';
 	expect('archived on: both lists read', listed.some((p) => p.includes('archived=false')) && listed.some((p) => p.includes('archived=true')), listed.join(' | '));
 	expect('archived on: archived chat saved in its normal folder, chat in both lists kept once', r6.listed === 2 && r6.newCount === 1 && r6.unchanged === 1 && files.get(archivedMd)?.includes('Archived question') === true, `${JSON.stringify({ listed: r6.listed, newCount: r6.newCount, unchanged: r6.unchanged, stopped: r6.stopped })} ${notes().join(' | ')}`);
+
+	{
+		// A manually moved and edited note is parked under the mirror of its actual active path.
+		const manual = 'Projects/Custom/Vault plan (mine).md';
+		const projectNote = 'Projects/Custom/DECISIONS.md';
+		const saved = account.web.index[CHAT]!;
+		await vault.create(manual, files.get(saved.md)! + '\nMy edit\n');
+		await vault.create(projectNote, 'Keep this decision');
+		files.delete(saved.md);
+		saved.md = manual;
+		account.web.separateArchived = true;
+		project = PROJECT;
+		currentMembership = 'archived';
+		const beforeBodies = bodyRequests;
+		const stopped = await runSync(plugin, account, (text) => {
+			if (text === 'moving archived chats 2 of 2') throw new StopError('Stopped by you.');
+		});
+		expect('separation: Stop finishes between chats', stopped.archive?.moved === 1 && stopped.stopped === 'Stopped by you.' && saved.md === manual);
+		const reconciled = await runSync(plugin, account);
+		const manualArchive = 'AI/Claude/Chat/Archived/_External/Projects/Custom/Vault plan (mine).md';
+		expect('separation: existing chat moves with its name and edits', reconciled.archive?.moved === 1 && saved.md === manualArchive && files.get(manualArchive)?.includes('My edit') === true, JSON.stringify(reconciled.archive));
+		expect('separation: the unrelated project note stays', files.get(projectNote) === 'Keep this decision');
+		currentMembership = 'active';
+		account.web.separateArchived = false;
+		expect('separation: turning it off keeps the notes in place', (await runSync(plugin, account)).archive === undefined && saved.md === manualArchive);
+		account.web.separateArchived = true;
+		const returned = await runSync(plugin, account);
+		expect('separation: unchanged unarchive restores the manual folder', returned.archive?.moved === 1 && files.has(manual) && !files.has(manualArchive));
+		expect('separation: archive changes cause no body requests', bodyRequests === beforeBodies);
+
+		// A second account shares the same configured root, with flat archives and a custom raw folder.
+		const second = addAccount(settings, 'claude', 'Second') as typeof account;
+		settings.rawRootOn = false;
+		Object.assign(second.web, {
+			orgId: '55555555-5555-4555-8555-555555555555', secretId: 'synthetic', cloudSessions: false, downloadFiles: false,
+			includeArchived: true, separateArchived: true, projectSubfolders: false, onlyProjects: true,
+			projects: [PROJECT.uuid, ':no-project'], customProjectFolders: true,
+			projectFolders: { [PROJECT.uuid]: 'Projects/Second' }, chatRawFolder: 'Raw/Second',
+			projectRawFolders: { [PROJECT.uuid]: 'Raw/Second/Custom' },
+		});
+		currentMembership = 'archived';
+		const secondSync = await runSync(plugin, second);
+		const secondRoot = `${second.web.chatFolder}/Archived/_Accounts/claude-${second.id}`;
+		const secondProject = second.web.index[CHAT]!;
+		const secondLoose = second.web.index[ARCHIVED]!;
+		expect('separation: a shared root has isolated flat account paths', secondSync.newCount === 2 && [secondProject, secondLoose].every((e) => e.md.slice(0, e.md.lastIndexOf('/')) === secondRoot), secondSync.stopped ?? notes().join(' | '));
+		expect('separation: the explicit project raw override takes precedence', secondProject.json.startsWith('Raw/Second/Custom/') && !secondProject.json.includes('/Archived/'));
+		expect('separation: the account raw folder has its own archive mirror', secondLoose.json.startsWith(`Raw/Second/Archived/_Accounts/claude-${second.id}/`));
+		currentMembership = 'active';
+		const secondReturn = await runSync(plugin, second);
+		expect('separation: a new archived chat returns to its configured active project', secondReturn.archive?.moved === 1 && secondProject.md.startsWith('Projects/Second/') && secondProject.json.startsWith('Raw/Second/Custom/'));
+	}
+	settings.rawRootOn = true;
+	project = null;
 
 	// Quick check: an unchanged chat's .json is not read again once a full check found its files there.
 	const raw = account.web.index[CHAT]!.json;

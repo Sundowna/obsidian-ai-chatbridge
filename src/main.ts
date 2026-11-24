@@ -1103,7 +1103,8 @@ export default class AIChatBridge extends Plugin {
 			this.stopRequested ? undefined : r.stopped ?? ('missing' in r && r.missing.length ? `Skipped, not found: ${r.missing.join(', ')}.` : 'nothing' in r && r.nothing.length ? `Nothing to read for: ${r.nothing.join(', ')}.` : undefined));
 		if (this.stopRequested) {
 			const saved = r.newCount + r.changedCount;
-			new Notice(`${label}: stopped. ${saved ? `${saved} saved before stopping` : 'Nothing new was saved'}; the next sync carries on from there.`, 8000);
+			const moved = 'archive' in r && r.archive?.moved ? `, ${r.archive.moved} moved` : '';
+			new Notice(`${label}: stopped. ${saved ? `${saved} saved before stopping` : 'Nothing new was saved'}${moved}; the next sync carries on from there.`, 8000);
 			return false;
 		}
 		if ('nothingSelected' in r && r.nothingSelected) {
@@ -1120,7 +1121,8 @@ export default class AIChatBridge extends Plugin {
 			return false;
 		}
 		this.paused.delete(key);
-		if (trigger === 'manual' || r.written.length || r.restored.length) {
+		const archive = 'archive' in r ? r.archive : undefined;
+		if (trigger === 'manual' || r.written.length || r.restored.length || archive?.moved || archive?.skipped.length || archive?.failed.length) {
 			const active = 'active' in r && r.active ? `, ${r.active} still active` : '';
 			const more = (r.leftForLater ? `, ${r.leftForLater} left for next run` : '') + active;
 			const restored = r.restored.length ? `, ${r.restored.length} restored` : '';
@@ -1128,7 +1130,8 @@ export default class AIChatBridge extends Plugin {
 			const gone = 'missing' in r && r.missing.length ? ` Skipped, not found: ${r.missing.join(', ')}.` : 'nothing' in r && r.nothing.length ? ` Nothing to read for: ${r.nothing.join(', ')}.` : '';
 			// A one-account desktop run: say so when another account has sessions waiting.
 			const others = 'elsewhere' in r ? elsewhereText(r.elsewhere) : '';
-			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.${gone}${others ? ` ${others}` : ''}`, others ? 15_000 : undefined);
+			const archiveStatus = archive ? ` Archived chats: ${archive.moved} moved, ${archive.skipped.length} skipped, ${archive.failed.length} failed.` : '';
+			new Notice(`${label}: ${r.newCount} new, ${r.changedCount} changed, ${r.unchanged} unchanged${restored}${more}.${archiveStatus}${gone}${others ? ` ${others}` : ''}`, others ? 15_000 : undefined);
 		}
 		return true;
 	}
