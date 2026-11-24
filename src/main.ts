@@ -877,7 +877,7 @@ export default class AIChatBridge extends Plugin {
 			const today = localDate(new Date().toISOString());
 			let daily = null;
 			if (byHand || h.lastDaily !== today) {
-				daily = await dailyUpkeep(this.app, h, today);
+				daily = await dailyUpkeep(this.app, h, today, byHand);
 				if (daily.found) await this.saveSettings();
 			}
 			const found = await updateLive(this.app, this.settings, Date.now());

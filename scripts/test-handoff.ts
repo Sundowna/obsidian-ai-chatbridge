@@ -298,10 +298,14 @@ async function vaultTests(): Promise<void> {
 	const later = await dailyUpkeep(app, s.handoff, '2026-12-30');
 	expect('daily: stale check off (0) asks nothing', later.flagged === 0 && !files.get(ctxPath)!.includes('Still in **Now**'));
 
-	// A vault without the note: it is made with the five parts, and the upkeep works on it.
+	// A vault without the note: the automatic run makes nothing (turning the upkeep on must not
+	// make a folder before you chose one); Update now makes it with the five parts.
 	const empty = new Map<string, string>();
 	const n = normalizeSettings({}).settings.handoff;
-	const made = await dailyUpkeep(fakeApp(empty).app, n, '2026-11-24');
+	const emptyApp = fakeApp(empty);
+	const auto = await dailyUpkeep(emptyApp.app, n, '2026-11-24');
+	expect('daily, automatic: a missing note is not made, nothing written, the day not marked done', !auto.found && emptyApp.writes() === 0 && empty.size === 0 && n.lastDaily === undefined);
+	const made = await dailyUpkeep(emptyApp.app, n, '2026-11-24', true);
 	const note = empty.get('_AI Handoff/Active Context.md') ?? '';
 	expect('daily: a missing note is made with the five empty parts', made.found && made.created && ['## Plan', '## Now', '## Waiting for you', '## Next up', '## Recently done (last 7 days)'].every((h) => note.includes(`\n${h}\n`)) && note.includes('created: 2026-11-24'));
 	const busy = note.replace('## Now\n', '## Now\n\n- Something in progress\n');
@@ -309,7 +313,7 @@ async function vaultTests(): Promise<void> {
 	expect('a made note: the stale question goes under "Waiting for you"', /## Waiting for you\n\n- \[ \] Still in \*\*Now\*\* since 2026-11-01/.test(asked), asked);
 	expect('a made note has nothing to archive', splitOld(note, '2026-11-24', 7).moved.length === 0);
 	const blocked = fakeApp(new Map(), ['_AI Handoff/Active Context.md']);
-	expect('daily: a folder where the note should be is reported, nothing written', !(await dailyUpkeep(blocked.app, n, '2026-11-24')).found && blocked.writes() === 0);
+	expect('daily: a folder where the note should be is reported, nothing written', !(await dailyUpkeep(blocked.app, n, '2026-11-24', true)).found && blocked.writes() === 0);
 }
 
 // --- System file names: "_ai-chatbridge-…", renamed once from the old names ---------------------

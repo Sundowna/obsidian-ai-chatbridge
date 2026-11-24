@@ -34,14 +34,14 @@ export async function askOf(app: App, item: LiveItem): Promise<string> {
 }
 
 /**
- * The Active Context note, made with the five empty parts when the folder has none yet.
- * Null when its place is taken by a folder.
+ * The Active Context note. With `create` (only when you press Update now) it is made with the
+ * five empty parts when the folder has none yet, never by itself. Null when it is missing.
  */
-export async function ensureContextNote(app: App, h: HandoffSettings, today: string): Promise<{ file: TFile; text: string; created: boolean } | null> {
+export async function ensureContextNote(app: App, h: HandoffSettings, today: string, create: boolean): Promise<{ file: TFile; text: string; created: boolean } | null> {
 	const path = handoffNote(h);
 	const found = await readNote(app, path);
 	if (found) return { ...found, created: false };
-	if (app.vault.getAbstractFileByPath(path) !== null) return null;
+	if (!create || app.vault.getAbstractFileByPath(path) !== null) return null;
 	await ensureFolder(app, h.folder);
 	await app.vault.create(path, newContextNote(today));
 	const made = await readNote(app, path);
@@ -90,9 +90,12 @@ export interface DailyResult {
 	archives: string[];
 }
 
-/** The archive pass and the stale "Now" check, once a day. Archive files are written first. */
-export async function dailyUpkeep(app: App, h: HandoffSettings, today: string): Promise<DailyResult> {
-	const ctx = await ensureContextNote(app, h, today);
+/**
+ * The archive pass and the stale "Now" check, once a day. Archive files are written first.
+ * A missing note is made only with `create`; without the note nothing is written or remembered.
+ */
+export async function dailyUpkeep(app: App, h: HandoffSettings, today: string, create = false): Promise<DailyResult> {
+	const ctx = await ensureContextNote(app, h, today, create);
 	if (!ctx) return { found: false, created: false, moved: 0, flagged: 0, archives: [] };
 	await renameOldMonthFiles(app, h);
 	const { keep, moved } = splitOld(ctx.text, today, h.keepDays);
