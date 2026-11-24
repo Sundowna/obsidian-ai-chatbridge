@@ -113,7 +113,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Only sync selected projects, then Choose a folder per project (sub-setting)
 - [ ] Project picker: Fetch projects / Refresh list / Fetching… (cta only before first fetch), status with indeterminate bar, error text, "N of M selected · K with own folder", "Fetched … ago", filter box from 9 rows, Select all/Clear become Select shown/Clear shown while filtering, tags **New** and **Not found**, chat counts, warnings (nothing selected, catalog note), per-row transcript and JSON folder lines with greyed default, reset, invalid state; only the picker redraws on a tick
 - [ ] Lumo: project list fetched once per settings opening, full list in memory only, only selected names saved
-- [ ] Claude: Claude Code cloud sessions toggle; Advanced: Session key (secret storage), Organization ID (UUID check)
+- [ ] Claude: Include archived chats toggle (off by default); Claude Code cloud sessions toggle; Advanced: Session key (secret storage), Organization ID (UUID check)
 - [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Keep Codex's steps toggle (off by default); Include pinned chats (on by default); Include archived chats; Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
 - [ ] Gemini: "What is saved" note; Advanced: Google cookies. AI Studio: Sync AI Studio toggle, own folder
 - [ ] Lumo: Encryption note
@@ -168,6 +168,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 ## 6. Claude web [code: sync.ts]
 
 - [ ] Chats to Chat folder, other platforms to Code Cloud folder; project subfolders; `Recent` for no project; per-project custom folders
+- [ ] Include archived chats (`includeArchived`, off by default): also reads the list with `archived=true` after the normal one (`archived=false`), merged and deduplicated by chat ID; archived chats are filed like the others (project or `Recent`), no folder of their own; the project picker reads both lists too. Off = the archived list is never requested
 - [ ] Raw `.json` saved byte for byte; transcript with `account:` property and raw link
 - [ ] Files: `Artifacts/` and `Attachments/` per chat; chat-view files read too; size mismatch and 404 skipped and remembered; identical file under another ID not copied; all files fetched before anything is written
 - [ ] Backfill of missing or deleted files for older chats, transcripts untouched

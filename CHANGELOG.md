@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- **Include archived chats for Claude** - a switch in the Claude account settings, like the one ChatGPT has. Off by default. Turned on, the sync also reads claude.ai's archived chats, which claude.ai lists apart, and saves them in their normal folder (their project, or `Recent`). A chat archived after it was saved stays where it is
+
 ## 0.36.1 - 2026-11-20
 
 ### Fixed
