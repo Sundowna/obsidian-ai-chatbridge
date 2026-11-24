@@ -211,7 +211,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Gemini: chats with shown reasoning, pictures as links. AI Studio: chats and prompts
 - [ ] Gemini: a chat Google sends in an odd shape is skipped, named in the log under "could not read" and tried again next run; the third such chat in one run stops the sync ("could not be verified"), as a format change would
 - [ ] Lumo: chats and projects decrypted in memory, saved readable, no attachments
-- [ ] Claude Code local: folders follow sidebar groups or working folder, forks nested, `Attachments/` and `Artifacts/` (latest version, no source code or scratch files, vault notes linked), quiet wait, extra folders
+- [ ] Claude Code local: folders follow sidebar groups or working folder, forks nested, `Attachments/` and `Artifacts/` (latest version, no source code or scratch files, vault notes linked), quiet wait, extra folders; sessions archived in the app (`isArchived` in its session file) are synced like the others, in their usual folder
 - [ ] Codex local: per project or `Recent`, same file rules
 - [ ] Desktop sessions assigned to accounts: extra folder, then organization or workspace ID, then first account; a saved session stays with its account
 - [ ] A provider's desktop run (its command, no account): that app for every account with it on, filed as `desktop:<provider>:*`; the settings show the newest of the account's own run, this run and the all-desktop-apps run
