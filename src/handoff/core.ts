@@ -1,7 +1,7 @@
 // Active Context upkeep, as plain text in and text out (no Obsidian here, see run.ts):
 // - the "Live sessions" block: chats active in the last hours, with a link and your last request;
 // - the 7-day archive pass (port of the vault's 90 System/Tools/archive-handoff.py);
-// - lines that stay in "Now" too long are flagged under "Waiting for …" (Walter, you…);
+// - lines that stay in "Now" too long are flagged under "Waiting for …" (any name: you, me, the team…);
 // - the hand-over message for another AI.
 // Tested by scripts/test-handoff.ts.
 
@@ -29,7 +29,7 @@ export interface SeenLine {
 export const LIVE_START = '<!-- ai-chatbridge:live-sessions -->';
 export const LIVE_END = '<!-- /ai-chatbridge:live-sessions -->';
 /** The five parts plus the plugin's own section: never archived as a whole. */
-const PARTS = new Set(['plan', 'now', 'waiting for walter', 'next up', 'recently done', 'recently done (last 7 days)', 'live sessions']);
+const PARTS = new Set(['plan', 'now', 'next up', 'recently done', 'recently done (last 7 days)', 'live sessions']);
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 

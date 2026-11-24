@@ -323,7 +323,7 @@ export interface HandoffSettings {
 	liveHours: number;
 	/** "Recently done" keeps this many days; older entries move to the archive. */
 	keepDays: number;
-	/** A "Now" line still there after this many days is flagged under "Waiting for Walter" (0 = never). */
+	/** A "Now" line still there after this many days is flagged under the "Waiting for …" section (0 = never). */
 	staleDays: number;
 	/** Day (YYYY-MM-DD) the daily pass last ran. */
 	lastDaily?: string;

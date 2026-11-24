@@ -39,7 +39,7 @@ const put = (path: string, text: string) => {
 };
 
 // The three languages, a secret-looking line and Markdown that would break a note if it were not fenced.
-const SUMMARY = '# Memory summary\n\n- Walter schreibt auf Deutsch, English en Afrikaans.\n- Hy sê: "moenie my woorde regmaak nie".\n- Passwort: hunter2 (bleibt drin, es wird nichts gefiltert)\n';
+const SUMMARY = '# Memory summary\n\n- Der Nutzer schreibt auf Deutsch, English en Afrikaans.\n- Hy sê: "moenie my woorde regmaak nie".\n- Passwort: hunter2 (bleibt drin, es wird nichts gefiltert)\n';
 const FENCED = '---\nname: tricky\n---\n\n## A heading of its own\n\n```js\nconsole.log("three backticks inside");\n```\n\n````\nfour\n````\nno newline at the end';
 
 function seed(): void {

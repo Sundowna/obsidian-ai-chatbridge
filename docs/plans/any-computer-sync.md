@@ -5,7 +5,7 @@ Written 19.11.2026. **Built the same day as 0.35.0** on branch `any-computer-syn
 What changed from this plan while building:
 - **No Rename button.** The computer's name is its network name, the same name the `Code-Local/<computer>` folders already use. A second name could drift away from those folders.
 - **The phone part was already released** in 0.34.0 ("Sync from your phone, run by your computer"). Nothing was left to finish. A phone request now waits while another computer is busy.
-- **Walter's answers (19.11.2026):**
+- **The owner's answers (19.11.2026):**
   - Login cookies stay on each computer. The README confirms that pasted ones live in Obsidian's secret storage on that computer.
   - Hermes runs only where it is installed. Hermes and Claude Code history is never combined between computers.
   - Proton Drive is reported to keep both copies of a clash, with "Name clash" and a date in one name. That is user reports, not Proton documentation.
@@ -14,11 +14,11 @@ Before building, read [FEATURES.md](../../FEATURES.md) and follow its rule. The 
 
 ## The goal
 
-Walter wants the Brain vault on several laptops, kept in step through Proton Drive. Tower is often switched off and he will be on a laptop somewhere else. So **whichever computer he is on must be able to sync everything itself**, including the online accounts (claude.ai, ChatGPT, Lumo, Gemini, AI Studio).
+The owner wants the Brain vault on several laptops, kept in step through Proton Drive. Tower is often switched off and they will be on a laptop somewhere else. So **whichever computer they are on must be able to sync everything itself**, including the online accounts (claude.ai, ChatGPT, Lumo, Gemini, AI Studio).
 
 Proton Drive copies the whole vault, including `.obsidian/plugins/ai-chatbridge/`. It has no ignore list. So ChatBridge must never have two computers writing the same file.
 
-## What Walter decided
+## What was decided
 
 - **No hub.** "One computer syncs, the others ask it" is out, because Tower will be off.
 - The open-notes layout (`workspace.json`) may sync between laptops. That is fine.
@@ -28,13 +28,13 @@ Proton Drive copies the whole vault, including `.obsidian/plugins/ai-chatbridge/
 
 ### 1. Settings and sync history are split up
 
-Today `data.json` holds everything: settings, the lists of what was synced, and paths that only exist on Tower (Hermes folders on `D:\AI\Hermes`, Claude Code folders under `C:\Users\Walter\.claude`, 1,305 local chat files in the Claude Code index).
+Today `data.json` holds everything: settings, the lists of what was synced, and paths that only exist on Tower (Hermes folders on `D:\AI\Hermes`, Claude Code folders under `C:\Users\the owner\.claude`, 1,305 local chat files in the Claude Code index).
 
 After the change:
 
 | File | What is in it | Who writes it |
 |---|---|---|
-| `data.json` | Shared settings: accounts, folder names, how notes look, which projects | Any computer, but only when Walter changes a setting |
+| `data.json` | Shared settings: accounts, folder names, how notes look, which projects | Any computer, but only when you change a setting |
 | `computers/<name>.json` | This computer's folder paths (Claude Code extra folders, Hermes profiles) and its lists of what it has synced: every `index`, `fileIndex`, `cloudIndex`, plus cooldowns, resume points, inventories and progress | Only that computer |
 | `sync-busy.json` | The busy marker (see 2) | The computer that is syncing |
 
@@ -58,7 +58,7 @@ After the change:
 ### 4. The computer's name stays the same
 
 - The name comes from the computer's network name, as today (`computerName()` in `src/computer.ts`). It is stored once in Obsidian's local storage for this vault, which never travels, so it doesn't change when the network does.
-- In settings Walter can rename it, for example when two laptops report the same name. Renaming also renames `computers/<old>.json`, and asks before moving the `Code-Local/<old>` folder.
+- In settings you can rename it, for example when two laptops report the same name. Renaming also renames `computers/<old>.json`, and asks before moving the `Code-Local/<old>` folder.
 
 ### 5. The same chat always gives the same note
 
@@ -91,7 +91,7 @@ After the change:
   - the move from the old `data.json` (Tower and non-Tower cases)
   - renaming a computer
   - writing a note twice gives identical text
-- A two-computer test in the TAlpha test vault, with two separate Obsidian profiles pointing at one copied folder: start a sync on both, check the marker, check the lists combine. Only with Walter present, and only pressing Sync when he says so.
+- A two-computer test in the TAlpha test vault, with two separate Obsidian profiles pointing at one copied folder: start a sync on both, check the marker, check the lists combine. Only with the owner present, and only pressing Sync when he says so.
 - Then the real Proton test: a throwaway vault copy in Proton "My files" on Tower and one laptop.
 
 ## Open questions

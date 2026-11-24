@@ -255,7 +255,7 @@ Every item here must hold on all three. Path logic takes the platform or a fake 
 - [ ] Hermes homes: `HERMES_HOME`, then `%LOCALAPPDATA%/hermes` (Windows only), then `~/.hermes`
 - [ ] A leading `~` is the home folder in Extra session folders, Hermes **Add by path** and the Python setting
 - [ ] Scratch files are skipped in every system's temp folder: `AppData/Local/Temp`, `/tmp`, `/var/tmp`, `/var/folders`, also under `/private`
-- [ ] Computer folder name is the first part of the network name ("Walters-MacBook.local" gives "Walters-MacBook"); an IP address gives "This computer"
+- [ ] Computer folder name is the first part of the network name ("My-MacBook.local" gives "My-MacBook"); an IP address gives "This computer"
 - [ ] Example paths in placeholders and hints match the system Obsidian runs on
 - [ ] Vault lookups (`findFile` in vaultio.ts, used for every existence check) also find a name in the other Unicode form (NFC/NFD) on all three, and on Windows, macOS and iOS a name that differs only in letter case; so a name the file system already has is never treated as free (no "File already exists" stop). Linux and Android stay case-sensitive
 - [ ] Python fallback tries `python3`, `python`, `py`; Hermes' bundled one as `python.exe` or `bin/python3`

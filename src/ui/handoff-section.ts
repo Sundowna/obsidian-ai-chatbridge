@@ -54,7 +54,7 @@ export function handoffSection(ctx: PanelContext, el: HTMLElement): void {
 	);
 	numberSetting(el, 'Live sessions: last hours', 'Chats with activity in this many hours are listed (at most 10).', () => h.liveHours, (n) => (h.liveHours = n), save, 1);
 	numberSetting(el, 'Recently done: days kept', 'Older lines move to the archive.', () => h.keepDays, (n) => (h.keepDays = n), save, 1);
-	numberSetting(el, 'Ask about "Now" lines after (days)', 'A line still in "Now" after this many days gets a question under "Waiting for Walter". 0 = never.', () => h.staleDays, (n) => (h.staleDays = n), save, 0);
+	numberSetting(el, 'Ask about "Now" lines after (days)', 'A line still in "Now" after this many days gets a question under "Waiting for …" (made as "Waiting for you" if missing). 0 = never.', () => h.staleDays, (n) => (h.staleDays = n), save, 0);
 	new Setting(el)
 		.setName('Update now')
 		.setDesc(`${h.lastDaily ? `Daily pass last ran on ${h.lastDaily}.` : 'The daily pass has not run yet.'} If the folder has no "${HANDOFF_NOTE}" yet, this makes one with the five parts, empty.`)

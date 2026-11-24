@@ -101,7 +101,7 @@ const CONTEXT = [
 	'- Agent speed-up',
 	'  - an indented detail',
 	'',
-	'## Waiting for Walter',
+	'## Waiting for me',
 	'',
 	'- [ ] Something to decide',
 	'',
@@ -174,17 +174,17 @@ const CONTEXT = [
 	r = flagStale(CONTEXT, seen, '2026-11-22', 3);
 	expect('two days later: still nothing', r.flagged === 0);
 	r = flagStale(CONTEXT, r.seen, '2026-11-23', 3);
-	const waiting = r.text.slice(r.text.indexOf('## Waiting for Walter'), r.text.indexOf('## Next up'));
-	expect('three days later: one question per line, at the end of "Waiting for Walter"', r.flagged === 2 && waiting.includes('- [ ] Something to decide\n- [ ] Still in **Now** since 2026-11-20') && waiting.endsWith('\n\n') && waiting.includes('“Langflow pipeline running”'), waiting);
+	const waiting = r.text.slice(r.text.indexOf('## Waiting for me'), r.text.indexOf('## Next up'));
+	expect('three days later: one question per line, at the end of "Waiting for me"', r.flagged === 2 && waiting.includes('- [ ] Something to decide\n- [ ] Still in **Now** since 2026-11-20') && waiting.endsWith('\n\n') && waiting.includes('“Langflow pipeline running”'), waiting);
 	const again = flagStale(r.text, r.seen, '2026-11-30', 3);
 	expect('a flagged line is asked about once only', again.flagged === 0 && again.text === r.text);
 	const changed = flagStale(r.text.replace('- Agent speed-up', '- Agent speed-up, now faster'), again.seen, '2026-11-30', 3);
 	expect('a line that is gone from "Now" is forgotten, a changed line counts as new', Object.keys(changed.seen).length === 2 && Object.values(changed.seen).some((v) => v.first === '2026-11-30' && !v.flagged));
-	const noWaiting = flagStale(CONTEXT.replace(/## Waiting for Walter\n\n- \[ \] Something to decide\n\n/, ''), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
+	const noWaiting = flagStale(CONTEXT.replace(/## Waiting for me\n\n- \[ \] Something to decide\n\n/, ''), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
 	expect('without a "Waiting for …" section, "## Waiting for you" is made before "Next up"', /## Waiting for you\n\n- \[ \] Still in \*\*Now\*\* since 2026-11-01[^\n]*\n\n## Next up/.test(noWaiting.text), noWaiting.text);
-	const other = flagStale(CONTEXT.replace('## Waiting for Walter', '## Waiting for Anna'), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
+	const other = flagStale(CONTEXT.replace('## Waiting for me', '## Waiting for the team'), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
 	expect('any "## Waiting for <name>" section takes the question', other.text.includes('- [ ] Something to decide\n- [ ] Still in **Now**') && !other.text.includes('Waiting for you'));
-	expect('a dated "Waiting for …" heading is never archived', splitOld(CONTEXT.replace('## Waiting for Walter', '## Waiting for you 2026-01-01'), '2026-11-24', 7).keep.includes('Something to decide'));
+	expect('a dated "Waiting for …" heading is never archived', splitOld(CONTEXT.replace('## Waiting for me', '## Waiting for you 2026-01-01'), '2026-11-24', 7).keep.includes('Something to decide'));
 	const crlf = flagStale(CONTEXT.replace(/\n/g, '\r\n'), { [Object.keys(seen)[0]!]: { first: '2026-11-01' } }, '2026-11-24', 3);
 	expect('Windows line endings are kept when flagging', crlf.flagged === 1 && !/[^\r]\n/.test(crlf.text));
 }

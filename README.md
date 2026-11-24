@@ -539,7 +539,7 @@ The plugin works the same on all three. Where it looks for local sessions:
 | Claude desktop titles and groups | `%LOCALAPPDATA%/Claude`, `%APPDATA%/Claude` | `~/Library/Application Support/Claude` | `$XDG_CONFIG_HOME/Claude`, else `~/.config/Claude` |
 | Hermes profiles | `HERMES_HOME`, `%LOCALAPPDATA%/hermes`, `~/.hermes` | `HERMES_HOME`, `~/.hermes` | `HERMES_HOME`, `~/.hermes` |
 
-`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are followed on every system. Folder names of local sessions use your computer's own name, without the network ending (`Walters-MacBook`, not `Walters-MacBook.local`). The macOS and Linux parts are covered by automatic tests on all three systems; if something is off on yours, please [open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues).
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are followed on every system. Folder names of local sessions use your computer's own name, without the network ending (`My-MacBook`, not `My-MacBook.local`). The macOS and Linux parts are covered by automatic tests on all three systems; if something is off on yours, please [open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues).
 
 ## Installation
 

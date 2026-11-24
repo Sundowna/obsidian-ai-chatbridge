@@ -6,7 +6,7 @@
 - **System files start with "_"** - the sync log is now `_ai-chatbridge-log.md`, reports are `_ai-chatbridge-merge-report-….md` and the diagnostics folder is `_ai-chatbridge-diagnostics`, so they are easy to leave out of the graph. Your existing ones are renamed once when you update, through Obsidian, so links keep working; a log you named yourself keeps its name
 
 ### New
-- **Active Context** - for a vault with a handover note, **General → Active Context** (off until you turn it on; choose a handoff folder, the note is made there if you have none) keeps it up to date: after every sync a **Live sessions** list of the chats active in the last 48 hours, with a link and your last request; once a day the 7-day archive pass into `Handoff archive/_YYYY-MM.md`; and a question under "Waiting for Walter" for a "Now" line that stayed 3 days. New commands **Update Active Context now** and **Hand over a chat to another AI**, which copies a ready message for the next AI; also on the right-click menu of a synced chat note
+- **Active Context** - for a vault with a handover note, **General → Active Context** (off until you turn it on; choose a handoff folder, the note is made there if you have none) keeps it up to date: after every sync a **Live sessions** list of the chats active in the last 48 hours, with a link and your last request; once a day the 7-day archive pass into `Handoff archive/_YYYY-MM.md`; and a question under "Waiting for …" for a "Now" line that stayed 3 days. New commands **Update Active Context now** and **Hand over a chat to another AI**, which copies a ready message for the next AI; also on the right-click menu of a synced chat note
 
 ## 0.37.0 - 2026-11-24
 
@@ -122,7 +122,7 @@ Better on macOS and Linux. Nothing changes on Windows.
 - **Browse… on macOS and Linux** - the folder dialog opened in the wrong place (the start folder was written the Windows way) and now opens at the current folder. On macOS the dialog also says what it is for. On Linux, where `Notes` and `notes` are two folders, the pick is compared exactly
 - **Claude desktop titles and groups on Linux** - also looked for in `$XDG_CONFIG_HOME/Claude`, not only `~/.config/Claude`
 - **Scratch files on macOS** - temporary files Claude wrote for itself under `/var/folders/…` and `/private/tmp` are no longer saved as artifacts, as on Windows and Linux
-- **Computer name on macOS and Linux** - the folder for local sessions was named after the full network name ("Walters-MacBook.fritz.box"), which changes with the network. New installs use the computer's own name ("Walters-MacBook"). Folders you already have keep their name
+- **Computer name on macOS and Linux** - the folder for local sessions was named after the full network name ("My-MacBook.fritz.box"), which changes with the network. New installs use the computer's own name ("My-MacBook"). Folders you already have keep their name
 
 ### Changed
 - Example paths in the settings match the system you are on
