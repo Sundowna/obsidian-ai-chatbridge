@@ -526,6 +526,101 @@ async function testQuickCheck() {
 	}
 }
 
+/**
+ * Audit 2026-11-24: things the full check reacts to that the raw pages do not show. With the
+ * quick check on, each must still give the full check's result: a file that failed to download
+ * (on its retry delay, then fetched), a renamed project, a saved file deleted while file
+ * downloads are off, and a changed list of earlier versions.
+ */
+async function testQuickCheckSameResult() {
+	const h = harness();
+	const g = h.settings.chatgpt[0]!.web;
+	g.downloadFiles = true;
+	const connect = GptApi.connect;
+	const projectId = 'g-p-0123456789abcdef';
+	let projectName = 'Alpha';
+	let sandboxOk = false;
+	GptApi.connect = async () => ({
+		inventoryKey: 'account:quick-same-result-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: () => 'chat',
+		olderPath: () => 'older',
+		redact: (value: string) => value,
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: [{ id, title: 'Fixture', create_time: date, update_time: date, gizmo_id: projectId }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [{ gizmo: { gizmo: { id: projectId, display: { name: projectName } } } }] });
+			if (path === 'chat') return raw(top);
+			if (path === 'older') return raw(older);
+			throw new Error('Unexpected request ' + path);
+		},
+		sandboxBytes: async () => (sandboxOk ? bytes('%PDF-1.7 fixture') : null),
+	} as unknown as GptApi);
+	const entry = () => g.index[id]!;
+	const sync = async () => {
+		const entryNow = g.index[id];
+		const pages = entryNow ? [entryNow.json, ...(entryNow.older ?? [])] : [];
+		h.reads.length = 0;
+		const r = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(r.stopped, undefined);
+		return { r, read: h.reads.filter((p) => pages.includes(p)).length };
+	};
+	try {
+		// A file that fails to download waits for its retry; every run reports it as pending.
+		const first = await sync();
+		assert.equal(first.r.newCount, 1);
+		assert.equal(first.r.filesSaved, 0, 'the file could not be downloaded');
+		assert.equal(first.r.pendingAssets, 1);
+		for (const n of [1, 2]) {
+			const waiting = await sync();
+			assert.equal(waiting.r.pendingAssets, 1, `run ${n} after: the waiting file is still reported`);
+			assert.equal(waiting.read, 2, `run ${n} after: a chat with a waiting file gets the full check`);
+		}
+		// Its retry time has come and the download works now: fetched, then quiet.
+		for (const r of Object.values(g.assetRetries ?? {})) r.nextAttempt = 0;
+		sandboxOk = true;
+		const fetched = await sync();
+		assert.equal(fetched.r.filesSaved, 1, 'the file is fetched once its retry time has come');
+		assert.equal(fetched.r.pendingAssets, 0);
+		await sync();
+		assert.equal((await sync()).read, 0, 'then quiet');
+
+		// The project renamed on chatgpt.com: the note shows the new name, as the full check draws it.
+		assert(h.read(entry().md).includes('Alpha'));
+		projectName = 'Beta';
+		const renamed = await sync();
+		assert.equal(renamed.r.refreshedViews, 1, 'the note is redrawn for the renamed project');
+		assert(h.read(entry().md).includes('project: "Beta"'), 'the note names the new project');
+		assert.equal((await sync()).read, 0, 'then quiet');
+
+		// File downloads off, a saved file deleted: the note no longer links it, as the full check draws it.
+		g.downloadFiles = false;
+		await sync();
+		assert.equal((await sync()).read, 0, 'quiet with file downloads off');
+		const pdf = Object.values(g.fileIndex)[0]!;
+		const pdfName = pdf.split('/').pop()!;
+		assert(h.read(entry().md).includes(pdfName), 'the note links the saved file');
+		const folder = h.entries.get(pdf.slice(0, pdf.lastIndexOf('/')));
+		if (folder instanceof TFolder) folder.children = folder.children.filter((f) => f.path !== pdf);
+		h.entries.delete(pdf);
+		const unlinked = await sync();
+		assert.equal(unlinked.r.refreshedViews, 1, 'the note is redrawn without the deleted file');
+		assert(!h.read(entry().md).includes(pdfName), 'the deleted file is no longer linked');
+		assert.equal((await sync()).read, 0, 'then quiet');
+
+		// The list of earlier versions changed (as an index merged from another computer can): the note shows it.
+		entry().versions = [{ at: '2026-01-01T00:00:00Z', files: ['Chats/raw/Fixture (version 2026-01-01).json'] }];
+		const versioned = await sync();
+		assert.equal(versioned.r.refreshedViews, 1, 'the note is redrawn with its earlier version');
+		assert(h.read(entry().md).includes('earlier_versions: 1'));
+		assert.equal((await sync()).read, 0, 'then quiet');
+		console.log('Quick check, same result as the full check: a waiting file, a renamed project, a deleted file with downloads off and changed versions all bring the full check back.');
+	} finally {
+		GptApi.connect = connect;
+	}
+}
+
 async function main() {
 	assert.equal(retryDeadline('120', 1000), 121000);
 	assert.equal(retryDeadline('invalid', 1000), 601000);
@@ -537,6 +632,7 @@ async function main() {
 	await testVoiceReimport();
 	await testJsonFolder();
 	await testQuickCheck();
+	await testQuickCheckSameResult();
 	let calls = 0;
 	let sandboxCalls = 0;
 	let listingLimit = true;
