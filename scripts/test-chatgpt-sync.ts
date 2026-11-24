@@ -223,6 +223,43 @@ class StampedMap<V> extends Map<string, V> {
 	}
 }
 
+async function testArchiveSettingTiming() {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const gpt = settings.chatgpt[0]!;
+	const claude = settings.claude[0]!;
+	const runs: { kind: string; forceFull?: boolean }[] = [];
+	let retries = 0;
+	let saved = 0;
+	const plugin = new AIChatBridge();
+	const hooks = {
+		settings,
+		saveSettings: async () => { saved++; },
+		scheduleGptResume: () => { retries++; },
+		guarded: async (_trigger: string, fn: () => Promise<unknown>) => { await fn(); },
+		runOne: async ({ kind, forceFull }: typeof runs[number]) => { runs.push({ kind, forceFull }); },
+	};
+	Object.assign(plugin, hooks);
+	gpt.web.separateArchived = true;
+	await plugin.syncArchivedNow('chatgpt', gpt.id);
+	assert.deepEqual(runs, [], 'inclusion is required even if the saved separation preference is on');
+	gpt.web.includeArchived = true;
+	gpt.web.cooldownUntil = Date.now() + 60_000;
+	gpt.web.resumeAfter429 = { consecutive: 3, forceFull: false };
+	await plugin.syncArchivedNow('chatgpt', gpt.id);
+	assert.deepEqual(runs, [], 'during cooldown no manual sync starts');
+	assert.equal(saved, 1);
+	assert.equal(retries, 1);
+	assert.deepEqual(gpt.web.resumeAfter429, { consecutive: 3, forceFull: true });
+	gpt.web.cooldownUntil = Date.now() - 1;
+	await plugin.syncArchivedNow('chatgpt', gpt.id);
+	assert.deepEqual(runs.pop(), { kind: 'chatgpt', forceFull: true });
+	claude.web.includeArchived = claude.web.separateArchived = true;
+	await plugin.syncArchivedNow('claude', claude.id);
+	assert.deepEqual(runs.pop(), { kind: 'claude', forceFull: undefined });
+	assert.deepEqual(runs, []);
+	console.log('Archive settings timing passed: inclusion guard, account sync, full check and cooldown retry.');
+}
+
 function harness() {
 	const entries = new Map<string, TFile | TFolder>();
 	const contents = new StampedMap<ArrayBuffer>();
@@ -896,6 +933,7 @@ async function main() {
 	assert.throws(() => checkGptChat({ ...top, page_info: undefined }, id));
 	assert.throws(() => checkGptOlderPage({ messages: [], page_info: {} }));
 	await testAutomaticResume();
+	await testArchiveSettingTiming();
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();
 	await testJsonFolder();

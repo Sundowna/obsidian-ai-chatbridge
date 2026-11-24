@@ -545,6 +545,34 @@ export default class AIChatBridge extends Plugin {
 		await this.guarded('manual', () => this.runSurface(provider, account, surface));
 	}
 
+	/** Start archive filing through the usual sync, waiting for the current run or cooldown if needed. */
+	async syncArchivedNow(provider: 'claude' | 'chatgpt', id: string): Promise<void> {
+		if (this.unloaded || Platform.isMobile) return;
+		if (this.running) new Notice('The archive check will start after the current operation.');
+		while (this.running && !this.unloaded) await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+		if (this.unloaded) return;
+		const account = this.settings[provider].find((a) => a.id === id);
+		if (!account?.web.includeArchived || !account.web.separateArchived) return;
+		if (provider === 'chatgpt') {
+			const gpt = (account as ChatgptAccount).web;
+			const deadline = gpt.cooldownUntil ?? 0;
+			if (deadline > Date.now()) {
+				gpt.resumeAfter429 = { consecutive: gpt.resumeAfter429?.consecutive ?? 1, forceFull: true };
+				await this.saveSettings();
+				this.scheduleGptResume();
+				new Notice(`The archive check will run with the ChatGPT retry after ${formatClock(deadline)}.`);
+				return;
+			}
+		}
+		await this.guarded('manual', async () => {
+			const current = this.settings[provider].find((a) => a.id === id);
+			if (!current?.web.includeArchived || !current.web.separateArchived) return;
+			await this.runOne(provider === 'chatgpt'
+				? { kind: 'chatgpt', account: current as ChatgptAccount, forceFull: true }
+				: { kind: 'claude', account: current as ClaudeAccount }, 'manual');
+		});
+	}
+
 	/** Everything of one account in one run (the Overview's Sync): website, desktop app, AI Studio. Stop ends it all. */
 	async syncWholeAccount(provider: Provider, account: AnyAccount) {
 		await this.guarded('manual', async () => {

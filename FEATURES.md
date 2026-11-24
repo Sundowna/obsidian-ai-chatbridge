@@ -119,6 +119,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Lumo: project list fetched once per settings opening, full list in memory only, only selected names saved
 - [ ] Claude: Include archived chats and Separate archived chats (both off by default); Claude Code cloud sessions toggle; Advanced: Session key (secret storage), Organization ID (UUID check)
 - [ ] ChatGPT: Codex Cloud folder and Codex Cloud JSON folder (folder fields like the others); Codex cloud tasks toggle (off by default); Keep Codex's steps toggle (off by default); Include pinned chats (on by default); Include archived chats and Separate archived chats (both off by default); Advanced: Session cookie, Incremental sync overlap (1 to 1440), Workspace ID, Reset file delays
+- [ ] Separate archived chats is a sub-setting shown only while Include archived chats is on. Enabling it on desktop offers Separate now or Next sync. During ChatGPT cooldown, Separate when ready schedules the check through the existing automatic retry. Turning inclusion off hides and pauses separation while retaining its saved preference.
 - [ ] Gemini: "What is saved" note; Advanced: Google cookies. AI Studio: Sync AI Studio toggle, own folder
 - [ ] Lumo: Encryption note
 - [ ] Desktop app panel: Sync desktop sessions toggle (rest hidden while off), **Sync now**, Code Local / Codex Local folder, Raw session folder (only with Keep the raw session file), Reads from (roots and account matching text), Advanced: Extra session folders
