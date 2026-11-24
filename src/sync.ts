@@ -15,7 +15,7 @@ import { createNew, ensureFolder, findFile, freeFileName, freeStem } from './vau
 import { appendLog } from './log';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
-import { buildStamp, checkKey, fileStamps } from './quick-check';
+import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
 import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, safeFileName, visibleFiles } from './files';
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
@@ -413,6 +413,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		//    never downloaded yet, or deleted from the vault since. Transcripts stay as they are.
 		if (s.downloadFiles) {
 			const build = await buildStamp(app, plugin.manifest);
+			let quickUnsaved = 0;
 			for (const item of kept) {
 				const entry = s.index[item.uuid];
 				if (!entry || done.has(item.uuid) || !exists(entry.json)) continue;
@@ -449,12 +450,18 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 				const files = chatFiles(chat).map((f) => f.fileUuid);
 				const quick = key ? { files, key } : undefined;
 				if (viewRead) entry.outputsChecked = item.updated_at;
-				if (viewRead || JSON.stringify(entry.quick) !== JSON.stringify(quick)) {
+				const keyChanged = JSON.stringify(entry.quick) !== JSON.stringify(quick);
+				if (keyChanged) {
 					if (quick) entry.quick = quick;
 					else delete entry.quick;
+				}
+				// A new key alone is saved in batches; a read chat view right away, as before.
+				if (viewRead || (keyChanged && ++quickUnsaved >= QUICK_SAVE_EVERY)) {
+					quickUnsaved = 0;
 					await plugin.saveSettings();
 				}
 			}
+			if (quickUnsaved) await plugin.saveSettings();
 		}
 
 		// 8. Claude Code sessions run in the cloud (claude.ai/code), into the Code Cloud folder.

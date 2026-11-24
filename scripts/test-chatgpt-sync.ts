@@ -234,6 +234,8 @@ function harness() {
 	// A deep copy: the defaults' index objects must not carry one test's chats into the next.
 	settings.chatgpt[0]!.web = { ...structuredClone(DEFAULT_GPT), folder: 'Chats', includeArchived: true };
 	let saved = structuredClone(settings);
+	/** How often the index was written. */
+	let saves = 0;
 	let crashOnOlder = false;
 	/** Paths whose content was replaced (the one-note rule), in order. */
 	const rewritten: string[] = [];
@@ -273,12 +275,13 @@ function harness() {
 	};
 	const plugin = {
 		manifest, settings, app: { vault, fileManager: { processFrontMatter: async () => {}, trashFile: async (file: TFile) => { entries.delete(file.path); contents.delete(file.path); } } },
-		saveSettings: async () => { saved = structuredClone(settings); },
+		saveSettings: async () => { saves++; saved = structuredClone(settings); },
 	} as unknown as AIChatBridge;
 	return { settings, entries, contents, plugin, read, rewritten, reads,
 		newBuild: () => { buildTime++; },
 		interrupt: () => { crashOnOlder = true; },
 		restart: () => { Object.assign(settings.chatgpt[0]!.web, structuredClone(saved.chatgpt[0]!.web)); },
+		saves: () => saves,
 	};
 }
 
@@ -540,6 +543,7 @@ async function testQuickCheckSameResult() {
 	const projectId = 'g-p-0123456789abcdef';
 	let projectName = 'Alpha';
 	let sandboxOk = false;
+	let fileTries = 0;
 	GptApi.connect = async () => ({
 		inventoryKey: 'account:quick-same-result-test',
 		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
@@ -555,7 +559,7 @@ async function testQuickCheckSameResult() {
 			if (path === 'older') return raw(older);
 			throw new Error('Unexpected request ' + path);
 		},
-		sandboxBytes: async () => (sandboxOk ? bytes('%PDF-1.7 fixture') : null),
+		sandboxBytes: async () => { fileTries++; return sandboxOk ? bytes('%PDF-1.7 fixture') : null; },
 	} as unknown as GptApi);
 	const entry = () => g.index[id]!;
 	const sync = async () => {
@@ -572,11 +576,18 @@ async function testQuickCheckSameResult() {
 		assert.equal(first.r.newCount, 1);
 		assert.equal(first.r.filesSaved, 0, 'the file could not be downloaded');
 		assert.equal(first.r.pendingAssets, 1);
+		// The first check after saving is a full one; while the file waits, the chat is then skipped,
+		// and the waiting file is still reported as pending, as the full check reports it.
+		const firstCheck = await sync();
+		assert.equal(firstCheck.read, 2, 'the first check of the saved chat is a full one');
+		assert.equal(firstCheck.r.pendingAssets, 1);
+		const tries = fileTries;
 		for (const n of [1, 2]) {
 			const waiting = await sync();
 			assert.equal(waiting.r.pendingAssets, 1, `run ${n} after: the waiting file is still reported`);
-			assert.equal(waiting.read, 2, `run ${n} after: a chat with a waiting file gets the full check`);
+			assert.equal(waiting.read, 0, `run ${n} after: a chat whose missing file is still waiting is not read`);
 		}
+		assert.equal(fileTries, tries, 'no download is tried while the file waits, as before');
 		// Its retry time has come and the download works now: fetched, then quiet.
 		for (const r of Object.values(g.assetRetries ?? {})) r.nextAttempt = 0;
 		sandboxOk = true;
@@ -615,7 +626,64 @@ async function testQuickCheckSameResult() {
 		assert.equal(versioned.r.refreshedViews, 1, 'the note is redrawn with its earlier version');
 		assert(h.read(entry().md).includes('earlier_versions: 1'));
 		assert.equal((await sync()).read, 0, 'then quiet');
-		console.log('Quick check, same result as the full check: a waiting file, a renamed project, a deleted file with downloads off and changed versions all bring the full check back.');
+		console.log('Quick check, same result as the full check: a waiting file (skipped while it waits, still pending, fetched when due), a renamed project, a deleted file with downloads off and changed versions all bring the full check back.');
+	} finally {
+		GptApi.connect = connect;
+	}
+}
+
+/** New quick-check keys are saved in batches, not once per chat; none is lost at the end of the run. */
+async function testQuickCheckSavedInBatches() {
+	const h = harness();
+	h.settings.maxChatsPerRun = 0;
+	const chats = Array.from({ length: 120 }, (_, i) => `aaaaaaaa-0000-4000-8000-${String(i).padStart(12, '0')}`);
+	const one = (cid: string) => ({
+		conversation_id: cid, title: 'Chat ' + cid.slice(-3), create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [{ id: 'a1', author: { role: 'assistant' }, create_time: 1793955610, content: { content_type: 'text', parts: ['Hi'] }, recipient: 'all', channel: 'final' }],
+		page_info: { has_previous_page: false },
+	});
+	const connect = GptApi.connect;
+	GptApi.connect = async () => ({
+		inventoryKey: 'account:batch-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: (cid: string) => 'chat:' + cid,
+		olderPath: () => 'older',
+		redact: (value: string) => value,
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: chats.map((cid) => ({ id: cid, title: 'Chat ' + cid.slice(-3), create_time: date, update_time: date, gizmo_id: null })), offset: 0, total: chats.length });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path.startsWith('chat:')) return raw(one(path.slice(5)));
+			throw new Error('Unexpected request ' + path);
+		},
+	} as unknown as GptApi);
+	const web = () => h.settings.chatgpt[0]!.web;
+	try {
+		const first = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(first.newCount, chats.length, first.stopped);
+		const check = async () => {
+			const before = h.saves();
+			const r = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+			assert.equal(r.stopped, undefined);
+			return h.saves() - before;
+		};
+		// The first full check of 120 chats gives each one a new key.
+		const firstCheck = await check();
+		assert(firstCheck < 12, `new keys saved in batches, not once per chat (${firstCheck} writes)`);
+		h.restart(); // as after a restart: only what was saved is there
+		assert.equal(chats.filter((cid) => web().index[cid]?.quick).length, chats.length, 'every key was saved by the end of the run');
+		// A new build changes every key: again a few writes, not 120.
+		h.newBuild();
+		const afterBuild = await check();
+		assert(afterBuild < 12, `after a new build, keys saved in batches (${afterBuild} writes)`);
+		h.restart();
+		const keys = chats.map((cid) => web().index[cid]!.quick!.key);
+		h.reads.length = 0;
+		await check();
+		assert.equal(h.reads.filter((p) => p.endsWith('.json')).length, 0, 'the saved keys are the new ones: nothing is read next run');
+		assert.deepEqual(chats.map((cid) => web().index[cid]!.quick!.key), keys);
+		console.log('Quick check keys saved in batches: 120 chats checked with a handful of index writes, every key there after a restart.');
 	} finally {
 		GptApi.connect = connect;
 	}
@@ -633,6 +701,7 @@ async function main() {
 	await testJsonFolder();
 	await testQuickCheck();
 	await testQuickCheckSameResult();
+	await testQuickCheckSavedInBatches();
 	let calls = 0;
 	let sandboxCalls = 0;
 	let listingLimit = true;

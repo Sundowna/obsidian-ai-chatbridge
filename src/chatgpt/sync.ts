@@ -25,7 +25,7 @@ import { gptChatFiles, type GptFileTask } from './files';
 import { automaticRetryDeadline, fingerprint, GptRateLimitError, retryAsset, type Capture } from './recovery';
 import { accountInventory, compareRevision, completeInventoryJob, DEFAULT_OVERLAP_MINUTES, scanInventory, type ScanStats } from './inventory';
 import { renderGptTranscript } from './transcript';
-import { buildStamp, checkKey, fileStamps } from '../quick-check';
+import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from '../quick-check';
 import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
@@ -499,21 +499,36 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				Intl.DateTimeFormat().resolvedOptions().timeZone,
 			]);
 		};
-		/** Nothing to do for this chat: same key as after its last full check, and no file waiting to be fetched. */
+		/** A missing file whose next download try is not due yet: backfill would only count it as pending. */
+		const waiting = (id: string): boolean => (retries[id]?.nextAttempt ?? 0) > Date.now();
+		/** A missing file the full check would try to fetch now. */
+		const fetchable = (id: string): boolean => g.downloadFiles && missingId(id) && !waiting(id);
+		/**
+		 * Nothing to do for this chat: same key as after its last full check, and no missing file due
+		 * for a try. Missing files still waiting count as pending, as backfill counts them.
+		 */
 		const quickDone = async (item: ListItem, entry: IndexEntry): Promise<boolean> => {
 			const q = entry.quick;
-			if (!q || (g.downloadFiles && q.files.some(missingId))) return false;
-			return (await quickKey(item, entry, q.files)) === q.key;
+			if (!q || q.files.some(fetchable)) return false;
+			if ((await quickKey(item, entry, q.files)) !== q.key) return false;
+			if (g.downloadFiles) for (const id of q.files) if (missingId(id)) pendingAssets.add(id);
+			return true;
 		};
-		/** After a full check: remembered only when it ended with the note as drawn and every file there. */
+		let quickUnsaved = 0;
+		/**
+		 * After a full check: remembered only when it ended with the note as drawn and every file
+		 * there or waiting for its next try. Saved in batches (QUICK_SAVE_EVERY).
+		 */
 		const rememberQuick = async (item: ListItem, entry: IndexEntry, chat: GptChat, hash: string): Promise<void> => {
 			const files = gptChatFiles(chat).map((f) => f.fileUuid);
-			const settled = entry.viewHash === hash && !(g.downloadFiles && files.some(missingId));
+			const settled = entry.viewHash === hash && !files.some(fetchable);
 			const key = settled ? await quickKey(item, entry, files) : null;
 			const quick = key ? { files, key } : undefined;
 			if (JSON.stringify(entry.quick) === JSON.stringify(quick)) return;
 			if (quick) entry.quick = quick;
 			else delete entry.quick;
+			if (++quickUnsaved < QUICK_SAVE_EVERY) return;
+			quickUnsaved = 0;
 			await plugin.saveSettings();
 		};
 
@@ -566,6 +581,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			if (result.filesSaved > before) result.backfilledChats++;
 			await rememberQuick(item, entry, chat, await refreshView(chat, item, entry));
 		}
+		if (quickUnsaved) await plugin.saveSettings();
 
 		// Codex tasks run in the cloud (chatgpt.com/codex), into the Codex Cloud folder.
 		if (g.codexCloud) {

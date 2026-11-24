@@ -15,6 +15,13 @@ export interface QuickCheck {
 	key: string;
 }
 
+/**
+ * A remembered key changes for every chat after a plugin update. Saving the index for each one
+ * would write the whole computer file about a thousand times in one sync, so keys are saved
+ * every this many chats and at the end. A stop in between only costs those chats one more read.
+ */
+export const QUICK_SAVE_EVERY = 50;
+
 /** "size:mtime" per file, or null when one is missing or the vault cannot tell. */
 export async function fileStamps(app: App, paths: string[]): Promise<string[] | null> {
 	const adapter = app.vault.adapter as { stat?: (path: string) => Promise<{ type: string; size: number; mtime: number } | null> };
