@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.37.0 - 2026-11-24
 
 ### New
 - **Include archived chats for Claude** - a switch in the Claude account settings, like the one ChatGPT has. Off by default. Turned on, the sync also reads claude.ai's archived chats, which claude.ai lists apart, and saves them in their normal folder (their project, or `Recent`). A chat archived after it was saved stays where it is
+
+### Docs
+- **Archived desktop sessions** - the README now says that sessions archived in the Claude or Codex desktop app are synced as before, in their usual folder
 
 ## 0.36.1 - 2026-11-20
 
