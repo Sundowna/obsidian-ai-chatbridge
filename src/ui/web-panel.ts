@@ -73,6 +73,15 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 	new Setting(el).setName('Content').setHeading();
 	contentOptions(ctx, el, 'claude', account, s);
 	new Setting(el)
+		.setName('Include archived chats')
+		.setDesc('Also check archived conversations during sync. claude.ai lists them apart, so this adds a few requests. They are filed like the others, by project.')
+		.addToggle((t) =>
+			t.setValue(s.includeArchived ?? false).onChange(async (v) => {
+				s.includeArchived = v;
+				await save();
+			}),
+		);
+	new Setting(el)
 		.setName('Claude Code cloud sessions')
 		.setDesc('Also save the Claude Code sessions that ran in the cloud (claude.ai/code), in the Code Cloud folder, one subfolder per repository. A session still running is saved once it is done. Sessions you steered from claude.ai but that ran on a computer are saved by Code Local instead.')
 		.addToggle((t) =>

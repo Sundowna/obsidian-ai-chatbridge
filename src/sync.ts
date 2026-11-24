@@ -57,19 +57,24 @@ export interface SyncResult {
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/, '');
 
-/** The whole chat list, 30 at a time. */
-export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn): Promise<ListItem[]> {
+/**
+ * The whole chat list, 30 at a time. With `archived` the archived chats are read too
+ * (claude.ai lists them apart) and added to the list; a chat in both is kept once.
+ */
+export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn, archived = false): Promise<ListItem[]> {
 	const items: ListItem[] = [];
-	let offset = 0;
-	for (let page = 0; ; page++) {
-		if (page >= MAX_PAGES) throw new StopError('Chat list did not end after 200 pages – stopped.');
-		if (page > 0) await sleep(delayMs);
-		const { json } = await api.get(api.listPath(offset));
-		const p = checkListPage(json);
-		items.push(...p.data);
-		progress(`reading chat list… ${items.length} chats`);
-		if (!p.has_more || p.data.length === 0) break;
-		offset += p.data.length;
+	for (const listArchived of archived ? [false, true] : [false]) {
+		let offset = 0;
+		for (let page = 0; ; page++) {
+			if (page >= MAX_PAGES) throw new StopError(`${listArchived ? 'Archived chat' : 'Chat'} list did not end after 200 pages – stopped.`);
+			if (page > 0 || listArchived) await sleep(delayMs);
+			const { json } = await api.get(api.listPath(offset, listArchived));
+			const p = checkListPage(json);
+			items.push(...p.data);
+			progress(`reading ${listArchived ? 'archived chats' : 'chat list'}… ${items.length} chats`);
+			if (!p.has_more || p.data.length === 0) break;
+			offset += p.data.length;
+		}
 	}
 	return dedupe(items);
 }
@@ -231,7 +236,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const api = new ClaudeApi(auth.orgId, getKey);
 
 		// 1. Read the whole chat list, 30 at a time.
-		const items = await listAllChats(api, delayMs, progress);
+		const items = await listAllChats(api, delayMs, progress, s.includeArchived === true);
 		result.listed = items.length;
 
 		// 2. Project filter (uses the project info in the list – no extra requests).

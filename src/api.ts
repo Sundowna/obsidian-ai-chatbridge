@@ -83,8 +83,9 @@ export class ClaudeApi {
 		if (!isUuid(orgId)) throw new StopError('Organization ID is missing or not a valid ID. Set it in the plugin settings.');
 	}
 
-	listPath(offset: number): string {
-		return `/api/organizations/${this.orgId}/chat_conversations_v2?limit=30&offset=${offset}&archived=false&consistency=strong`;
+	/** One page of the chat list: the normal chats, or with `archived` the archived ones. */
+	listPath(offset: number, archived = false): string {
+		return `/api/organizations/${this.orgId}/chat_conversations_v2?limit=30&offset=${offset}&archived=${archived}&consistency=strong`;
 	}
 
 	chatPath(uuid: string): string {

@@ -50,10 +50,21 @@ const chat = () => ({
 	chat_messages: turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z' })),
 });
 const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).buffer;
+// An archived chat: only in claude.ai's archived list (with the first chat again, to check it is kept once).
+const ARCHIVED = '44444444-4444-4444-8444-444444444444';
+const archivedChat = {
+	uuid: ARCHIVED, name: 'Old garden plan', created_at: '2026-10-01T09:00:00Z', updated_at: '2026-10-01T10:00:00Z',
+	chat_messages: [{ uuid: 'a0', sender: 'human', text: 'Archived question', content: [{ type: 'text', text: 'Archived question' }], created_at: '2026-10-01T09:00:00Z' }],
+};
+const listed: string[] = [];
 ClaudeApi.prototype.get = async function (path: string) {
+	const current = { uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, project };
+	if (path.includes('chat_conversations_v2')) listed.push(path);
 	const json = path.includes('chat_conversations_v2')
-		? { data: [{ uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, project }], has_more: false }
-		: chat();
+		? path.includes('archived=true')
+			? { data: [{ uuid: ARCHIVED, name: archivedChat.name, created_at: archivedChat.created_at, updated_at: archivedChat.updated_at, project: null }, current], has_more: false }
+			: { data: [current], has_more: false }
+		: path.includes(ARCHIVED) ? archivedChat : chat();
 	return { json, bytes: bytes(json) };
 };
 Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
@@ -98,6 +109,15 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	files.delete(renamed);
 	const r5 = await runSync(plugin, account);
 	expect('sync 5: deleted note restored with its version info', r5.restored.length === 1 && files.get(renamed)!.includes('earlier_versions: 2'));
+
+	// Include archived chats: off by default, so the archived list is never asked for.
+	expect('archived off: only the normal list is read', listed.length > 0 && listed.every((p) => p.includes('archived=false')), listed.join(' | '));
+	listed.length = 0;
+	account.web.includeArchived = true;
+	const r6 = await runSync(plugin, account);
+	const archivedMd = 'AI/Claude/Chat/Recent/2026-10-01 Old garden plan.md';
+	expect('archived on: both lists read', listed.some((p) => p.includes('archived=false')) && listed.some((p) => p.includes('archived=true')), listed.join(' | '));
+	expect('archived on: archived chat saved in its normal folder, chat in both lists kept once', r6.listed === 2 && r6.newCount === 1 && r6.unchanged === 1 && files.get(archivedMd)?.includes('Archived question') === true, `${JSON.stringify({ listed: r6.listed, newCount: r6.newCount, unchanged: r6.unchanged, stopped: r6.stopped })} ${notes().join(' | ')}`);
 
 	console.log(failures ? `\n${failures} FAILED` : '\nAll Claude sync tests passed.');
 	process.exit(failures ? 1 : 0);
