@@ -472,7 +472,15 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			const view = withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md));
 			const hash = await viewHash(view);
 			const latest = entry.view ?? entry.md;
-			if (exists(entry.md) && exists(latest) && (entry.viewHash === hash || (await viewHash(await app.vault.adapter.read(latest))) === hash)) return hash;
+			if (exists(entry.md) && exists(latest)) {
+				if (entry.viewHash === hash) return hash;
+				if ((await viewHash(await app.vault.adapter.read(latest))) === hash) {
+					// The note already reads as drawn now, but its fingerprint is gone (a merge clears it):
+					// remember it, so the note is not read again every run and the quick check can skip it.
+					entry.viewHash = hash;
+					return hash;
+				}
+			}
 			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: entry.noteHash, lastSynced: entry.synced, unedited: await asWritten(entry), keep: ['unread'] });
 			recordEdit(result.edits, note, entry.md);
 			if (note.outcome === 'created') result.restored.push(stemOf(entry.md));

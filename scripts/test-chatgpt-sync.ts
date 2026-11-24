@@ -518,6 +518,19 @@ async function testQuickCheck() {
 		assert(h.entries.has(md), 'the note is back');
 		assert.equal((await pagesRead()).read, 0);
 
+		// The note's fingerprint cleared, as the merge does: the note still reads as drawn, so it is
+		// not rewritten; its fingerprint comes back and the next run skips the chat again.
+		const asDrawn = h.read(entry().md);
+		delete entry().viewHash;
+		const cleared = await pagesRead();
+		assert.equal(cleared.read, 2, 'a full check once');
+		assert.equal(cleared.r.refreshedViews, 0, 'the note is not rewritten');
+		assert.equal(h.read(entry().md), asDrawn);
+		assert(entry().viewHash, 'its fingerprint is stored again');
+		h.reads.length = 0;
+		assert.equal((await pagesRead()).read, 0, 'then the chat is skipped again');
+		assert(!h.reads.includes(entry().md), 'and its note is not read either');
+
 		// A vault that cannot tell file times: always the full check.
 		const adapter = h.plugin.app.vault.adapter as { stat?: unknown };
 		delete adapter.stat;
