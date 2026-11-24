@@ -223,10 +223,14 @@ export interface Settings {
 	memory: MemorySettings;
 	/** Asking another device to sync through files in the vault (see remote/protocol.ts). */
 	remote: RemoteSettings;
+	/** Keeping the vault's Active Context note up to date (see handoff/). */
+	handoff: HandoffSettings;
 	/** What the last sync of each account surface did (see last-run.ts). */
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
 	lastAll?: LastAll;
+	/** System file renames done in this vault (see system-names.ts). */
+	systemNames?: number;
 }
 
 /** Where a new vault's chats go: the layout below "AI Chats" (see desktop/layout.ts). */
@@ -310,6 +314,37 @@ export interface RemoteSettings {
 	maxAgeHours: number;
 }
 
+/** Active Context upkeep: Live sessions after each sync, the 7-day archive pass and stale "Now" lines once a day. */
+export interface HandoffSettings {
+	enabled: boolean;
+	/** Folder of the handoff: holds "Active Context.md" and the "Handoff archive" folder. */
+	folder: string;
+	/** Live sessions: chats active in the last this many hours. */
+	liveHours: number;
+	/** "Recently done" keeps this many days; older entries move to the archive. */
+	keepDays: number;
+	/** A "Now" line still there after this many days is flagged under the "Waiting for …" section (0 = never). */
+	staleDays: number;
+	/** Day (YYYY-MM-DD) the daily pass last ran. */
+	lastDaily?: string;
+	/** "Now" lines seen so far: line key -> first day seen. */
+	nowSeen: Record<string, { first: string; flagged?: boolean }>;
+}
+
+export const HANDOFF_NOTE = 'Active Context.md';
+export const HANDOFF_ARCHIVE = 'Handoff archive';
+export const handoffNote = (h: Pick<HandoffSettings, 'folder'>): string => normalizePath(`${h.folder}/${HANDOFF_NOTE}`);
+export const handoffArchive = (h: Pick<HandoffSettings, 'folder'>): string => normalizePath(`${h.folder}/${HANDOFF_ARCHIVE}`);
+
+export const DEFAULT_HANDOFF: HandoffSettings = {
+	enabled: false,
+	folder: '_AI Handoff',
+	liveHours: 48,
+	keepDays: 7,
+	staleDays: 3,
+	nowSeen: {},
+};
+
 export const DEFAULT_REMOTE: RemoteSettings = {
 	folder: '00 Inbox/Mobile/ChatBridge',
 	maxAgeHours: DEFAULT_MAX_AGE_HOURS,
@@ -332,7 +367,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	delaySeconds: 1.5,
 	intervalMinutes: 0,
 	syncOnStartup: false,
-	logPath: 'AI Chats/AI ChatBridge log.md',
+	logPath: 'AI Chats/_ai-chatbridge-log.md',
 	rawRootOn: true,
 	rawRoot: '80 Archive/raw',
 	editedNotes: 'copy',
@@ -344,6 +379,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	hermes: DEFAULT_HERMES,
 	memory: DEFAULT_MEMORY,
 	remote: DEFAULT_REMOTE,
+	handoff: DEFAULT_HANDOFF,
 	lastRuns: {},
 };
 

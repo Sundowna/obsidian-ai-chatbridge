@@ -3,6 +3,7 @@
 // downloads shown in the chat view. GET only, claude.ai only (same guard).
 
 import { Notice, TFile } from 'obsidian';
+import { DIAGNOSTICS_FOLDER } from './system-names';
 import type AIChatBridge from './main';
 import { ClaudeApi, ReadRpc, redact, StopError } from './api';
 import { decodeMessage, encodeStrings } from './proto';
@@ -10,7 +11,7 @@ import { isUuid } from './schema';
 import { claudeAuth } from './claude-auth';
 import { createNew, ensureFolder } from './vaultio';
 
-const OUT = 'AI Chats/AI ChatBridge diagnostics';
+const OUT = DIAGNOSTICS_FOLDER;
 
 export async function diagnoseActiveChat(plugin: AIChatBridge): Promise<void> {
 	const app = plugin.app;

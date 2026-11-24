@@ -1,5 +1,5 @@
 import { Notice, Platform, Plugin, setIcon } from 'obsidian';
-import { MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
+import { handoffNote, MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 import { accountsOf, hasPastedSession, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
 import { AIChatBridgeSettingTab } from './ui/settings-tab';
@@ -31,6 +31,11 @@ import { runStudioSync } from './studio/sync';
 import { anyHermesEnabled, runHermesSync } from './hermes/sync';
 import { anyMemoryEnabled, runMemorySync } from './memory/sync';
 import { chatCountStatus, SyncProgress } from './progress';
+import { dailyUpkeep, updateLive } from './handoff/run';
+import { copyHandover, HandoverModal } from './ui/handover-modal';
+import { chatOfNote } from './handoff/core';
+import { renameOldSystemFiles } from './system-names';
+import { localDate } from './naming';
 import { DESKTOP_ALL, DESKTOP_EVERY_ACCOUNT, HERMES, MEMORY, runKey, type LastRun, type RunOutcome } from './last-run';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
@@ -180,6 +185,31 @@ export default class AIChatBridge extends Plugin {
 		});
 
 		this.addCommand({
+			id: 'update-active-context',
+			name: 'Update Active Context now (live sessions, archive, stale lines)',
+			callback: () => void this.upkeepHandoff(true),
+		});
+
+		this.addCommand({
+			id: 'hand-over-chat',
+			name: 'Hand over a chat to another AI (copies a ready message)',
+			callback: () => new HandoverModal(this.app, this.settings).open(),
+		});
+		// Right-click on a synced chat note (file list, tab menu): hand it over directly.
+		this.registerEvent(
+			this.app.workspace.on('file-menu', (menu, file) => {
+				const item = chatOfNote(this.settings, file.path);
+				if (!item) return;
+				menu.addItem((i) =>
+					i
+						.setTitle('Hand over this chat')
+						.setIcon('forward')
+						.onClick(() => void copyHandover(this.app, this.settings, item)),
+				);
+			}),
+		);
+
+		this.addCommand({
 			id: 'move-to-app-layout',
 			name: 'Move synced chats into the new folder layout',
 			callback: () => void this.moveToAppLayout(),
@@ -230,6 +260,10 @@ export default class AIChatBridge extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			this.restartTimer();
 			this.restartMemoryTimer();
+			// Old system file names -> "_ai-chatbridge-…" once, then the Active Context upkeep:
+			// at start-up, then every hour (the daily part runs once a day).
+			void this.renameSystemFiles().then(() => this.upkeepHandoff(false));
+			this.registerInterval(window.setInterval(() => void this.upkeepHandoff(false), 3_600_000));
 			const watch = this.remote.start();
 			for (const ref of watch.events) this.registerEvent(ref);
 			this.registerInterval(watch.interval);
@@ -811,6 +845,57 @@ export default class AIChatBridge extends Plugin {
 			this.scheduleGptResume();
 			if (this.externalPending) void this.onExternalSettingsChange();
 			this.wakeIdleWaiters();
+			if (!this.fetchingList) void this.upkeepHandoff(false);
+		}
+	}
+
+	/** Once per vault, on a device that syncs (two devices renaming at once would clash). */
+	private async renameSystemFiles(): Promise<void> {
+		if (this.unloaded || Platform.isMobile) return;
+		try {
+			if (await renameOldSystemFiles(this.app, this.settings)) await this.saveSettings();
+		} catch (e) {
+			console.error('AI ChatBridge: renaming system files failed', e);
+		}
+	}
+
+	private handoffBusy = false;
+
+	/**
+	 * Active Context upkeep (General tab): Live sessions after every sync; the archive pass and
+	 * stale "Now" lines once a day. `byHand` runs everything now and reports the result.
+	 */
+	async upkeepHandoff(byHand: boolean): Promise<void> {
+		const h = this.settings.handoff;
+		if (this.unloaded || Platform.isMobile || this.handoffBusy) return;
+		if (!h.enabled) {
+			if (byHand) new Notice('Active Context upkeep is off. Turn it on in the plugin settings, General tab.');
+			return;
+		}
+		this.handoffBusy = true;
+		try {
+			const today = localDate(new Date().toISOString());
+			let daily = null;
+			if (byHand || h.lastDaily !== today) {
+				daily = await dailyUpkeep(this.app, h, today, byHand);
+				if (daily.found) await this.saveSettings();
+			}
+			const found = await updateLive(this.app, this.settings, Date.now());
+			if (!found) {
+				if (byHand) new Notice(`Active Context: "${handoffNote(h)}" is a folder, so no note can be made there. Choose another handoff folder.`);
+				return;
+			}
+			if (byHand) {
+				const parts = [daily?.created ? `Active Context made in ${h.folder}` : 'Active Context updated'];
+				if (daily?.moved) parts.push(`${daily.moved} ${daily.moved === 1 ? 'entry' : 'entries'} moved to the archive`);
+				if (daily?.flagged) parts.push(`${daily.flagged} stale ${daily.flagged === 1 ? 'line' : 'lines'} flagged`);
+				new Notice(`${parts.join(', ')}.`);
+			}
+		} catch (e) {
+			console.error('AI ChatBridge: Active Context upkeep failed', e);
+			if (byHand) new Notice(`Active Context could not be updated: ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			this.handoffBusy = false;
 		}
 	}
 

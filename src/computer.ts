@@ -6,7 +6,7 @@ export const UNNAMED_COMPUTER = 'This computer';
 
 /**
  * The computer's own name out of its network name. macOS and Linux report the name with the
- * network's ending ("Walters-MacBook.local", "tower.fritz.box"), which changes with the
+ * network's ending ("My-MacBook.local", "tower.fritz.box"), which changes with the
  * network; only the first part is the computer. An IP address is no name at all.
  */
 export function hostLabel(hostname: string): string {

@@ -15,6 +15,7 @@ export class Notice {}
 export class SecretComponent {}
 export class Setting {}
 export class Modal {}
+export class SuggestModal {}
 export class TextComponent {}
 export const setIcon = () => undefined;
 export const normalizePath = (path: string) => path.replace(/\\/g, '/');

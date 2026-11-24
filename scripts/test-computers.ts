@@ -39,7 +39,7 @@ function towerSettings(): Settings {
 	s.claude[0]!.web.fileIndex = { f1: 'AI Chats/Claude/Chat/Attachments/a.png' };
 	s.claude[0]!.web.cloudIndex = { cse_1: { updated: 'x', md: 'AI Chats/Claude/Code-Cloud/s.md', json: 's.json', synced: '2026-11-01T10:00:00Z' } };
 	s.claude[0]!.desktop.extraFolders = ['D:/Old/claude/projects'];
-	s.claude[0]!.desktop.index = { d1: { updated: 'u', size: 1, mtime: 1, source: 'C:/Users/Walter/.claude/projects/a/d1.jsonl', md: 'AI Chats/Claude/Code-Local/Tower/d1.md', synced: 's' } };
+	s.claude[0]!.desktop.index = { d1: { updated: 'u', size: 1, mtime: 1, source: 'C:/Users/me/.claude/projects/a/d1.jsonl', md: 'AI Chats/Claude/Code-Local/Tower/d1.md', synced: 's' } };
 	s.claude.push({ ...JSON.parse(JSON.stringify(s.claude[0])), id: 'work', label: 'Work' });
 	s.claude[1]!.web.index = { w1: entry('AI Chats/Claude/Chat/Work.md', '2026-11-02T10:00:00Z') };
 	s.chatgpt[0]!.web.index = { g1: entry('AI Chats/ChatGPT/Chat/G.md', '2026-11-03T10:00:00Z') };
@@ -90,7 +90,7 @@ function towerSettings(): Settings {
 {
 	const { local } = splitSettings(towerSettings(), 'Tower');
 	const paths = machinePaths(local);
-	expect('machine: its paths are the extra folders, session sources and Hermes homes', paths.includes('D:/Old/claude/projects') && paths.includes('C:/Users/Walter/.claude/projects/a/d1.jsonl') && paths.includes('D:/AI/Hermes'));
+	expect('machine: its paths are the extra folders, session sources and Hermes homes', paths.includes('D:/Old/claude/projects') && paths.includes('C:/Users/me/.claude/projects/a/d1.jsonl') && paths.includes('D:/AI/Hermes'));
 	expect('machine: it is this computer when one of them exists here', belongsHere(local, (p) => p === 'D:/AI/Hermes') && !belongsHere(local, () => false));
 	const part = machinePart(local);
 	const rest = withoutMachinePart(local);
@@ -220,7 +220,7 @@ async function store() {
 	const st3 = new ComputerStore(() => adapter as never, () => 'P');
 	(st3 as unknown as { here: string }).here = 'Tower';
 	const origExists = (globalThis as unknown as { require?: unknown }).require;
-	(globalThis as unknown as { require: (m: string) => unknown }).require = (m: string) => (m === 'fs' ? { existsSync: (p: string) => p === 'D:/AI/Hermes' } : { homedir: () => 'C:/Users/Walter' });
+	(globalThis as unknown as { require: (m: string) => unknown }).require = (m: string) => (m === 'fs' ? { existsSync: (p: string) => p === 'D:/AI/Hermes' } : { homedir: () => 'C:/Users/me' });
 	const tower = await st3.load(dataJson);
 	(globalThis as unknown as { require?: unknown }).require = origExists;
 	const s3 = normalizeSettings(tower.raw).settings;

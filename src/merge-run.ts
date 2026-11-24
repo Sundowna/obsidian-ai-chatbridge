@@ -5,7 +5,8 @@
 // do the other notes go to Obsidian's trash.
 
 import { getLinkpath, normalizePath, TFile, TFolder, type App } from 'obsidian';
-import { KIND_FOLDER, numbered } from './files';
+import { KIND_FOLDER, numbered as numberedFile } from './files';
+import { numbered, reportBase } from './system-names';
 import { followRename } from './follow';
 import { appendLog } from './log';
 import { canvasLinkpaths, canvasLinks, rewriteCanvas, type CanvasRef } from './merge-canvas';
@@ -395,7 +396,7 @@ async function mergeOne(app: App, s: Settings, g: PreviewGroup, known: Map<strin
 		} else {
 			// Two versions saved different files under one name: both are kept, the later one numbered.
 			const dir = dirOf(m.to);
-			const to = `${dir}/${freeFileName(app, dir, nameOf(m.to), numbered)}`;
+			const to = `${dir}/${freeFileName(app, dir, nameOf(m.to), numberedFile)}`;
 			await move(app, s, file, to, moved);
 			r.filesMoved++;
 		}
@@ -540,9 +541,9 @@ export function mergeReportText(groups: readonly PreviewGroup[], skipped: MergeP
 export async function writeMergeReport(app: App, s: Settings, title: string, body: string, logLine?: string): Promise<string> {
 	const now = new Date();
 	const dir = dirOf(s.logPath);
-	const base = `${dir ? `${dir}/` : ''}AI ChatBridge ${title} ${localStamp(now.toISOString())}`;
-	let path = `${base}.md`;
-	for (let n = 2; findFile(app, path) !== null; n++) path = `${base} ${n}.md`;
+	const base = reportBase(s.logPath, title, localStamp(now.toISOString()));
+	let path = numbered(base, 1);
+	for (let n = 2; findFile(app, path) !== null; n++) path = numbered(base, n);
 	await ensureFolder(app, dir);
 	await app.vault.create(path, `---\nunread: true\n---\n\n${body}\n`);
 	if (logLine) {

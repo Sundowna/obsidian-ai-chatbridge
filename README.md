@@ -452,6 +452,20 @@ The computer runs each request once, at most one requested sync every two minute
 
 **Test mobile connection** is a first step towards syncing on the phone itself: it checks whether the phone can reach claude.ai and ChatGPT with a session key or cookie pasted there, and shows the status, the content type and whether a Cloudflare check page came back. Nothing is saved and no key is shown.
 
+## Active Context
+
+When you switch between AIs (one account hits its limit, you continue in another or in Codex), the next AI needs to know where things stand. Turn on **General → Active Context** and choose a **Handoff folder** (default `_AI Handoff`). The plugin keeps a note `Active Context.md` there, made with five empty parts (Plan, Now, Waiting for you, Next up, Recently done) if you don't have one yet. Ask your AIs to read it first and keep "Now" and "Recently done" current. The plugin then:
+
+- writes a **Live sessions** list into the note after every sync: the chats active in the last 48 hours, newest first, each with a link to its transcript and your last request. When one account hits its limit, the next AI finds the chat there. The list sits between two markers and is replaced each time, so don't edit it;
+- once a day, moves "Recently done" lines older than 7 days to the monthly archive (`Handoff archive/_YYYY-MM.md`), word for word;
+- asks under "Waiting for you" about a "Now" line that has stayed for 3 days: finish it, move it to Recently done, or drop it.
+
+**Hand over a chat to another AI** puts a ready message on the clipboard: which chat, where its transcript is in the vault, when it was last synced, and your last request. Paste it into the other account or Codex. Right-click a synced chat note for **Hand over this chat**.
+
+### System files start with "_"
+
+The plugin's own files are named so you can leave them out of the graph and searches: the log `_ai-chatbridge-log.md`, reports `_ai-chatbridge-merge-report-….md` and the folder `_ai-chatbridge-diagnostics`. When you update from an older version, the old ones are renamed once, through Obsidian, so links keep working. A log you named yourself keeps its name.
+
 ## Commands
 
 | Command | What it does |
@@ -472,6 +486,8 @@ The computer runs each request once, at most one requested sync every two minute
 | **Merge chat copies into one note (preview first)** | For vaults from before one note per chat: merges each chat's `(updated …)` notes into its first note, keeps earlier versions as raw files and rewrites links. Shows a preview; nothing changes until you confirm |
 | **Move synced chats into the new folder layout** | Moves folders from older versions into `Claude/…`, `ChatGPT/…` - links, the sync index and the raw files follow |
 | **Diagnose: save claude.ai answers for the open chat** | Saves the raw answers of the open chat, for bug reports |
+| **Update Active Context now (live sessions, archive, stale lines)** | Runs the Active Context upkeep now. See [Active Context](#active-context) |
+| **Hand over a chat to another AI (copies a ready message)** | Pick a recent chat; a message for the next AI (where the transcript is, how fresh it is, your last request) goes to the clipboard |
 | **Test mobile connection** | One request each to claude.ai and ChatGPT with the pasted logins; reports status, content type and whether a Cloudflare check page came back |
 
 ## Part of the Sundowna Second Brain Suite
@@ -523,7 +539,7 @@ The plugin works the same on all three. Where it looks for local sessions:
 | Claude desktop titles and groups | `%LOCALAPPDATA%/Claude`, `%APPDATA%/Claude` | `~/Library/Application Support/Claude` | `$XDG_CONFIG_HOME/Claude`, else `~/.config/Claude` |
 | Hermes profiles | `HERMES_HOME`, `%LOCALAPPDATA%/hermes`, `~/.hermes` | `HERMES_HOME`, `~/.hermes` | `HERMES_HOME`, `~/.hermes` |
 
-`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are followed on every system. Folder names of local sessions use your computer's own name, without the network ending (`Walters-MacBook`, not `Walters-MacBook.local`). The macOS and Linux parts are covered by automatic tests on all three systems; if something is off on yours, please [open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues).
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are followed on every system. Folder names of local sessions use your computer's own name, without the network ending (`My-MacBook`, not `My-MacBook.local`). The macOS and Linux parts are covered by automatic tests on all three systems; if something is off on yours, please [open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues).
 
 ## Installation
 

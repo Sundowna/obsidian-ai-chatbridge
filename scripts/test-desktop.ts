@@ -220,7 +220,7 @@ class FakeFs implements DesktopFs {
 	expect('dialog: Linux pick is case-sensitive', rel('/home/w/Vault', '/home/w/Vault/AI Chats', 'linux') === 'AI Chats' && rel('/home/w/Vault', '/home/w/vault/AI Chats', 'linux') === 'outside' && rel('/home/w/Vault', '/home/w/Vault/', 'linux') === 'root');
 	expect('dialog: a backslash in a Linux folder name stays', rel('/home/w/Vault', '/home/w/Vault/a\\b', 'linux') === 'a\\b');
 
-	expect('computer: network ending dropped', hostLabel('Walters-MacBook-Pro.local') === 'Walters-MacBook-Pro' && hostLabel('tower.fritz.box') === 'tower' && hostLabel('Tower') === 'Tower');
+	expect('computer: network ending dropped', hostLabel('My-MacBook-Pro.local') === 'My-MacBook-Pro' && hostLabel('tower.fritz.box') === 'tower' && hostLabel('Tower') === 'Tower');
 	expect('computer: an address is no name', hostLabel('192.168.1.20') === '' && hostLabel('fe80::1') === '' && hostLabel('  ') === '');
 	expect('folder: macOS and Linux working folders', sessionFolderName('/Users/w/dev/My Repo/', 'Other') === 'My Repo' && sessionFolderName('/', 'Other') === 'Other' && sessionFolderName('/home/w/.claude/scratch-workspaces/a/b/scratch-1', 'Other') === 'Scratch');
 }
