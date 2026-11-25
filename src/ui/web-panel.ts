@@ -11,6 +11,7 @@ import { googleRawMoves, webRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
 import { lastRunLine, runKey } from '../last-run';
 import { archiveSettings } from './archive-settings';
+import { BrowserLoginModal } from './browser-login-modal';
 
 /** Login state with only the buttons that make sense for it. */
 function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string, surface: 'web' | 'studio' = 'web'): void {
@@ -176,6 +177,15 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 		const until = g.cooldownUntil ?? 0;
 		return `${count(Object.keys(g.index).length, 'chat')} saved.${until > Date.now() ? ` Rate limited, cooling down until ${new Date(until).toLocaleTimeString()}.` : ''}`;
 	});
+	const saved = hasPastedSession('chatgpt', account);
+	new Setting(el)
+		.setName('Made your account with Google?')
+		.setDesc(`Google blocks its sign-in inside apps, so "Continue with Google" fails in the login window. Sign in in your own browser instead and bring the login over.${saved ? ' A browser login is saved for this account.' : ''}`)
+		.addButton((b) =>
+			b.setButtonText(saved ? 'Replace browser login…' : 'Use browser login…').onClick(() =>
+				new BrowserLoginModal(ctx.app, ctx.plugin, account, withAccount('ChatGPT', ctx.plugin.settings.chatgpt, account), ctx.refresh).open(),
+			),
+		);
 
 	new Setting(el).setName('Folders').setHeading();
 	folderSetting(ctx, el, 'Chat folder', 'Where ChatGPT chats are saved.', () => g.folder, (p) => (g.folder = p));

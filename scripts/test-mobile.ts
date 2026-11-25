@@ -1,6 +1,7 @@
 // "Test mobile connection": reading the two answers. Synthetic answers only, shaped like what
 // claude.ai, chatgpt.com and Cloudflare send. Run: npm run test:mobile
 
+import { browserLoginSecretId, browserLoginText, checkBrowserLogin, SESSION_COOKIE_NAME } from '../src/chatgpt/browser-login';
 import { isChallenge, noAnswer, pageTitle, passed, readClaude, readGpt, resultText, type Answer } from '../src/mobile/probe';
 
 let failures = 0;
@@ -64,5 +65,44 @@ expect('nothing pasted is "not tested", not a failure', skipped.login === 'not t
 const dead = noAnswer('claude.ai', 'https://claude.ai/api/organizations', 'Main', 'Network error: offline', true);
 expect('a request without an answer fails', resultText(dead).startsWith('claude.ai (Main): FAIL') && resultText(dead).includes('offline'));
 
-console.log(failures ? `\n${failures} FAILED` : '\nAll mobile connection tests passed.');
-process.exit(failures ? 1 : 0);
+// --- "Use browser login" (ChatGPT accounts made with Google, issue #52) ------
+void (async () => {
+	const TOKEN = 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..aGVsbG8td29ybGQtc2Vzc2lvbi10b2tlbg';
+	const asked: string[] = [];
+	const probe = (a: Answer | Error) => async (cookie: string) => {
+		asked.push(cookie);
+		if (a instanceof Error) throw a;
+		return a;
+	};
+	const ok = answer(200, JSON_TYPE, JSON.stringify({ accessToken: KEY, user: { id: 'user-1' } }));
+	expect('browser login: empty paste is not sent', (await checkBrowserLogin('   ', probe(ok))).kind === 'empty' && asked.length === 0);
+	const bad = await checkBrowserLogin('hello there', probe(ok));
+	expect('browser login: a wrong paste names the cookie to copy and is not sent', bad.kind === 'malformed' && bad.message.includes(SESSION_COOKIE_NAME) && asked.length === 0);
+	const works = await checkBrowserLogin(`  ${TOKEN}  `, probe(ok));
+	expect('browser login: a bare value is sent as the session cookie and works', works.kind === 'works' && asked.at(-1) === `${SESSION_COOKIE_NAME}=${TOKEN}`, works.message);
+	const split = `Cookie: oai-did=abc; ${SESSION_COOKIE_NAME}.0=${TOKEN}; ${SESSION_COOKIE_NAME}.1=${TOKEN}`;
+	expect('browser login: a whole Cookie line with .0 and .1 works', (await checkBrowserLogin(split, probe(ok))).kind === 'works' && asked.at(-1)!.includes(`${SESSION_COOKIE_NAME}.1=`));
+	const refused = await checkBrowserLogin(TOKEN, probe(answer(200, JSON_TYPE, '{}')));
+	expect('browser login: an expired cookie is refused, says what to do, saves nothing', refused.kind === 'refused' && refused.message.includes('Nothing was saved') && refused.message.includes('copy it again'));
+	expect('browser login: a refused single value asks for the .1 value first', refused.message.includes('.1 value in the second box'));
+	const bothRefused = await checkBrowserLogin(browserLoginText(TOKEN, TOKEN), probe(answer(200, JSON_TYPE, '{}')));
+	expect('browser login: refused with both values says to copy both again', bothRefused.kind === 'refused' && bothRefused.message.includes('copy both values again') && !bothRefused.message.includes(TOKEN));
+	expect('browser login: one box gives the bare value', browserLoginText(`  ${TOKEN} `, '  ') === TOKEN);
+	const joined = browserLoginText(TOKEN, ' tail-part ');
+	expect('browser login: two boxes give the .0 and .1 cookie', joined === `${SESSION_COOKIE_NAME}.0=${TOKEN}; ${SESSION_COOKIE_NAME}.1=tail-part`);
+	expect('browser login: the two-box text is sent as both parts and works', (await checkBrowserLogin(joined, probe(ok))).kind === 'works' && asked.at(-1) === joined);
+	expect('browser login: only the second box filled counts as empty', browserLoginText('', TOKEN) === '');
+	expect('browser login: a 401 is refused', (await checkBrowserLogin(TOKEN, probe(answer(401, JSON_TYPE, '{}')))).kind === 'refused');
+	const cf = await checkBrowserLogin(TOKEN, probe(answer(403, { 'cf-mitigated': 'challenge', ...HTML_TYPE }, CHALLENGE_PAGE)));
+	expect('browser login: a Cloudflare check is "unclear", not saved', cf.kind === 'unclear' && cf.message.includes('Cloudflare'));
+	const offline = await checkBrowserLogin(TOKEN, probe(new Error('Network error: offline')));
+	expect('browser login: no connection is "unclear", not saved', offline.kind === 'unclear' && offline.message.includes('offline') && !offline.message.includes(TOKEN));
+	const odd = await checkBrowserLogin(TOKEN, probe(answer(500, HTML_TYPE, '<html></html>')));
+	expect('browser login: an odd answer is "unclear" and names the status', odd.kind === 'unclear' && odd.message.includes('500'));
+	expect('browser login: no message ever holds the pasted value', [bad, works, refused, cf, offline, odd].every((r) => !r.message.includes(TOKEN)));
+	expect('browser login: a new account gets its own valid secret ID', browserLoginSecretId('', 'Agri_Land 2') === 'ai-chatbridge-chatgpt-agri-land-2' && /^[a-z0-9-]+$/.test(browserLoginSecretId('', '__')));
+	expect('browser login: a secret the account already names is reused', browserLoginSecretId('my-gpt-cookie', 'x') === 'my-gpt-cookie');
+
+	console.log(failures ? `\n${failures} FAILED` : '\nAll mobile connection tests passed.');
+	process.exit(failures ? 1 : 0);
+})();
