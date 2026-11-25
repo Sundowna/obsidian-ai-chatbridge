@@ -6,6 +6,7 @@
 
 import { StopError } from '../api';
 import { openReadyPage, type LoginRef, type ReadyPage } from '../login';
+import { recordError, type ErrorSource } from '../error-log';
 import { googleLogin } from '../gemini/api';
 import { ShapeError } from '../schema';
 import type { StudioPrompt } from '../gemini/types';
@@ -24,18 +25,19 @@ const KEY_IN_PAGE = String.raw`(document.documentElement.innerHTML.match(/"WIu0N
 const READY = `location.origin === ${JSON.stringify(ORIGIN)} && /(?:^|; )SAPISID=/.test(document.cookie) && !!${KEY_IN_PAGE}`;
 
 export class StudioApi {
-	private constructor(private readonly page: ReadyPage) {}
+	private constructor(private readonly page: ReadyPage, private readonly source: ErrorSource) {}
 
 	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
 	static async connect(login: LoginRef, fallback: string | null = null): Promise<StudioApi> {
 		const pasted = await googleLogin(login, fallback);
 		const page = await openReadyPage(login, START, READY, OPEN_TIMEOUT_MS, pasted);
 		if (!page) {
+			recordError({ provider: 'gemini', accountId: login.id }, { service: 'AI Studio', method: 'OPEN', url: START, status: null, message: 'the AI Studio page did not open signed in' });
 			throw new StopError(pasted
 				? 'AI Studio did not open signed in with the pasted cookies. They may have expired: paste fresh ones, or log in instead.'
 				: 'AI Studio did not open signed in. Open aistudio.google.com once in the login window to accept its terms, or log in again.');
 		}
-		return new StudioApi(page);
+		return new StudioApi(page, { provider: 'gemini', accountId: login.id });
 	}
 
 	close(): void {
@@ -77,13 +79,17 @@ export class StudioApi {
 				'Content-Type': 'application/json+protobuf', 'X-Goog-Api-Key': key, 'X-Goog-AuthUser': '0',
 				Authorization: 'SAPISIDHASH ' + h + ' SAPISID1PHASH ' + h + ' SAPISID3PHASH ' + h,
 			}, body: ${JSON.stringify(JSON.stringify(body))} });
-			return JSON.stringify({ status: r.status, text: await r.text() });
+			return JSON.stringify({ status: r.status, text: await r.text(), headers: Object.fromEntries(r.headers) });
 		})()`;
-		let res: { status: number; text: string };
+		let res: { status: number; text: string; headers?: Record<string, string> };
 		try {
-			res = JSON.parse(await this.page.run(code)) as { status: number; text: string };
+			res = JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> };
 		} catch {
+			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: null, message: 'Network error while talking to AI Studio.' });
 			throw new StopError('Network error while talking to AI Studio.');
+		}
+		if (res.status !== 200 && !(res.status === 404 && method === 'ResolveDriveResource')) {
+			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: res.status, headers: res.headers, body: res.text, message: `AI Studio answered ${res.status}` });
 		}
 		if (res.status === 401 || res.status === 403) throw new StopError(`AI Studio answered ${res.status} (not logged in). Log in to Google again in the plugin settings.`);
 		if (res.status === 404 && method === 'ResolveDriveResource') return null;
@@ -92,6 +98,7 @@ export class StudioApi {
 		try {
 			return JSON.parse(res.text);
 		} catch {
+			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: res.status, headers: res.headers, body: res.text, message: 'AI Studio reply is not JSON' });
 			throw new ShapeError('AI Studio reply is not JSON');
 		}
 	}

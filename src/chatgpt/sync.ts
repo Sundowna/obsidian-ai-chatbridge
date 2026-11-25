@@ -31,6 +31,7 @@ import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
 import { CodexCloudShapeError } from '../cloud/codex-cloud';
 import { syncCodexCloud } from '../cloud/codex-sync';
+import { recordError } from '../error-log';
 import { emptyCloudResult, type CloudSyncResult } from '../cloud/sync';
 
 const MAX_PAGES = 300; // 6000 chats per list; a guard against an endless paging loop
@@ -600,6 +601,11 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			const client = async () => (codex ??= await a.codexAppServer(plugin.manifest.version));
 			try {
 				await syncCodexCloud({ app, settings: s, account, client, delayMs, progress, save: () => plugin.saveSettings(), sleep }, cloud);
+			} catch (e) {
+				if (!(e instanceof GptRateLimitError)) {
+					recordError({ provider: 'chatgpt', accountId: account.id }, { service: 'Codex cloud', method: 'WebSocket', url: 'wss://codex-cloud-backend.chatgpt.com', status: null, message: a.redact(e instanceof Error ? e.message : String(e)) });
+				}
+				throw e;
 			} finally {
 				codex?.close();
 				addCodexCloud(result, cloud);

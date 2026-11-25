@@ -29,7 +29,7 @@
 		"test:computers": "esbuild scripts/test-computers.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-computers.cjs && node scripts/.test-computers.cjs",
 		"test:handoff": "esbuild scripts/test-handoff.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-handoff.cjs && node scripts/.test-handoff.cjs",
 		"test:lumo": "esbuild scripts/test-lumo.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-lumo.cjs && node scripts/.test-lumo.cjs",
-		"test:error-log": "esbuild scripts/test-error-log.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-error-log.cjs && node scripts/.test-error-log.cjs"
+		"test:error-log": "esbuild scripts/test-error-log.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-error-log.cjs && node scripts/.test-error-log.cjs"
 	},
 	"keywords": [
 		"obsidian",

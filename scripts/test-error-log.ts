@@ -10,6 +10,9 @@ import { DEFAULT_SETTINGS, type Settings } from '../src/settings';
 import { ClaudeApi } from '../src/api';
 import { GptApi } from '../src/chatgpt/api';
 import { testHooks } from 'obsidian';
+import { GeminiApi } from '../src/gemini/api';
+import { StudioApi } from '../src/studio/api';
+import { LumoApi } from '../src/lumo/api';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -290,6 +293,52 @@ async function apiChecks() {
 	await gpt.get(gpt.listPath(0, false));
 	expect('ChatGPT: allowed 404 and 200 not recorded', errorEntries(gptSource).length === n);
 	testHooks.requestUrl = null;
+
+	// Gemini, AI Studio and Lumo: the page sends the request; the test plays the page.
+	const page = (status: number, text: string, headers: Record<string, string>) => ({
+		uid: 'LUMOUIDVALUE123', appVersion: 'web-lumo@1', close: () => undefined, goTo: async () => true,
+		run: async () => JSON.stringify({ status, text, headers }),
+	});
+	const none = async () => undefined;
+	const gem: ErrorSource = { provider: 'gemini', accountId: 'm1' };
+	type PageCtor<T> = new (page: unknown, source: ErrorSource) => T;
+	const gemini = new (GeminiApi as unknown as PageCtor<GeminiApi>)(page(403, ')]}\'\nforbidden', { 'content-type': 'application/json' }), gem);
+	try {
+		await gemini.listChats(none, () => undefined);
+	} catch {
+		// expected stop
+	}
+	e = errorEntries(gem)[0];
+	expect('Gemini: 403 recorded with headers and body', e?.service === 'Gemini' && e.status === 403 && e.body.includes('forbidden') && e.headers['content-type'] === 'application/json');
+
+	const studio = new (StudioApi as unknown as PageCtor<StudioApi>)(page(500, '{"error":{"message":"Internal"}}', { 'content-type': 'application/json' }), gem);
+	try {
+		await studio.listPrompts(none, () => undefined);
+	} catch {
+		// expected stop
+	}
+	e = errorEntries(gem)[0];
+	expect('AI Studio: 500 recorded under the Google account', e?.service === 'AI Studio' && e.status === 500 && e.body.includes('Internal'));
+
+	const lumoSource: ErrorSource = { provider: 'lumo', accountId: 'l1' };
+	const lumo = new (LumoApi as unknown as PageCtor<LumoApi>)(page(422, '{"Code":2501,"Error":"Conversation does not exist","Echo":"LUMOUIDVALUE123"}', { 'content-type': 'application/json' }), lumoSource);
+	try {
+		await lumo.conversation('abc123');
+	} catch (x) {
+		stop = x instanceof Error ? x.message : String(x);
+	}
+	e = errorEntries(lumoSource)[0];
+	expect('Lumo: stop message unchanged', stop === 'Lumo answered 422, so the sync stopped. Its explanation: Conversation does not exist', stop);
+	expect('Lumo: whole answer kept, session ID removed', e?.status === 422 && e.body.includes('"Code":2501') && !e.body.includes('LUMOUIDVALUE123'));
+
+	const okLumo = new (LumoApi as unknown as PageCtor<LumoApi>)(page(200, '{"Code":1000}', {}), lumoSource);
+	const count = errorEntries(lumoSource).length;
+	try {
+		await okLumo.conversation('abc123');
+	} catch {
+		// shape check may refuse it; only the log matters here
+	}
+	expect('Lumo: 200 not recorded', errorEntries(lumoSource).length === count);
 
 	await flushErrorLog();
 	const saved = ad.files.get(FILE) ?? '';
