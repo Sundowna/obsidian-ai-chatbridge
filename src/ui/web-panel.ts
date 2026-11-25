@@ -1,6 +1,6 @@
 // The Web surface of an account: its login, where its chats go, and what gets synced.
 
-import { Notice, SecretComponent, Setting } from 'obsidian';
+import { Notice, Platform, SecretComponent, Setting } from 'obsidian';
 import { hasPastedSession, loginRef, SITE_LABEL, withAccount, accountsOf, type AnyAccount } from '../accounts';
 import { DEFAULT_OVERLAP_MINUTES } from '../chatgpt/inventory';
 import { isLoggedIn, logout, openLogin, type Provider } from '../login';
@@ -8,6 +8,7 @@ import { isUuid } from '../schema';
 import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount } from '../settings';
 import { advanced, bindSyncButton, contentOptions, count, filingOptions, folderSetting, projectFilterOptions, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
 import { googleRawMoves, webRawMoves } from '../raw-move';
+import { changeChatgptFolder } from './chatgpt-folder';
 import { masterRaw } from '../raw-folders';
 import { lastRunLine, runKey } from '../last-run';
 
@@ -185,7 +186,11 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 	});
 
 	new Setting(el).setName('Folders').setHeading();
-	folderSetting(ctx, el, 'Chat folder', 'Where ChatGPT chats are saved.', () => g.folder, (p) => (g.folder = p));
+	const chatFolderDescription = 'Where ChatGPT chats are saved.';
+	folderSetting(ctx, el, 'Chat folder', Platform.isMobile ? chatFolderDescription : `${chatFolderDescription} Changing this folder moves saved chats after confirmation.`,
+		() => account.web.folder,
+		Platform.isMobile ? (p) => (account.web.folder = p) : { commit: (p) => changeChatgptFolder(ctx, account, p) },
+	);
 	rawFolderSetting(ctx, el, { name: 'JSON folder', what: 'the raw .json of each chat (and the older parts of long chats)', partner: 'chat folder', mirrors: true, get: () => g.rawFolder, set: (p) => (g.rawFolder = p) });
 	folderSetting(ctx, el, 'Codex Cloud folder', 'Where Codex tasks that ran in the cloud (Codex on the ChatGPT website) are saved.', () => g.codexCloudFolder, (p) => (g.codexCloudFolder = p));
 	rawFolderSetting(ctx, el, { name: 'Codex Cloud JSON folder', what: 'the raw .json of each task', partner: 'Codex Cloud folder', mirrors: true, get: () => g.codexCloudRawFolder, set: (p) => (g.codexCloudRawFolder = p) });

@@ -21,6 +21,7 @@ import { joinSaved, splitSettings } from './computers/split';
 import { ConfirmModal } from './ui/modals';
 import { findFile } from './vaultio';
 import { followRename } from './follow';
+import { moveChatgptFolder } from './chatgpt/folder-move';
 import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { StopError } from './api';
 import { runGptSync } from './chatgpt/sync';
@@ -603,6 +604,17 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
+	async moveChatgptFolder(accountId: string, from: string, to: string): Promise<number | undefined> {
+		if (this.busy) throw new StopError('Another operation is running. Try again when it has finished.');
+		let moved: number | undefined;
+		await this.guarded('manual', async () => {
+			const account = this.settings.chatgpt.find(({ id }) => id === accountId);
+			if (!account || account.web.folder !== from) throw new StopError('The chat folder changed. Open the settings again and retry.');
+			moved = await moveChatgptFolder(this.app, this.settings, account, to, () => this.saveSettings(), () => this.stopRequested);
+		}, { folderMove: true });
+		return moved;
+	}
+
 	/** Shows what "Merge chat copies into one note" would do. Reads only. */
 	openMergePreview(): void {
 		if (this.mergeWaiting || this.merging) {
@@ -800,7 +812,7 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	/** One sync at a time. (A source that stopped with an error is skipped by runOne, not here.) */
-	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>, opts: { merge?: boolean } = {}) {
+	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>, opts: { merge?: boolean; folderMove?: boolean } = {}) {
 		if (this.unloaded) return;
 		// A phone or tablet cannot sync by itself yet: it has no login windows and must not write
 		// beside the computer that does. There the sync button asks the computer (remote/).
@@ -818,6 +830,7 @@ export default class AIChatBridge extends Plugin {
 		// go ahead by hand; the automatic sync, a retry and another device's request just wait.
 		const other = await this.computers.busyElsewhere();
 		if (other) {
+			if (opts.folderMove) throw new StopError('Another computer is syncing. Wait for that sync before moving the folder.');
 			if (trigger !== 'manual') return;
 			if (!(await this.syncAnyway(other))) return;
 		}
