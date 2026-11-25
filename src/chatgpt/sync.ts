@@ -29,6 +29,9 @@ import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from '../quick-che
 import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
+import { archiveRoot } from '../archive-folders';
+import { ArchiveObservations } from '../archive-state';
+import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, rememberArchiveObservations, type ArchiveReport } from '../archive-move';
 import { CodexCloudShapeError } from '../cloud/codex-cloud';
 import { syncCodexCloud } from '../cloud/codex-sync';
 import { recordError } from '../error-log';
@@ -40,6 +43,7 @@ const SKIPPED = 'skipped: ';
 const MAX_ASSET_ATTEMPTS = 24;
 
 export interface GptSyncResult {
+	archive?: ArchiveReport;
 	listed: number;
 	filteredOut: number;
 	unchanged: number;
@@ -251,12 +255,19 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		const recent = g.recentFolderName || DEFAULT_RECENT;
 		const filters = g.onlyProjects ? [...new Set(g.projects.map((name) => name.trim().toLowerCase()).filter(Boolean))].sort() : [];
 		const includePinned = g.includePinned !== false;
+		const observations = g.includeArchived === true && g.separateArchived === true ? new ArchiveObservations() : undefined;
+		const observeArchive = g.includeArchived === true && !observations ? new ArchiveObservations() : undefined;
+		if (observations) {
+			result.archive = emptyArchiveReport();
+			progress('checking archived status…');
+		}
 		// Pinned chats off adds a fifth entry, so the default (on) keeps the scope older versions saved.
 		const scope = JSON.stringify([
 			g.includeArchived === true, filters, filters.length ? recent.toLowerCase() : '',
 			projectList.filter((p) => filters.includes(p.name.toLowerCase()) || filters.includes(p.id.toLowerCase()))
 				.map((p) => p.id).sort(),
 			...(includePinned ? [] : ['no-pinned']),
+			...(observations ? ['separate-archived'] : []),
 		]);
 		const inventory = accountInventory(g.inventories ??= { accounts: {} }, a.inventoryKey, scope);
 		if (g.chatProgress && (g.chatProgress.inventoryKey !== a.inventoryKey || g.chatProgress.scope !== scope)) {
@@ -275,6 +286,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		fullStillRequested = false;
 		await scanInventory(inventory, {
 			archived: g.includeArchived === true,
+			archive: observations,
+			observeArchive,
 			pinned: includePinned,
 			overlapMinutes: g.overlapMinutes ?? DEFAULT_OVERLAP_MINUTES,
 			forceFull: reconcile,
@@ -285,7 +298,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				return plugin.saveSettings();
 			},
 			fetch: async (offset, tpp, archived, pinned) => {
-				progress(`reading ChatGPT inventory… ${scan.seen.size} chats checked`);
+				progress(`${observations ? 'checking archived status' : 'reading ChatGPT inventory'}… ${scan.seen.size} chats checked`);
 				await sleep(delayMs);
 				requestStage = `listing ${archived ? 'archived' : pinned ? 'pinned' : 'active'} ${tpp ? 'TPP' : 'normal'} chats (offset ${offset})`;
 				return (await a.get(a.listPath(offset, tpp, archived, pinned))).json;
@@ -300,7 +313,6 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		result.filteredOut = discovered.length - seenInScope.length;
 		result.unchanged = seenInScope.filter((item) => g.index[item.uuid]?.updated_at === item.updated_at).length;
 		const todo = eligibleJobs().sort((a, b) => compareRevision(b.updated_at, a.updated_at));
-		const batch = s.maxChatsPerRun > 0 ? todo.slice(0, s.maxChatsPerRun) : todo;
 		// This catalog includes older indexed chats outside the current scan overlap.
 		const catalog = allowed(toListItems(Object.values(inventory.known)
 			.filter((row) => row.generation === inventory.generation)
@@ -310,11 +322,19 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		const counts = { inventoryKey: a.inventoryKey, scope, saved: kept.length, total: catalog.length };
 		g.chatProgress = counts;
 		await plugin.saveSettings();
+		const archiveState = (id: string) => observations ? inventory.known[id]?.archived : undefined;
+		const rawRoot = masterRaw(plugin.settings);
+		const root = archiveRoot(s, 'chatgpt', account.id, base);
+		const filing = (item: ListItem) => ({
+			base, root, projectSubfolders: g.projectSubfolders, rawSetting: g.rawFolder, rawRoot,
+			projectRaw: customProjectFolder(item, { ...g, projectFolders: g.projectRawFolders }, recent),
+			active: chatFolders(item, g, base, g.rawFolder, recent, rawRoot),
+		});
 
 		// 4. Folders.
 		await ensureFolder(app, base);
 		if (g.projectSubfolders) {
-			for (const name of projectFolderNames(kept.filter((item) => customProjectFolder(item, g, recent) === null), recent)) {
+			for (const name of projectFolderNames(kept.filter((item) => archiveState(item.uuid) !== true && customProjectFolder(item, g, recent) === null), recent)) {
 				const path = `${base}/${name}`;
 				if (!findFile(app, path)) {
 					await ensureFolder(app, path);
@@ -322,7 +342,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				}
 			}
 		}
-		const foldersFor = (item: ListItem) => chatFolders(item, g, base, g.rawFolder, recent, masterRaw(plugin.settings));
+		const foldersFor = (item: ListItem) => archiveState(item.uuid) === true ? newArchiveFolders(filing(item)) : filing(item).active;
 		let activeDownload = 'recovering a saved chat';
 
 
@@ -430,6 +450,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 					}
 					// The earlier version: its main file and its older parts, kept together.
 					const kept = before ? await keepVersion(app, [before.json, ...(before.older ?? [])], before.updated_at, loaded.bytes[0]) : null;
+					const archive = before ? before.archive : archiveState(item.uuid) === true ? { root, active: filing(item).active } : undefined;
 					entry = {
 						updated_at: item.updated_at,
 						synced: new Date().toISOString(),
@@ -439,6 +460,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 						pageHashes: hashes,
 						versions: addVersion(before, kept),
 						noteHash: before?.noteHash,
+						...(archive ? { archive } : {}),
 					};
 					pending[item.uuid] = entry;
 					await plugin.saveSettings();
@@ -455,10 +477,12 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				}
 			}
 			if (!entry) throw new Error('ChatGPT capture has no saved journal entry.');
+			const observed = observations ? archiveState(item.uuid) : observeArchive?.get(item.uuid);
+			const archiveObservation = observed !== undefined ? observed : typeof chat.is_archived === 'boolean' ? chat.is_archived : before?.archiveObservation;
 			const view = withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md));
 			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, unedited: await asWritten(before), keep: before?.updated_at === item.updated_at ? ['unread'] : [] });
 			recordEdit(result.edits, note, entry.md);
-			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(view), noteHash: note.hash };
+			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(view), noteHash: note.hash, archiveObservation };
 			if (!before && catalogIds.has(item.uuid)) counts.saved++;
 			delete pending[item.uuid];
 			await plugin.saveSettings();
@@ -542,8 +566,13 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		};
 
 		// Before anything is written: many saved chats missing means a wrong sync history, not deletions.
-		const savedChats = Object.values(g.index);
+		const savedChats = Object.values(g.index).filter((entry) => !entry.archiveMove);
 		guardMissing('ChatGPT chats', savedChats.length, savedChats.filter((e) => !exists(e.md) || !exists(e.json)).length);
+		if (observations && result.archive) {
+			await reconcileArchived(plugin, { items: catalog.filter((item) => !pending[item.uuid]), web: g, state: archiveState, filing, progress, rememberView: true }, result.archive);
+		} else if (observeArchive) await rememberArchiveObservations(plugin, g.index, seenInScope, (id) => observeArchive.get(id));
+		const ready = todo.filter((item) => !g.index[item.uuid]?.archiveMove && (g.index[item.uuid] || pending[item.uuid] || archiveState(item.uuid) !== null));
+		const batch = s.maxChatsPerRun > 0 ? ready.slice(0, s.maxChatsPerRun) : ready;
 
 		const done = new Set<string>();
 		for (const [i, item] of batch.entries()) {
@@ -573,7 +602,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		for (const [k, item] of kept.entries()) {
 			if (k % 25 === 0) progress(`checking older chats… ${k} of ${kept.length}`, k, kept.length, 'checking saved chats');
 			let entry = g.index[item.uuid];
-			if (!entry || done.has(item.uuid) || entry.updated_at !== item.updated_at) continue;
+			if (!entry || entry.archiveMove || done.has(item.uuid) || entry.updated_at !== item.updated_at) continue;
 			requestChat = { item, position: `saved chat ${k + 1} of ${kept.length}` };
 			if (await quickDone(item, entry)) continue; // its raw pages are not read (quick-check.ts)
 			let chat = await readSaved(item, entry);
@@ -584,6 +613,13 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				chat = saved.chat;
 				entry = g.index[item.uuid]!;
 				result.restored.push(stemOf(entry.json));
+			}
+			if (entry.archiveViewMoved) {
+				// The link paths changed with the move. Adopt that rendering before backfill so a
+				// newly downloaded file can still refresh the note through the usual edit policy.
+				entry.viewHash = await viewHash(withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md)));
+				delete entry.archiveViewMoved;
+				await plugin.saveSettings();
 			}
 			const before = result.filesSaved;
 			await backfill(a, chat, dirOf(entry.md), stemOf(entry.json));
@@ -665,6 +701,7 @@ async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyn
 	const now = new Date();
 	const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 	const parts = [`${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
+	if (r.archive) parts.push(...archiveLog(r.archive));
 	parts.push(`${r.listingRequests} chat-list requests, ${r.projectRequests} project-list requests (${r.incrementalLists} incremental lists, ${r.fullLists} full lists)`);
 	if (r.filteredOut) parts.push(`${r.filteredOut} skipped (other projects)`);
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);

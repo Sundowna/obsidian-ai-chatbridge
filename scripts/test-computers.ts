@@ -86,6 +86,25 @@ function towerSettings(): Settings {
 	expect('join: data.json from before the split counts as unsplit', isUnsplit(JSON.parse(JSON.stringify(s))) && !isUnsplit(null));
 }
 
+// An upgrade and a settings reload keep the existing account folders and history.
+{
+	const folder = 'Existing workspace/Custom ChatGPT exports';
+	const rawFolder = 'Existing workspace/Chat history JSON';
+	const note = entry(`${folder}/Personal/Original filename.md`, '2026-11-03T10:00:00Z', { json: `${rawFolder}/Original filename.json` });
+	const s = normalizeSettings({ claude: [{ web: { chatFolder: 'Existing workspace/Claude notes' } }],
+		chatgpt: [{ id: 'default', web: { folder, rawFolder, includeArchived: true, index: { synthetic: note } } }] }).settings;
+	const web = s.chatgpt[0]!.web;
+	expect('archive upgrade: old folders and index stay, separation defaults off',
+		web.folder === folder && web.rawFolder === rawFolder && web.separateArchived !== true && canon(web.index.synthetic) === canon(note));
+	web.separateArchived = true;
+	const { shared, local } = splitSettings(s, 'Synthetic');
+	const loaded = normalizeSettings(joinSaved(JSON.parse(JSON.stringify(shared)), JSON.parse(JSON.stringify(local)) as ComputerFile)).settings.chatgpt[0]!.web;
+	expect('archive restart: enabling and reloading keeps custom folders and filenames',
+		loaded.separateArchived === true && loaded.folder === folder && loaded.rawFolder === rawFolder && canon(loaded.index.synthetic) === canon(note));
+	const flat = normalizeSettings({ gpt: { folder, rawFolder } }).settings.chatgpt[0]!.web;
+	expect('archive upgrade: the legacy ChatGPT folders also stay', flat.folder === folder && flat.rawFolder === rawFolder && flat.separateArchived !== true);
+}
+
 // --- the part that belongs to one computer ---------------------------------------------
 {
 	const { local } = splitSettings(towerSettings(), 'Tower');

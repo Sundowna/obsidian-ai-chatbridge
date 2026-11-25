@@ -10,6 +10,7 @@ import { advanced, bindSyncButton, contentOptions, count, filingOptions, folderS
 import { googleRawMoves, webRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
 import { lastRunLine, runKey } from '../last-run';
+import { archiveSettings } from './archive-settings';
 
 /** Login state with only the buttons that make sense for it. */
 function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string, surface: 'web' | 'studio' = 'web'): void {
@@ -72,15 +73,7 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 
 	new Setting(el).setName('Content').setHeading();
 	contentOptions(ctx, el, 'claude', account, s);
-	new Setting(el)
-		.setName('Include archived chats')
-		.setDesc('Also check archived conversations during sync. claude.ai lists them apart, so this adds a few requests. They are filed like the others, by project.')
-		.addToggle((t) =>
-			t.setValue(s.includeArchived ?? false).onChange(async (v) => {
-				s.includeArchived = v;
-				await save();
-			}),
-		);
+	archiveSettings(ctx, el, 'claude', account);
 	new Setting(el)
 		.setName('Claude Code cloud sessions')
 		.setDesc('Also save the Claude Code sessions that ran in the cloud (claude.ai/code), in the Code Cloud folder, one subfolder per repository. A session still running is saved once it is done. Sessions you steered from claude.ai but that ran on a computer are saved by Code Local instead.')
@@ -203,15 +196,7 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 				await save();
 			}),
 		);
-	new Setting(el)
-		.setName('Include archived chats')
-		.setDesc('Also check archived conversations during sync.')
-		.addToggle((t) =>
-			t.setValue(g.includeArchived ?? false).onChange(async (v) => {
-				g.includeArchived = v;
-				await save();
-			}),
-		);
+	archiveSettings(ctx, el, 'chatgpt', account);
 	new Setting(el)
 		.setName('Codex cloud tasks')
 		.setDesc('Also save the Codex tasks that ran in the cloud – started on chatgpt.com/codex or from ChatGPT – in the folder set above (subfolders Tasks and Work): your prompts and Codex\'s answers, with its steps counted. A task still running is saved once it is done. Off until you turn it on.')

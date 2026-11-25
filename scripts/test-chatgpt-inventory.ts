@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { accountInventory, completeInventoryJob, scanInventory, type Inventories, type ScanStats } from '../src/chatgpt/inventory';
 import { inventoryIdentity } from '../src/chatgpt/token';
 import type { GptListItem } from '../src/chatgpt/types';
+import { ArchiveObservations } from '../src/archive-state';
 
 const now = Date.parse('2026-11-06T12:00:00Z');
 const iso = (value: number) => new Date(value).toISOString();
@@ -20,7 +21,47 @@ const archived = [row(2000, now - 3_600_000)];
 // Pinned chats come only from the is_starred=true lists (issue #32).
 const pinned = [row(3000, now - 1_800_000)];
 
+async function testArchiveDiscovery() {
+	const inventory = accountInventory({ accounts: {} }, 'account:archive', 'separate');
+	const old = row(7654, now - 2 * 86_400_000);
+	const newer = Array.from({ length: 60 }, (_, i) => row(8000 + i, now - i * 60_000));
+	let isArchived = false;
+	let contradict = false;
+	let interrupt = true;
+	const scan = async (time: number) => {
+		const stats: ScanStats = { requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set() };
+		await scanInventory(inventory, {
+			archived: true, pinned: false, archive: new ArchiveObservations(), forceFull: false, now: time, overlapMinutes: 10,
+			needsCapture: () => false, save: async () => {},
+			fetch: async (offset, tpp, archived) => {
+				if (interrupt && tpp && archived) throw new Error('archive list interrupted');
+				const list = tpp ? [] : [...newer, ...(archived === isArchived || contradict ? [old] : [])];
+				return { offset, total: list.length, items: list.slice(offset, offset + 20) };
+			},
+		}, stats);
+		return stats;
+	};
+	await assert.rejects(scan(now), /archive list interrupted/);
+	assert.equal(inventory.known[old.id]?.archived, undefined);
+	assert.equal(inventory.archiveReady, undefined);
+	interrupt = false;
+	assert.equal((await scan(now + 1)).fullLists, 4);
+	assert.equal(inventory.known[old.id]?.archived, false);
+	isArchived = true;
+	assert.equal((await scan(now + 2)).fullLists, 0);
+	assert.equal(inventory.known[old.id]?.archived, false, 'outside overlap until a full scan');
+	const week = 7 * 86_400_000;
+	assert.equal((await scan(now + week + 1)).fullLists, 4);
+	assert.equal(inventory.known[old.id]?.archived, true);
+	assert.equal(inventory.known[old.id]?.item.update_time, old.update_time);
+	contradict = true;
+	assert.equal((await scan(now + 2 * week + 1)).fullLists, 4);
+	assert.equal(inventory.known[old.id]?.archived, null);
+	assert.deepEqual(inventory.queue, {});
+}
+
 async function main() {
+	await testArchiveDiscovery();
 	const jwt = (sub: string, workspace?: string) => 'x.' + Buffer.from(JSON.stringify({
 		sub, 'https://api.openai.com/auth': { chatgpt_account_id: workspace },
 	})).toString('base64url') + '.signature';

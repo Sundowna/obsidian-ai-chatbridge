@@ -47,7 +47,7 @@ export class NameModal extends Modal {
 
 export class ConfirmModal extends Modal {
 	/** `tone`: "warning" (red) for something you can't easily undo, "cta" for a harmless step. */
-	constructor(app: App, private readonly title: string, private readonly body: string, private readonly action: string, private readonly confirm: () => void | Promise<void>, private readonly tone: 'warning' | 'cta' = 'warning') {
+	constructor(app: App, private readonly title: string, private readonly body: string, private readonly action: string, private readonly confirm: () => void | Promise<void>, private readonly tone: 'warning' | 'cta' = 'warning', private readonly cancelLabel = 'Cancel') {
 		super(app);
 	}
 
@@ -55,7 +55,7 @@ export class ConfirmModal extends Modal {
 		this.titleEl.setText(this.title);
 		this.contentEl.createEl('p', { text: this.body });
 		new Setting(this.contentEl)
-			.addButton((b) => b.setButtonText('Cancel').onClick(() => this.close()))
+			.addButton((b) => b.setButtonText(this.cancelLabel).onClick(() => this.close()))
 			.addButton((b) =>
 				(this.tone === 'cta' ? b.setButtonText(this.action).setCta() : b.setButtonText(this.action).setWarning()).onClick(async () => {
 					await this.confirm();

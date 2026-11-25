@@ -56,6 +56,9 @@ export interface ClaudeWebSettings {
 	downloadFiles: boolean;
 	/** Also read claude.ai's archived chats (a list of their own). Missing = off. */
 	includeArchived?: boolean;
+	separateArchived?: boolean;
+	/** Archive folders awaiting empty-folder cleanup on this computer. */
+	archiveCleanup?: string[];
 	index: Record<string, IndexEntry>;
 	/** file_uuid -> vault path, so each file is downloaded once. */
 	fileIndex: Record<string, string>;
@@ -101,6 +104,9 @@ export interface GptSettings {
 	/** The workspace the login belongs to (not secret); matches Codex sessions to this account. */
 	workspaceId?: string;
 	includeArchived?: boolean;
+	separateArchived?: boolean;
+	/** Archive folders awaiting empty-folder cleanup on this computer. */
+	archiveCleanup?: string[];
 	/** Pinned chats sit in lists of their own (issue #32). Missing = on. */
 	includePinned?: boolean;
 	cooldownUntil?: number;

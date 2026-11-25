@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { Notice, TFile, TFolder } from 'obsidian';
+import { Notice, Platform, TFile, TFolder } from 'obsidian';
 import { GptApi } from '../src/chatgpt/api';
 import { runGptSync } from '../src/chatgpt/sync';
 import { GptRateLimitError, retryDeadline } from '../src/chatgpt/recovery';
@@ -9,6 +9,8 @@ import { DEFAULT_SETTINGS, DEFAULT_GPT } from '../src/settings';
 import AIChatBridge, { formatClock } from '../src/main';
 import { StopError } from '../src/api';
 import { DESKTOP_ALL } from '../src/last-run';
+import { planArchiveLinks, rebaseArchiveLinks } from '../src/archive-links';
+import { hasArchiveToRestore, restoreSavedChats, separateSavedChats } from '../src/archive-local';
 
 const id = '12345678-1234-1234-1234-123456789abc';
 const date = '2026-11-06T09:00:00Z';
@@ -222,6 +224,52 @@ class StampedMap<V> extends Map<string, V> {
 	}
 }
 
+async function testArchiveSettingTiming() {
+	const h = harness();
+	const { settings } = h;
+	const gpt = settings.chatgpt[0]!;
+	const claude = settings.claude[0]!;
+	const runs: { kind: string; forceFull?: boolean }[] = [];
+	let saved = 0;
+	const plugin = new AIChatBridge();
+	const hooks = {
+		settings,
+		app: h.plugin.app,
+		saveSettings: async () => { saved++; },
+		guarded: async (_trigger: string, fn: () => Promise<unknown>) => { await fn(); },
+		runOne: async ({ kind, forceFull }: typeof runs[number]) => { runs.push({ kind, forceFull }); },
+	};
+	Object.assign(plugin, hooks);
+	Object.assign(globalThis, { createFragment: () => ({}) });
+	gpt.web.separateArchived = true;
+	await plugin.syncArchivedNow('chatgpt', gpt.id);
+	assert.deepEqual(runs, [], 'inclusion is required even if the saved separation preference is on');
+	gpt.web.includeArchived = true;
+	gpt.web.cooldownUntil = Date.now() + 60_000;
+	gpt.web.resumeAfter429 = { consecutive: 3, forceFull: false };
+	const md = 'Chats/Unknown.md';
+	const json = 'Chats/Unknown.json';
+	gpt.web.index[id] = { md, json, synced: date, updated_at: date };
+	await plugin.app.vault.create(json, JSON.stringify({ conversation_id: id, is_archived: false }));
+	await plugin.syncArchivedNow('chatgpt', gpt.id);
+	assert.deepEqual(runs, [], 'a known status needs no server check');
+	assert.deepEqual(gpt.web.resumeAfter429, { consecutive: 3, forceFull: false });
+	await plugin.app.vault.modify(plugin.app.vault.getAbstractFileByPath(json) as TFile, JSON.stringify({ conversation_id: id }));
+	await plugin.syncArchivedNow('chatgpt', gpt.id);
+	assert.deepEqual(runs, [], 'during cooldown no manual sync starts');
+	assert.equal(saved, 1);
+	assert.deepEqual(gpt.web.resumeAfter429, { consecutive: 3, forceFull: true });
+	gpt.web.cooldownUntil = Date.now() - 1;
+	await plugin.syncArchivedNow('chatgpt', gpt.id);
+	assert.deepEqual(runs.pop(), { kind: 'chatgpt', forceFull: true });
+	claude.web.includeArchived = claude.web.separateArchived = true;
+	claude.web.index[id] = { md, json: 'Chats/Missing.json', synced: date, updated_at: date };
+	await plugin.syncArchivedNow('claude', claude.id);
+	assert.deepEqual(runs.pop(), { kind: 'claude', forceFull: true });
+	assert.deepEqual(runs, []);
+	console.log('Archive settings timing passed: inclusion guard, account sync, full check and cooldown retry.');
+}
+
 function harness() {
 	const entries = new Map<string, TFile | TFolder>();
 	const contents = new StampedMap<ArrayBuffer>();
@@ -237,6 +285,8 @@ function harness() {
 	/** How often the index was written. */
 	let saves = 0;
 	let crashOnOlder = false;
+	let crashAfterRename = false;
+	const moved: [string, string][] = [];
 	/** Paths whose content was replaced (the one-note rule), in order. */
 	const rewritten: string[] = [];
 	const read = (path: string) => new TextDecoder().decode(contents.get(path));
@@ -246,7 +296,9 @@ function harness() {
 			crashOnOlder = false;
 			throw new Error('simulated interruption while saving an older page');
 		}
-		const f = new TFile(path, { size: content.byteLength });
+		const f = Object.assign(new TFile(path, { size: content.byteLength, ctime: entries.size + 1, mtime: entries.size + 1 } as { size: number }), {
+			name: path.split('/').at(-1),
+		});
 		entries.set(path, f);
 		const parent = entries.get(path.slice(0, path.lastIndexOf('/')));
 		if (parent instanceof TFolder) parent.children.push(f);
@@ -271,18 +323,280 @@ function harness() {
 				if (!(entries.get(path) instanceof TFile) || !contents.has(path)) return null;
 				return { type: 'file', size: contents.get(path)!.byteLength, mtime: contents.times.get(path)! };
 			},
+			exists: async (path: string) => entries.has(path),
+			list: async (path: string) => {
+				const children = [...entries.values()].filter((entry) => entry.path.startsWith(path + '/') && !entry.path.slice(path.length + 1).includes('/'));
+				return { folders: children.filter((entry) => entry instanceof TFolder).map((entry) => entry.path), files: children.filter((entry) => entry instanceof TFile).map((entry) => entry.path) };
+			},
+			rmdir: async (path: string, recursive: boolean) => {
+				assert.equal(recursive, false);
+				assert(![...entries.keys()].some((entry) => entry.startsWith(path + '/')));
+				assert(entries.get(path) instanceof TFolder);
+				entries.delete(path);
+			},
 		},
 	};
 	const plugin = {
-		manifest, settings, app: { vault, fileManager: { processFrontMatter: async () => {}, trashFile: async (file: TFile) => { entries.delete(file.path); contents.delete(file.path); } } },
+		manifest, settings, app: { vault, fileManager: {
+			processFrontMatter: async () => {},
+			trashFile: async (file: TFile) => { entries.delete(file.path); contents.delete(file.path); },
+			renameFile: async (file: TFile, path: string) => {
+				assert(!entries.has(path), 'a move would overwrite a file');
+				const from = file.path;
+				moved.push([from, path]);
+				entries.set(path, file);
+				contents.set(path, contents.get(from)!);
+				entries.delete(from);
+				contents.delete(from);
+				file.path = path;
+				if (crashAfterRename) {
+					crashAfterRename = false;
+					throw new Error('simulated interruption after moving a file');
+				}
+			},
+		} },
 		saveSettings: async () => { saves++; saved = structuredClone(settings); },
 	} as unknown as AIChatBridge;
-	return { settings, entries, contents, plugin, read, rewritten, reads,
+	return { settings, entries, contents, plugin, read, rewritten, reads, moved,
 		newBuild: () => { buildTime++; },
 		interrupt: () => { crashOnOlder = true; },
+		interruptMove: () => { crashAfterRename = true; },
 		restart: () => { Object.assign(settings.chatgpt[0]!.web, structuredClone(saved.chatgpt[0]!.web)); },
 		saves: () => saves,
 	};
+}
+
+async function testLocalArchiveToggle() {
+	const h = harness();
+	const { settings, plugin } = h;
+	const account = settings.chatgpt[0]!;
+	const { web } = account;
+	const target = { kind: 'chatgpt', account } as const;
+	const { vault } = plugin.app;
+	const stages: string[] = [];
+	const progress = (msg: string) => stages.push(msg);
+	web.projectSubfolders = true;
+	web.separateArchived = true;
+	const activeFolders = ['Chats/Project', 'Chats/Unclassified', 'My own/Other chats'];
+	const saved = activeFolders.map((folder, i) => {
+		const key = `chat-${i}`;
+		const md = `${folder}/Renamed ${i}.md`;
+		const json = `80 Archive/raw/${folder}/Renamed ${i}.json`;
+		web.index[key] = { md, json, synced: date, updated_at: date };
+		return { key, md, json };
+	});
+	for (const { key, md, json } of saved) {
+		await vault.create(md, 'A hand edit');
+		await vault.create(json, JSON.stringify({ conversation_id: key, gizmo_id: null, is_archived: true }));
+	}
+	const unknownId = 'unknown';
+	const unknownMd = 'Chats/Unclassified/Unknown.md';
+	const unknownJson = '80 Archive/raw/Chats/Unclassified/Unknown.json';
+	await vault.create(unknownMd, 'Unclassified');
+	await vault.create(unknownJson, JSON.stringify({ conversation_id: 'different', gizmo_id: null, is_archived: true }));
+	web.index[unknownId] = { md: unknownMd, json: unknownJson, synced: date, updated_at: date };
+	const parked = await separateSavedChats(plugin, target, progress);
+	assert.equal(parked.unresolved, 1, 'a JSON with the wrong chat ID is never used');
+	assert.equal(parked.report.moved, 3);
+	assert(stages.includes('moving archived chats 3 of 3'));
+	assert.equal(web.index[unknownId]!.md, unknownMd);
+	assert.match(web.index[saved[2]!.key]!.md, /^Chats\/Archived\/_External\/My own\/Other chats\//);
+
+	web.separateArchived = false;
+	await vault.create(saved[0]!.md, 'A collision');
+	await vault.create('Chats/Archived/Keep.md', 'A private note');
+	const partial = await restoreSavedChats(plugin, target, progress);
+	assert.equal(partial.report.moved, 2);
+	assert.equal(partial.report.skipped.length, 1);
+	assert.deepEqual(partial.retained.sort(), ['80 Archive/raw/Chats/Archived', 'Chats/Archived']);
+	assert(hasArchiveToRestore(target));
+	assert.equal(h.read(saved[0]!.md), 'A collision');
+	h.entries.delete(saved[0]!.md);
+	h.contents.delete(saved[0]!.md);
+	const recovered = await restoreSavedChats(plugin, target, progress);
+	assert.equal(recovered.report.moved, 1);
+	assert(stages.includes('returning archived chats 3 of 3'));
+	assert.deepEqual(recovered.retained, ['Chats/Archived']);
+	assert(!h.entries.has('80 Archive/raw/Chats/Archived'));
+	assert.equal(h.read('Chats/Archived/Keep.md'), 'A private note');
+	assert(!hasArchiveToRestore(target));
+	for (const { key, md, json } of saved) {
+		assert.equal(web.index[key]!.md, md);
+		assert.equal(web.index[key]!.json, json);
+		assert.equal(h.read(md), 'A hand edit');
+		assert.equal(JSON.parse(h.read(json)).is_archived, true);
+	}
+	h.entries.delete('Chats/Archived/Keep.md');
+	h.contents.delete('Chats/Archived/Keep.md');
+	assert.equal((await restoreSavedChats(plugin, target, progress)).retained.length, 0);
+	assert(!h.entries.has('Chats/Archived'));
+	web.separateArchived = true;
+	assert.equal((await separateSavedChats(plugin, target, progress)).report.moved, 3);
+	console.log('Local archive toggle passed: JSON identity, project and custom paths, safe cleanup and retry.');
+}
+
+async function testArchiveRelativeLink() {
+	const h = harness();
+	const vault = h.plugin.app.vault;
+	const from = 'Chats/First/Chat.md';
+	const to = 'Chats/Archived/First/Chat.md';
+	const target = await vault.create('Index files/Guide (1).md', 'Heading');
+	const original = '[keep the label](<../../Index files/Guide (1).md#Heading> "keep the title")';
+	const note = await vault.create(from, original);
+	const index = { md: from, json: 'Chats/First/Chat.json', synced: date, updated_at: date };
+	Object.assign(h.plugin.app, { metadataCache: {
+		getFileCache: () => ({ links: [{ original, link: '../../Index files/Guide (1).md#Heading', position: { start: { offset: 0 }, end: { offset: original.length } } }] }),
+		getFirstLinkpathDest: () => target,
+	} });
+	const plan = planArchiveLinks(h.plugin.app, index, note, to, new Map());
+	await h.plugin.app.fileManager.renameFile(note, to);
+	await rebaseArchiveLinks(h.plugin.app, index, note, plan);
+	assert.equal(h.read(to), '[keep the label](<../../../Index%20files/Guide%20%281%29.md#Heading> "keep the title")');
+}
+
+async function testArchivedPlacement() {
+	const h = harness();
+	const account = h.settings.chatgpt[0]!;
+	const web = account.web;
+	web.downloadFiles = true;
+	const projectA = 'g-p-0000000000000001';
+	const projectB = 'g-p-0000000000000002';
+	const other = '12345678-1234-1234-1234-123456789abd';
+	const loose = '12345678-1234-1234-1234-123456789abe';
+	const firstProject = '12345678-1234-1234-1234-123456789abf';
+	const archivedFirst = new Set([other, loose, firstProject]);
+	const projects = (key: string, name: string) => ({ gizmo: { gizmo: { id: key, display: { name } } } });
+	const rows = [id, other, loose, firstProject].map((chatId, i) => ({
+		id: chatId, title: chatId === firstProject ? 'Separate fixture' : 'Fixturé',
+		create_time: date, update_time: date, gizmo_id: [projectA, projectB, null, projectA][i],
+	}));
+	let both = false;
+	let incomplete = false;
+	let limited = false;
+	let requests = 0;
+	let repeatAssets = 0;
+	let showNew = false;
+	const connect = GptApi.connect;
+	GptApi.connect = async () => ({
+		inventoryKey: 'account:archive-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned: boolean) => `list:${offset}:${tpp}:${archived}:${pinned}`,
+		projectPagePath: () => 'projects', chatPath: (chatId: string) => `chat:${chatId}`, olderPath: () => 'older', redact: (v: string) => v,
+		get: async (path: string) => {
+			if (path === 'projects') return raw({ items: [projects(projectA, 'First'), projects(projectB, 'Second')] });
+			if (path.startsWith('list:')) {
+				const [, offset, tpp, archived, pinned] = path.split(':');
+				if (limited && archived === 'true') throw new GptRateLimitError(Date.now() + 60_000);
+				const items = tpp === 'true' || pinned === 'true' ? [] : rows.filter((row) =>
+					(showNew || row.id === id) && (archivedFirst.has(row.id) === (archived === 'true') || (both && row.id === id)));
+				return raw({ items: incomplete && archived === 'true' ? [] : items, offset: Number(offset), total: items.length });
+			}
+			requests++;
+			if (path === 'older') return raw(older);
+			const chatId = path.slice(5);
+			return raw({ ...top, conversation_id: chatId, messages: chatId === id ? top.messages : [message('message-two', 'Another fixture')] });
+		},
+		sandboxBytes: async () => { repeatAssets++; return bytes('synthetic PDF'); },
+	} as unknown as GptApi);
+	try {
+		web.recentFolderName = 'Unclassified';
+		h.settings.maxChatsPerRun = 1;
+		assert.equal((await runGptSync(h.plugin, account)).newCount, 1);
+		const active = web.index[id]!.md;
+		const activeRaw = web.index[id]!.json;
+		const activeOlder = web.index[id]!.older![0]!;
+		assert.match(active, /^Chats\/First\//);
+		assert.equal(web.index[other], undefined);
+		const ownVersion = activeRaw.replace('.json', ' (version fixture).json');
+		await h.plugin.app.vault.createBinary(ownVersion, bytes('historic bytes'));
+		web.index[id]!.versions = [{ at: date, files: [ownVersion] }];
+		// Render the existing history before simulating a manual edit.
+		h.settings.maxChatsPerRun = 0;
+		await runGptSync(h.plugin, account);
+		h.settings.maxChatsPerRun = 1;
+		h.contents.set(active, bytes(h.read(active).replace('unread:', 'fixture_property: true\nunread:') + '\nManual text\n'));
+		await h.plugin.app.vault.create('Chats/First/PROJECT.md', 'Unrelated');
+		const asset = web.fileIndex[sandboxKey(id, 'message-new', '/mnt/data/demo (1).pdf')]!;
+		const beforeRequests = requests;
+		web.separateArchived = true;
+		showNew = true;
+		archivedFirst.add(id);
+		const archiveFolder = 'Chats/Archived/First';
+		const collision = `${archiveFolder}/${active.split('/').at(-1)!.toLowerCase().normalize('NFD')}`;
+		await h.plugin.app.vault.createFolder('Chats/Archived');
+		await h.plugin.app.vault.createFolder(archiveFolder);
+		await h.plugin.app.vault.create(collision, 'unrelated collision');
+		const previousMac = Platform.isMacOS;
+		Object.assign(Platform, { isMacOS: true });
+		// The stub has no root entry, so let file lookups at the root return an empty folder.
+		Object.assign(h.plugin.app.vault, { getRoot: () => new TFolder('') });
+		const first = await runGptSync(h.plugin, account).finally(() => Object.assign(Platform, { isMacOS: previousMac }));
+		assert.equal(first.fullLists, 6);
+		assert.equal(first.archive?.skipped.length, 1);
+		assert.equal(h.moved.length, 0);
+		assert.match(web.index[other]!.md, /^Chats\/Archived\/Second\//);
+		assert.equal(h.read(collision), 'unrelated collision');
+		h.entries.delete(collision);
+		h.contents.delete(collision);
+		const parent = h.entries.get(archiveFolder) as TFolder;
+		parent.children = parent.children.filter((file) => file.path !== collision);
+		h.interruptMove();
+		assert.equal((await runGptSync(h.plugin, account)).archive?.failed.length, 1);
+		assert(web.index[id]!.archiveMove);
+		h.restart();
+		const stages: string[] = [];
+		const resumed = await runGptSync(h.plugin, account, (phase) => stages.push(phase));
+		assert.equal(resumed.archive?.moved, 1, JSON.stringify(resumed));
+		assert(stages.includes('moving archived chats 1 of 1'));
+		const parked = web.index[id]!;
+		assert.match(web.index[loose]!.md, /^Chats\/Archived\/Unclassified\//);
+		assert.match(web.index[firstProject]!.md, /^Chats\/Archived\/First\//);
+		assert.equal(parked.md, active.replace('/First/', '/Archived/First/'));
+		assert.equal(parked.json, activeRaw.replace('/First/', '/Archived/First/'));
+		assert.equal(parked.older?.[0], activeOlder.replace('/First/', '/Archived/First/'));
+		assert.equal(h.read(parked.versions![0]!.files[0]!), 'historic bytes');
+		assert.match(h.read(parked.md), /fixture_property: true[\s\S]*Manual text/);
+		assert.equal(h.read('Chats/First/PROJECT.md'), 'Unrelated');
+		assert(!h.entries.has(asset));
+		assert.equal(h.read(asset.replace('/First/', '/Archived/First/')), 'synthetic PDF');
+		assert(h.read(parked.md).includes(asset.replace('/First/', '/Archived/First/')));
+		assert.equal(requests - beforeRequests, 6, 'body and older page only for the three new chats');
+		assert.equal(repeatAssets, 1, 'moving the asset does not redownload it');
+		const moveCount = h.moved.length;
+		assert.equal((await runGptSync(h.plugin, account)).archive?.moved, 0);
+		h.restart();
+		assert.equal((await runGptSync(h.plugin, account)).archive?.moved, 0);
+		assert.equal(h.moved.length, moveCount);
+		archivedFirst.delete(id);
+		both = true;
+		assert.equal((await runGptSync(h.plugin, account)).archive?.skipped.length, 1);
+		assert.equal(h.moved.length, moveCount);
+		both = false;
+		incomplete = true;
+		assert.match((await runGptSync(h.plugin, account)).stopped ?? '', /reported total/);
+		assert.equal(h.moved.length, moveCount);
+		incomplete = false;
+		limited = true;
+		assert.match((await runGptSync(h.plugin, account)).stopped ?? '', /429/);
+		assert.equal(h.moved.length, moveCount);
+		limited = false;
+		web.cooldownUntil = Date.now() - 1;
+		web.includeArchived = false;
+		assert.equal((await runGptSync(h.plugin, account)).archive, undefined);
+		assert.equal(h.moved.length, moveCount);
+		web.includeArchived = true;
+		assert.equal((await runGptSync(h.plugin, account)).archive?.moved, 1);
+		assert.equal(web.index[id]!.md, active);
+		assert.equal(web.index[id]!.json, activeRaw);
+		assert.equal(web.index[id]!.older?.[0], activeOlder);
+		assert.equal(web.index[id]!.versions?.[0]?.files[0], ownVersion);
+		assert.equal(h.read(asset), 'synthetic PDF');
+		assert.match(h.read(active), /Manual text/);
+		assert.match(h.read('Logs/sync.md'), /Archived chats: 1 moved, 0 skipped, 0 failed/);
+		assert.equal(requests - beforeRequests, 6);
+		console.log('ChatGPT archive placement, unchanged revisions, contradiction, collision, partial rename and restart passed.');
+	} finally {
+		GptApi.connect = connect;
+	}
 }
 
 /** A voice chat saved by an older version has its one note brought up to date once; syncing again changes nothing. */
@@ -709,12 +1023,16 @@ async function main() {
 	assert.throws(() => checkGptChat({ ...top, page_info: undefined }, id));
 	assert.throws(() => checkGptOlderPage({ messages: [], page_info: {} }));
 	await testAutomaticResume();
+	await testArchiveSettingTiming();
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();
 	await testJsonFolder();
 	await testQuickCheck();
 	await testQuickCheckSameResult();
 	await testQuickCheckSavedInBatches();
+	await testArchiveRelativeLink();
+	await testLocalArchiveToggle();
+	await testArchivedPlacement();
 	let calls = 0;
 	let sandboxCalls = 0;
 	let listingLimit = true;

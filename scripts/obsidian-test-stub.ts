@@ -11,7 +11,9 @@ export class PluginSettingTab {}
 export class Plugin {}
 export class FileSystemAdapter {}
 export class AbstractInputSuggest {}
-export class Notice {}
+export class Notice {
+	hide() {}
+}
 export class SecretComponent {}
 export class Setting {}
 export class Modal {}

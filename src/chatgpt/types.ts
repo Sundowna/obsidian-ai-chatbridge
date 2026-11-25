@@ -3,6 +3,7 @@
 
 /** One entry of GET /backend-api/conversations?…&offset=N */
 export interface GptListItem {
+	is_archived?: boolean;
 	id: string;
 	title: string | null;
 	/** ISO date, e.g. "2026-10-27T13:14:06.272528Z" */
@@ -68,6 +69,7 @@ export interface GptChat {
 	create_time: number;
 	update_time: number;
 	gizmo_id: string | null;
+	is_archived?: boolean;
 	messages: GptMessage[];
 	current_node?: string;
 	/** start_cursor = oldest message loaded; has_previous_page = older messages exist. */
