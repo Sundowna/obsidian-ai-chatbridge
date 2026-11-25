@@ -13,6 +13,7 @@ import { testHooks } from 'obsidian';
 import { GeminiApi } from '../src/gemini/api';
 import { StudioApi } from '../src/studio/api';
 import { LumoApi } from '../src/lumo/api';
+import { ERROR_LOG_EMPTY, ERROR_LOG_WARNING } from '../src/ui/error-logs-tab';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -189,6 +190,9 @@ async function main() {
 	expect('title and count', work?.title === 'ChatGPT · Work' && work.count === errorEntries(A).length, `${work?.title} ${work?.count}`);
 	s.chatgpt[1]!.label = 'Job';
 	expect('rename keeps entries', errorLogAccounts(s).find((x) => x.source.accountId === 'a')?.title === 'ChatGPT · Job' && errorEntries(A).length > 0);
+
+	expect('tab warning text', ERROR_LOG_WARNING === 'Remove all personal data (email addresses, names, chat titles and chat text) before you paste this into a GitHub issue. Cookies and login keys are removed automatically.');
+	expect('tab empty text', ERROR_LOG_EMPTY === 'No errors saved for this account.');
 
 	await apiChecks();
 

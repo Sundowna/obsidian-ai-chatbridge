@@ -58,7 +58,7 @@ let adapter: DataAdapter | null = null;
 let path: string | null = null;
 let env = '';
 let log: LogFile = { version: 1, accounts: {} };
-let timer: ReturnType<typeof setTimeout> | null = null;
+let timer: number | null = null;
 let saving: Promise<void> = Promise.resolve();
 const listeners = new Set<() => void>();
 
@@ -124,8 +124,8 @@ function scheduleSave(): void {
 		}
 	}
 	if (!adapter || !path) return;
-	if (timer) clearTimeout(timer);
-	timer = setTimeout(() => {
+	if (timer) window.clearTimeout(timer);
+	timer = window.setTimeout(() => {
 		timer = null;
 		void writeNow();
 	}, SAVE_DELAY_MS);
@@ -143,7 +143,7 @@ function writeNow(): Promise<void> {
 /** Writes a pending save now (tests, unload). Never throws. */
 export async function flushErrorLog(): Promise<void> {
 	if (timer) {
-		clearTimeout(timer);
+		window.clearTimeout(timer);
 		timer = null;
 		await writeNow();
 	}
