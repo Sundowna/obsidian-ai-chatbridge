@@ -5,6 +5,9 @@
 ### New
 - **Error logs** - a new settings tab keeps the last 20 failed answers of each account (Claude, ChatGPT, Gemini, AI Studio, Lumo, Codex cloud) in full: address, status, response headers and body. **Copy** gives a ready-made block for a GitHub issue. Cookies, session keys and login keys are removed automatically; remove personal data (email addresses, names, chat titles and text) yourself before pasting. Saved in the plugin's folder, not in your notes
 
+### Fixed
+- **claude.ai sync no longer stops with "403 (forbidden) to ReadConversation" on some accounts** - on some account plans claude.ai does not offer the chat view the plugin reads for download cards. The sync now saves those chats without the chat-view files and goes on, and the log says so once. Any other 403 still stops the sync (#46)
+
 ## 0.38.0 - 2026-11-25
 
 ### Changed

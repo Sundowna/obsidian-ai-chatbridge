@@ -3,7 +3,7 @@
 // Run: npm run test:claude
 
 import { TFile } from 'obsidian';
-import { ClaudeApi } from '../src/api';
+import { ClaudeApi, chatViewNotOffered } from '../src/api';
 import { normalizeSettings } from '../src/migrate';
 import { localStamp } from '../src/naming';
 import { runSync } from '../src/sync';
@@ -75,6 +75,7 @@ const chat = () => ({
 });
 let fileFetches = 0;
 ClaudeApi.prototype.getFile = async () => { fileFetches++; return new TextEncoder().encode('notes').buffer; };
+const realReadConversation = ClaudeApi.prototype.readConversation;
 ClaudeApi.prototype.readConversation = async () => ({});
 const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).buffer;
 // An archived chat: only in claude.ai's archived list (with the first chat again, to check it is kept once).
@@ -206,6 +207,29 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	await rawReads();
 	const viewsRead = views;
 	expect('quick: once read, the chat is quiet again', (await rawReads()).read === 0 && views === viewsRead);
+
+	// Issue #46: on some account plans claude.ai answers ReadConversation with 403
+	// "blocked_by_org_tier". The chat is still saved (without chat-view files), the sync goes on,
+	// and the call is not repeated for the other chats of that run. Any other 403 still stops.
+	const NOT_OFFERED = JSON.stringify({ code: 'permission_denied', message: 'This isn’t available for your account.', details: [{ type: 'google.rpc.ErrorInfo', debug: { reason: 'feature_not_available', metadata: { sub_reason: 'blocked_by_org_tier' } } }] });
+	expect('#46: a "not offered for this plan" 403 is told apart from a plain 403', chatViewNotOffered(NOT_OFFERED) && !chatViewNotOffered('{"code":"permission_denied","message":"Forbidden"}'));
+	let rpcCalls = 0;
+	let rpcAnswer = { status: 403, contentType: 'application/json', bytes: new ArrayBuffer(0), text: NOT_OFFERED };
+	ClaudeApi.prototype.rpc = async () => { rpcCalls++; return rpcAnswer; };
+	ClaudeApi.prototype.readConversation = realReadConversation;
+	const direct = new ClaudeApi(ORG, () => 'k');
+	const v1 = await direct.readConversation(CHAT);
+	const v2 = await direct.readConversation(ARCHIVED);
+	expect('#46: not offered: no chat view, asked only once', v1 === null && v2 === null && direct.chatViewUnavailable && rpcCalls === 1, String(rpcCalls));
+	rpcAnswer = { ...rpcAnswer, text: '{"code":"permission_denied","message":"Forbidden"}' };
+	const plain = await new ClaudeApi(ORG, () => 'k').readConversation(CHAT).then(() => 'no stop', (e: unknown) => (e instanceof Error ? e.message : String(e)));
+	expect('#46: any other 403 still stops the sync', plain.includes('403 (forbidden) to ReadConversation'), plain);
+	rpcAnswer = { ...rpcAnswer, text: NOT_OFFERED };
+	updated = '2026-11-11T08:00:00Z';
+	turns = [...turns, 'Fourth question'];
+	const blocked = await runSync(plugin, account);
+	expect('#46: the sync is not stopped and the chat is saved', !blocked.stopped && blocked.changedCount === 1 && files.get(account.web.index[CHAT]!.md)!.includes('Fourth question'), JSON.stringify({ stopped: blocked.stopped, changed: blocked.changedCount }));
+	expect('#46: reported once as not offered, not as "will retry" per chat', blocked.viewUnavailable === true && blocked.viewNotRead.length === 0 && (files.get('log.md') ?? '').includes('claude.ai does not offer them for this account'), JSON.stringify(blocked.viewNotRead));
 
 	delete vault.adapter.stat;
 	expect('quick: a vault that cannot tell file times always reads it', (await rawReads()).read === 1 && (await rawReads()).read === 1);

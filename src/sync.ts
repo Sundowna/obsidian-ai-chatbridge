@@ -44,6 +44,8 @@ export interface SyncResult {
 	backfilledChats: number;
 	/** Chats whose chat-view files could not be read (ReadConversation not 200 JSON). */
 	viewNotRead: string[];
+	/** claude.ai does not offer the chat view (ReadConversation) for this account's plan. */
+	viewUnavailable?: boolean;
 	/** Chats whose deleted .json/.md were written again. */
 	restored: string[];
 	/** Notes you had edited whose chat continued. */
@@ -189,10 +191,11 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 
 	/** Chat-view files via ReadConversation, or null if claude.ai would not say. */
 	const readVisible = async (api: ClaudeApi, item: ListItem, name: string): Promise<FileTask[] | null> => {
-		await sleep(delayMs);
+		if (!api.chatViewUnavailable) await sleep(delayMs);
 		const rc = await api.readConversation(item.uuid);
 		if (rc === null) {
-			result.viewNotRead.push(name);
+			if (api.chatViewUnavailable) result.viewUnavailable = true;
+			else result.viewNotRead.push(name);
 			return null;
 		}
 		return visibleFiles(rc);
@@ -511,6 +514,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 	parts.push(...editsLog(r.edits));
 	if (r.filesSaved) parts.push(`${r.filesSaved} files saved${r.backfilledChats ? ` (incl. files for ${r.backfilledChats} older chats)` : ''}`);
 	if (r.filesDeduped) parts.push(`${r.filesDeduped} files already there under another ID (not copied)`);
+	if (r.viewUnavailable) parts.push('chat-view files: claude.ai does not offer them for this account, chats saved without them');
 	if (r.viewNotRead.length) parts.push(`chat-view files not readable (will retry): ${r.viewNotRead.join(', ')}`);
 	if (r.filesSkipped.length) parts.push(`files not saved: ${r.filesSkipped.join(', ')}`);
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);

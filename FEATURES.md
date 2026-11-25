@@ -173,7 +173,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Chats to Chat folder, other platforms to Code Cloud folder; project subfolders; `Recent` for no project; per-project custom folders
 - [ ] Include archived chats (`includeArchived`, off by default): also reads the list with `archived=true` after the normal one (`archived=false`), merged and deduplicated by chat ID; archived chats are filed like the others (project or `Recent`), no folder of their own; the project picker reads both lists too. Off = the archived list is never requested
 - [ ] Raw `.json` saved byte for byte; transcript with `account:` property and raw link
-- [ ] Files: `Artifacts/` and `Attachments/` per chat; chat-view files read too; size mismatch and 404 skipped and remembered; identical file under another ID not copied; all files fetched before anything is written
+- [ ] Files: `Artifacts/` and `Attachments/` per chat; chat-view files read too (if claude.ai answers 403 "not available for your account" / `blocked_by_org_tier`, the chats are saved without them, the sync goes on, the call is not repeated in that run and the log says so once; any other 403 still stops; issue #46, `npm run test:claude`); size mismatch and 404 skipped and remembered; identical file under another ID not copied; all files fetched before anything is written
 - [ ] Backfill of missing or deleted files for older chats, transcripts untouched
 - [ ] Cloud sessions (claude.ai/code): per repo folder, saved when done, counted in totals
 
