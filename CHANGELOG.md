@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **claude.ai sync no longer stops with "403 (forbidden) to ReadConversation" on some accounts** - on some account plans claude.ai does not offer the chat view the plugin reads for download cards. The sync now saves those chats without the chat-view files and goes on, and the log says so once. Any other 403 still stops the sync (#46)
+
 ## 0.38.0 - 2026-11-25
 
 ### Changed

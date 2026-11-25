@@ -75,7 +75,22 @@ export async function probeOrganizations(key: string): Promise<{ status: number;
 	return { status: res.status, headers: res.headers, text };
 }
 
+/**
+ * A 403 from ReadConversation that says the call is not offered for this account's plan
+ * (code "permission_denied", reason "feature_not_available" / "blocked_by_org_tier"), as
+ * opposed to a refused login. Seen 2026-11-25 (issue #46).
+ */
+export function chatViewNotOffered(text: string): boolean {
+	return /blocked_by_org_tier|feature_not_available/.test(text);
+}
+
 export class ClaudeApi {
+	/**
+	 * True once claude.ai said ReadConversation is not offered for this account (403 with
+	 * "feature not available"). Then the chat view is not asked for again in this run.
+	 */
+	chatViewUnavailable = false;
+
 	constructor(
 		private readonly orgId: string,
 		private readonly getKey: () => string | null,
@@ -179,8 +194,15 @@ export class ClaudeApi {
 	 */
 	async readConversation(uuid: string): Promise<unknown> {
 		if (!isUuid(uuid)) throw new StopError('Refusing to fetch: chat ID has an odd format.');
+		if (this.chatViewUnavailable) return null;
 		const r = await this.rpc('ReadConversation', JSON.stringify({ conversationId: uuid, displayLanguage: 'en' }));
 		if (r.status === 401) throw new StopError('claude.ai answered 401 (not logged in). The login has probably expired – log in again in the plugin settings.');
+		if (r.status === 403 && chatViewNotOffered(r.text)) {
+			// Some account plans (e.g. "blocked_by_org_tier") do not get this call at all (issue #46).
+			// The chat itself still comes from the normal API, so skip the chat-view files and go on.
+			this.chatViewUnavailable = true;
+			return null;
+		}
 		if (r.status === 403) throw new StopError('claude.ai answered 403 (forbidden) to ReadConversation.');
 		if (r.status === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');
 		if (r.status !== 200 || !r.contentType.includes('application/json')) return null;
