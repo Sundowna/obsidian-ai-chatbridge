@@ -25,6 +25,7 @@ import { gptChatFiles, type GptFileTask } from './files';
 import { automaticRetryDeadline, fingerprint, GptRateLimitError, retryAsset, type Capture } from './recovery';
 import { accountInventory, compareRevision, completeInventoryJob, DEFAULT_OVERLAP_MINUTES, scanInventory, type ScanStats } from './inventory';
 import { renderGptTranscript } from './transcript';
+import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from '../quick-check';
 import { chatFolders, masterRaw, rawLink } from '../raw-folders';
 import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
@@ -139,8 +140,9 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	const pendingAssets = new Set<string>();
 
 	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
-	const isMissing = (f: GptFileTask): boolean => {
-		const p = g.fileIndex[f.fileUuid];
+	const isMissing = (f: GptFileTask): boolean => missingId(f.fileUuid);
+	const missingId = (id: string): boolean => {
+		const p = g.fileIndex[id];
 		if (p === undefined) return true;
 		if (p.startsWith(SKIPPED)) return true;
 		return !exists(p);
@@ -462,12 +464,23 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			return { chat, entry };
 		};
 
-		/** Brings the chat's one note up to date when it would be rendered differently now (new files, a newer plugin). */
-		const refreshView = async (chat: GptChat, item: ListItem, entry: IndexEntry): Promise<void> => {
+		/**
+		 * Brings the chat's one note up to date when it would be rendered differently now (new files, a newer plugin).
+		 * Returns the fingerprint of the note as it is drawn now.
+		 */
+		const refreshView = async (chat: GptChat, item: ListItem, entry: IndexEntry): Promise<string> => {
 			const view = withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md));
 			const hash = await viewHash(view);
 			const latest = entry.view ?? entry.md;
-			if (exists(entry.md) && exists(latest) && (entry.viewHash === hash || (await viewHash(await app.vault.adapter.read(latest))) === hash)) return;
+			if (exists(entry.md) && exists(latest)) {
+				if (entry.viewHash === hash) return hash;
+				if ((await viewHash(await app.vault.adapter.read(latest))) === hash) {
+					// The note already reads as drawn now, but its fingerprint is gone (a merge clears it):
+					// remember it, so the note is not read again every run and the quick check can skip it.
+					entry.viewHash = hash;
+					return hash;
+				}
+			}
 			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: entry.noteHash, lastSynced: entry.synced, unedited: await asWritten(entry), keep: ['unread'] });
 			recordEdit(result.edits, note, entry.md);
 			if (note.outcome === 'created') result.restored.push(stemOf(entry.md));
@@ -476,6 +489,54 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			entry.view = entry.md;
 			entry.viewHash = hash;
 			entry.noteHash = note.hash;
+			await plugin.saveSettings();
+			return hash;
+		};
+
+		/**
+		 * Everything the check of a saved, unchanged chat depends on besides the chat itself: its raw
+		 * pages (size and time), note, versions, saved files and the plugin build. Null = unknown.
+		 */
+		const quickKey = async (item: ListItem, entry: IndexEntry, files: string[]): Promise<string | null> => {
+			const latest = entry.view ?? entry.md;
+			if (!exists(entry.md) || !exists(latest)) return null;
+			return checkKey([
+				build, JSON.stringify(item), entry.json, entry.md, latest, entry.older ?? [], entry.versions ?? [], entry.pageHashes ?? [], entry.viewHash ?? '',
+				await fileStamps(app, [entry.json, ...(entry.older ?? [])]),
+				g.downloadFiles, files.map((id) => [g.fileIndex[id] ?? '', !missingId(id)]),
+				Intl.DateTimeFormat().resolvedOptions().timeZone,
+			]);
+		};
+		/** A missing file whose next download try is not due yet: backfill would only count it as pending. */
+		const waiting = (id: string): boolean => (retries[id]?.nextAttempt ?? 0) > Date.now();
+		/** A missing file the full check would try to fetch now. */
+		const fetchable = (id: string): boolean => g.downloadFiles && missingId(id) && !waiting(id);
+		/**
+		 * Nothing to do for this chat: same key as after its last full check, and no missing file due
+		 * for a try. Missing files still waiting count as pending, as backfill counts them.
+		 */
+		const quickDone = async (item: ListItem, entry: IndexEntry): Promise<boolean> => {
+			const q = entry.quick;
+			if (!q || q.files.some(fetchable)) return false;
+			if ((await quickKey(item, entry, q.files)) !== q.key) return false;
+			if (g.downloadFiles) for (const id of q.files) if (missingId(id)) pendingAssets.add(id);
+			return true;
+		};
+		let quickUnsaved = 0;
+		/**
+		 * After a full check: remembered only when it ended with the note as drawn and every file
+		 * there or waiting for its next try. Saved in batches (QUICK_SAVE_EVERY).
+		 */
+		const rememberQuick = async (item: ListItem, entry: IndexEntry, chat: GptChat, hash: string): Promise<void> => {
+			const files = gptChatFiles(chat).map((f) => f.fileUuid);
+			const settled = entry.viewHash === hash && !files.some(fetchable);
+			const key = settled ? await quickKey(item, entry, files) : null;
+			const quick = key ? { files, key } : undefined;
+			if (JSON.stringify(entry.quick) === JSON.stringify(quick)) return;
+			if (quick) entry.quick = quick;
+			else delete entry.quick;
+			if (++quickUnsaved < QUICK_SAVE_EVERY) return;
+			quickUnsaved = 0;
 			await plugin.saveSettings();
 		};
 
@@ -507,11 +568,13 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 
 		progress('checking older chats…');
 		activeDownload = 'recovering a saved chat';
+		const build = await buildStamp(app, plugin.manifest);
 		for (const [k, item] of kept.entries()) {
 			if (k % 25 === 0) progress(`checking older chats… ${k} of ${kept.length}`, k, kept.length, 'checking saved chats');
 			let entry = g.index[item.uuid];
 			if (!entry || done.has(item.uuid) || entry.updated_at !== item.updated_at) continue;
 			requestChat = { item, position: `saved chat ${k + 1} of ${kept.length}` };
+			if (await quickDone(item, entry)) continue; // its raw pages are not read (quick-check.ts)
 			let chat = await readSaved(item, entry);
 			if (!chat) {
 				// Fetch a new capture as a unit. Pages from different revisions never share a capture.
@@ -524,8 +587,9 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			const before = result.filesSaved;
 			await backfill(a, chat, dirOf(entry.md), stemOf(entry.json));
 			if (result.filesSaved > before) result.backfilledChats++;
-			await refreshView(chat, item, entry);
+			await rememberQuick(item, entry, chat, await refreshView(chat, item, entry));
 		}
+		if (quickUnsaved) await plugin.saveSettings();
 
 		// Codex tasks run in the cloud (chatgpt.com/codex), into the Codex Cloud folder.
 		if (g.codexCloud) {

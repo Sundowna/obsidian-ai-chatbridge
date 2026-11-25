@@ -2,6 +2,8 @@
 // Only the fields we actually use are listed; everything else is kept untouched
 // in the raw .json file anyway.
 
+import type { QuickCheck } from './quick-check';
+
 export interface ProjectRef {
 	name: string;
 	uuid: string;
@@ -94,4 +96,6 @@ export interface IndexEntry extends NoteState {
 	pageHashes?: string[];
 	view?: string;
 	viewHash?: string;
+	/** What the last full check of this unchanged chat depended on (quick-check.ts). */
+	quick?: QuickCheck;
 }

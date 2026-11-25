@@ -15,6 +15,7 @@ import { createNew, ensureFolder, findFile, freeFileName, freeStem } from './vau
 import { appendLog } from './log';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
+import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
 import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, safeFileName, visibleFiles } from './files';
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
@@ -145,8 +146,9 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
 
 	/** Files not saved yet – or saved once and since deleted from the vault. */
-	const isMissing = (f: FileTask): boolean => {
-		const p = s.fileIndex[f.fileUuid];
+	const isMissing = (f: FileTask): boolean => missingId(f.fileUuid);
+	const missingId = (id: string): boolean => {
+		const p = s.fileIndex[id];
 		if (p === undefined) return true;
 		if (p.startsWith(SKIPPED)) return false; // known to be gone on claude.ai
 		return !exists(p);
@@ -410,18 +412,25 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		// 7. Backfill: files missing for chats whose .json and .md are in place –
 		//    never downloaded yet, or deleted from the vault since. Transcripts stay as they are.
 		if (s.downloadFiles) {
+			const build = await buildStamp(app, plugin.manifest);
+			let quickUnsaved = 0;
 			for (const item of kept) {
 				const entry = s.index[item.uuid];
 				if (!entry || done.has(item.uuid) || !exists(entry.json)) continue;
+				// Files live next to the transcript (the raw .json may have a folder of its own).
+				const folder = dirOf(exists(entry.md) ? entry.md : entry.json);
+				const stem = stemOf(entry.json);
+				// Same raw file as at the last full check, its chat view read, every file still there:
+				// nothing to do, so the .json is not read (quick-check.ts).
+				const key = checkKey([build, item.updated_at, entry.json, await fileStamps(app, [entry.json])]);
+				const settled = entry.outputsChecked === item.updated_at && !chatFileDeleted(folder, stem);
+				if (key && settled && entry.quick?.key === key && !entry.quick.files.some(missingId)) continue;
 				let chat: Chat;
 				try {
 					chat = checkChat(JSON.parse(await app.vault.adapter.read(entry.json)), item.uuid);
 				} catch {
 					continue; // unreadable saved JSON: skip, never touch it
 				}
-				// Files live next to the transcript (the raw .json may have a folder of its own).
-				const folder = dirOf(exists(entry.md) ? entry.md : entry.json);
-				const stem = stemOf(entry.json);
 				// Ask the chat view again if this version was never checked, or a saved file is gone.
 				let visible: FileTask[] = [];
 				let viewRead = false;
@@ -438,11 +447,21 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 					await saveFiles(fetched, folder, stem);
 					result.backfilledChats++;
 				}
-				if (viewRead) {
-					entry.outputsChecked = item.updated_at;
+				const files = chatFiles(chat).map((f) => f.fileUuid);
+				const quick = key ? { files, key } : undefined;
+				if (viewRead) entry.outputsChecked = item.updated_at;
+				const keyChanged = JSON.stringify(entry.quick) !== JSON.stringify(quick);
+				if (keyChanged) {
+					if (quick) entry.quick = quick;
+					else delete entry.quick;
+				}
+				// A new key alone is saved in batches; a read chat view right away, as before.
+				if (viewRead || (keyChanged && ++quickUnsaved >= QUICK_SAVE_EVERY)) {
+					quickUnsaved = 0;
 					await plugin.saveSettings();
 				}
 			}
+			if (quickUnsaved) await plugin.saveSettings();
 		}
 
 		// 8. Claude Code sessions run in the cloud (claude.ai/code), into the Code Cloud folder.
