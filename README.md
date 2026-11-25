@@ -575,6 +575,10 @@ Better not - treat them as the originals. Delete one and the next sync puts it b
 
 Your Obsidian has no built-in SQLite and no Python was found. Install Python 3 or point **Hermes → Advanced → Python** at one (Hermes ships its own in its `tools` folder).
 
+**A sync stopped with 403, 401 or another error?**
+
+Open the plugin settings, tab **Error logs**, and pick the account. It keeps the last 20 failed answers in full, so you can see whether the site refused the login, asked for a Cloudflare check or changed something. **Copy** gives a block ready for a [GitHub issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues). Cookies and login keys are removed automatically; remove email addresses, names and chat text yourself before you paste.
+
 **A sync stopped with "could not be verified"?**
 
 The provider changed how its site answers, so the plugin stopped rather than save something wrong. Please [open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues) with the line from the sync log.
@@ -592,7 +596,7 @@ npm run lint    # eslint with eslint-plugin-obsidianmd
 
 For live testing, clone the repo into `<vault>/.obsidian/plugins/ai-chatbridge/` (or copy the build output there) and reload Obsidian.
 
-Tests run offline with made-up samples: `npm run test:gemini`, `test:lumo`, `test:desktop`, `test:cloud`, `test:hermes`, `test:inventory` and `test:sync`. `test:hermes` builds a small SQLite database in a temporary folder (set `HERMES_PYTHON` to also test the Python reader with a specific interpreter). `npm run test:offline` also reads chat exports from `samples/`, which is git-ignored because it holds real chats - add your own exports to run it.
+Tests run offline with made-up samples: `npm run test:gemini`, `test:lumo`, `test:desktop`, `test:cloud`, `test:hermes`, `test:inventory`, `test:sync` and `test:error-log`. `test:hermes` builds a small SQLite database in a temporary folder (set `HERMES_PYTHON` to also test the Python reader with a specific interpreter). `npm run test:offline` also reads chat exports from `samples/`, which is git-ignored because it holds real chats - add your own exports to run it.
 
 ### Releasing
 
