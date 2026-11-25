@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.38.0 - 2026-11-25
 
 ### Changed
+- **Unchanged chats are not reread on every sync** - after a check that found nothing to do, a Claude or ChatGPT chat remembers its raw files' size and time, its note, its saved files and the plugin build. While those stay the same, the next sync skips the chat without opening its files. Anything different (a deleted or edited file, a moved note, a plugin update) brings the full check back, so the results are the same as before. Fewer reads on every sync, most noticeable on slower devices
 - **System files start with "_"** - the sync log is now `_ai-chatbridge-log.md`, reports are `_ai-chatbridge-merge-report-….md` and the diagnostics folder is `_ai-chatbridge-diagnostics`, so they are easy to leave out of the graph. Your existing ones are renamed once when you update, through Obsidian, so links keep working; a log you named yourself keeps its name
 
 ### New
