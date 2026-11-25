@@ -567,7 +567,7 @@ That's the 429s: with 1,000+ chats the providers start saying "too many requests
 Use the pasted login fallback. Sign in to the site in your browser and open DevTools (**F12**), then:
 
 - **claude.ai:** **Application → Cookies**, copy the value of `sessionKey`
-- **ChatGPT:** **Application → Cookies**, copy the value of `__Secure-next-auth.session-token` - or, if ChatGPT split it into `.0` and `.1`, go to **Network**, select a `chatgpt.com` request and copy its whole `Cookie` header
+- **ChatGPT:** use **Use browser login…** under the ChatGPT login (made for accounts created with "Continue with Google", which Google blocks inside apps). It walks you through copying `__Secure-next-auth.session-token` - both the `.0` and `.1` rows when ChatGPT splits it - and checks it with ChatGPT before saving
 - **Gemini and AI Studio:** **Network**, select a `gemini.google.com` request and copy its whole `Cookie` header
 
 Paste it under the account's advanced settings in the plugin. Pasted cookies run out sooner than a login - Google's especially - so paste a fresh one when the sync says it expired.

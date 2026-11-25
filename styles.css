@@ -1154,3 +1154,27 @@
 	overflow-wrap: anywhere;
 	user-select: text;
 }
+
+/* "Use browser login" window (ChatGPT accounts made with Google) */
+.ccs-browser-login-steps {
+	padding-inline-start: 1.4em;
+	margin-block: 12px 16px;
+}
+.ccs-browser-login-steps li {
+	margin-block-end: 8px;
+	line-height: 1.5;
+}
+.ccs-browser-login-steps button {
+	margin-inline: 4px;
+}
+.ccs-browser-login-status {
+	min-height: 1.5em;
+	margin-block: 4px 8px;
+	line-height: 1.5;
+}
+.ccs-browser-login-status.mod-success {
+	color: var(--text-success);
+}
+.ccs-browser-login-status.mod-warning {
+	color: var(--text-warning);
+}

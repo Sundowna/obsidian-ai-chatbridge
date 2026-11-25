@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.40.0 - 2026-11-25
+
+### New
+- **Use browser login for ChatGPT** - Google blocks its sign-in inside apps ("This browser or app may not be secure"), so "Continue with Google" cannot work in the login window. A new **Use browser login…** button under the ChatGPT login walks you through bringing over the login from your own browser: open chatgpt.com, find the session cookie with **Copy name**, and paste its value - both the `.0` and `.1` parts when ChatGPT splits it. The plugin checks it with ChatGPT once and only saves it when it works, in Obsidian's secret storage on this computer, never in your vault (#52)
+
 ## 0.39.0 - 2026-11-25
 
 ### New
