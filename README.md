@@ -602,6 +602,8 @@ Tests run offline with made-up samples: `npm run test:gemini`, `test:lumo`, `tes
 4. Push the commit and tag: `git push --follow-tags`
 5. The **Release Obsidian plugin** workflow builds the plugin and creates a draft GitHub release with `main.js`, `manifest.json` and `styles.css`, and this version's changelog as notes. Review it and publish
 
+Or make the release on github.com with a new tag `x.y.z` on `main` and publish it: publishing creates the tag, and the workflow then attaches `main.js`, `manifest.json` and `styles.css` to that release and adds the changelog as notes if it has none
+
 ## Support
 
 Found a bug or have an idea? [Open an issue](https://github.com/Sundowna/obsidian-ai-chatbridge/issues). What changed in each version is in the [changelog](CHANGELOG.md).

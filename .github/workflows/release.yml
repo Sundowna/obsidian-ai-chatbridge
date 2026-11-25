@@ -48,8 +48,19 @@ jobs:
                   awk -v v="$tag" 'index($0, "## " v " ") == 1 || $0 == "## " v {f=1; next} /^## /{if (f) exit} f' CHANGELOG.md > notes.md || true
                   [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
 
-                  gh release create "$tag" \
-                    --title="$tag" \
-                    --notes-file notes.md \
-                    --draft \
-                    main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+                  files="main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}"
+
+                  # A release made on github.com (publishing it creates the tag) already exists:
+                  # attach the files to it, and fill in its notes if it has none.
+                  if gh release view "$tag" > /dev/null 2>&1; then
+                    gh release upload "$tag" $files --clobber
+                    if [ -z "$(gh release view "$tag" --json body --jq .body)" ]; then
+                      gh release edit "$tag" --title="$tag" --notes-file notes.md
+                    fi
+                  else
+                    gh release create "$tag" \
+                      --title="$tag" \
+                      --notes-file notes.md \
+                      --draft \
+                      $files
+                  fi
