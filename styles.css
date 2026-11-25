@@ -1053,3 +1053,104 @@
 	margin: 0;
 	padding-inline-start: var(--size-4-5);
 }
+
+/* Error logs tab. */
+.ccs-errorlog-warning {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 10px 12px;
+	margin-bottom: 16px;
+	border: 1px solid var(--text-warning);
+	border-radius: var(--radius-m);
+	background: rgba(var(--color-orange-rgb), 0.1);
+	color: var(--text-normal);
+}
+
+.ccs-errorlog-warning-icon {
+	color: var(--text-warning);
+	flex-shrink: 0;
+}
+
+.ccs-errorlog-count {
+	padding: 0 6px;
+	border-radius: var(--radius-l);
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	font-size: var(--font-ui-smaller);
+}
+
+.ccs-errorlog-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+
+.ccs-errorlog-bar .ccs-errorlog-meta {
+	flex: 1;
+}
+
+.ccs-errorlog-entry {
+	padding: 10px 12px;
+	margin-bottom: 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.ccs-errorlog-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.ccs-errorlog-status {
+	font-family: var(--font-monospace);
+	font-weight: var(--font-semibold);
+	color: var(--text-error);
+}
+
+.ccs-errorlog-line {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-settings .ccs-errorlog-copy {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: auto;
+	padding: 2px 8px;
+}
+
+.ccs-errorlog-meta {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	overflow-wrap: anywhere;
+}
+
+.ccs-errorlog-entry details {
+	margin-top: 6px;
+}
+
+.ccs-errorlog-entry summary {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ccs-errorlog-pre {
+	max-height: 20em;
+	overflow: auto;
+	padding: 8px;
+	margin: 6px 0 0;
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	user-select: text;
+}

@@ -89,7 +89,7 @@ Command IDs are stable API. Never rename.
 Every selected or active state needs a visible signal in light and dark theme.
 
 **Shell**
-- [ ] Tabs: Overview, Claude, ChatGPT, Lumo, Gemini, Hermes, Memory, General; each with icon; active tab has `is-active` and `aria-selected="true"`; hover style
+- [ ] Tabs: Overview, Claude, ChatGPT, Lumo, Gemini, Hermes, Memory, General, Error logs (section 14); each with icon; active tab has `is-active` and `aria-selected="true"`; hover style
 - [ ] Current tab, selected account per provider, selected surface and open Advanced sections survive a redraw; scroll position kept on redraw, reset to top on tab change
 - [ ] Closing settings forgets in-memory project lists (Lumo)
 
@@ -316,3 +316,16 @@ The vault (with `.obsidian`) may be synced between computers by a tool with no i
 - [ ] The plugin's own files start with `_`, lower case with dashes (user decision 2026-11-24): log `_ai-chatbridge-log.md`, reports `_ai-chatbridge-<title>-<YYYY-MM-DD-HHMM>.md`, folder `AI Chats/_ai-chatbridge-diagnostics`; chat notes, raw files and `sync-request.json`/`sync-status.json` keep their names (an older phone must still find those)
 - [ ] Older vaults, once per vault on a device that syncs (`systemNames` in data.json): a log named `AI ChatBridge log.md` (any folder), `AI ChatBridge <title> <stamp>[ n].md` reports in the log's folder and `AI Chats/AI ChatBridge diagnostics` are renamed through Obsidian (links follow); the log setting follows the log
 - [ ] A log you named yourself is left alone; an old log name with no file yet just points to the new name; a target already taken: both stay, the log keeps its old name; files elsewhere are never touched; one notice says how many were renamed and lists what was left
+
+## 14. Error logs [code: error-log.ts, ui/error-logs-tab.ts, covered by `npm run test:error-log`]
+
+- [ ] Every failed answer is kept per account in `<plugin folder>/error-log.json` (never `data.json`, never a note): time, service, method, address, status (or "no answer"), response headers, whole response body, what the plugin said, plugin/Obsidian/system line (user decision 2026-11-25: whole answers, so a GitHub issue shows the cause)
+- [ ] Recorded: any status the request code does not accept (401, 403, 429, 5xx, other), network errors, a 200 that is not the expected JSON (Claude, ChatGPT, AI Studio, Lumo; not yet Gemini), the ChatGPT page without a login key, a Gemini/AI Studio/Lumo page that did not open signed in, a Codex cloud failure (message only). Not recorded: 200s and the 404s the code allows. Stop texts unchanged
+- [ ] Claude (`api.ts`: chat GETs, ReadConversation RPC, memory), ChatGPT (`chatgpt/api.ts`: requests, start page in the login window, generated files, signed file links without their query), Gemini, AI Studio (under its Google account), Lumo (page requests now return headers too), Codex cloud (`chatgpt/sync.ts`)
+- [ ] Secrets removed before anything is kept: session key and every login cookie value, ChatGPT login key, `sessionKey=`, `__Secure-next-auth.*`, Google `__Secure-*PSID`/`SAPISID`, Proton `AUTH-`/`REFRESH-` and UID, JWT- and JWE-shaped values, token fields in JSON (also escaped JSON inside a page), link signatures and keys in a query (`sig`, `signature`, `X-Amz-*`, `X-Goog-*`, `token`, `access_token`, `key`), `Bearer`/`SAPISIDHASH` values; `set-cookie`, `cookie`, `authorization` headers show `[hidden]`; request headers never kept. UUIDs and Cloudflare ray IDs stay
+- [ ] Last 20 per account, newest first; a body over 64 KB is cut with "… cut, N KB more"; binary bodies show "[binary, N bytes]"
+- [ ] Recording never throws and never waits on a sync; the file is written 0.5 s after the last change; a failed write or a corrupt file is ignored (starts empty); loaded on start, written on unload; a login-window answer whose body does not arrive within 5 s is recorded without it, so the stop is not held up
+- [ ] A removed account loses its entries (on remove and on start); a renamed one keeps them
+- [ ] Settings tab **Error logs** (icon `bug`, after General): warning at the top "Remove all personal data … Cookies and login keys are removed automatically."; one pill per account ("Claude · Default", …) with a count badge, active pill `is-active` + `aria-selected`, first shown is the selected one, else the first with errors; "No errors saved for this account." when empty
+- [ ] Per entry: status, service, method and address, time and environment, "Plugin said: …", collapsible Response with headers and body (scrolls, selectable), **Copy** (Markdown for an issue, fenced body with json/html language); per account **Copy all** and **Clear** (confirm, warning tone); copy notice "Copied – remove personal data before pasting."
+- [ ] The open tab redraws at most once a second while errors arrive

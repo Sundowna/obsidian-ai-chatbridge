@@ -6,6 +6,8 @@ import type { Provider } from '../login';
 import type AIChatBridge from '../main';
 import type { PanelContext } from './fields';
 import { generalTab } from './general-tab';
+import { errorLogsTab, type ErrorLogsState } from './error-logs-tab';
+import { onErrorLogChange } from '../error-log';
 import { hermesTab } from './hermes-tab';
 import { memoryTab } from './memory-tab';
 import { hermesIcon, providerIcon } from './icons';
@@ -13,7 +15,7 @@ import { overviewTab } from './overview-tab';
 import { forgetProjectLists } from './project-picker';
 import { providerTab, type ProviderState } from './provider-tab';
 
-type Tab = 'overview' | Provider | 'hermes' | 'memory' | 'general';
+type Tab = 'overview' | Provider | 'hermes' | 'memory' | 'general' | 'errors';
 
 export class AIChatBridgeSettingTab extends PluginSettingTab {
 	/** Where you are; kept while the settings window is open. */
@@ -25,6 +27,9 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		gemini: { accountId: '', surface: 'web' },
 	};
 	private readonly openSections = new Set<string>();
+	private readonly errorLogs: ErrorLogsState = { key: '' };
+	/** Redraws the Error logs tab when an error arrives while it is open. */
+	private stopWatching: (() => void) | null = null;
 
 	constructor(app: App, private readonly plugin: AIChatBridge) {
 		super(app, plugin);
@@ -32,6 +37,8 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 
 	hide(): void {
 		forgetProjectLists();
+		this.stopWatching?.();
+		this.stopWatching = null;
 		super.hide();
 	}
 
@@ -47,7 +54,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		b.toggleClass('is-active', active);
 		if (id === 'claude' || id === 'chatgpt' || id === 'lumo' || id === 'gemini') providerIcon(b, id);
 		else if (id === 'hermes') hermesIcon(b);
-		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : id === 'memory' ? 'brain' : 'sliders-horizontal');
+		else setIcon(b.createSpan({ cls: 'ccs-glyph' }), id === 'overview' ? 'layout-dashboard' : id === 'memory' ? 'brain' : id === 'errors' ? 'bug' : 'sliders-horizontal');
 		b.createSpan({ text: label });
 		b.addEventListener('click', () => this.go(id));
 	}
@@ -67,6 +74,7 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		this.tabButton(bar, 'hermes', 'Hermes');
 		this.tabButton(bar, 'memory', 'Memory');
 		this.tabButton(bar, 'general', 'General');
+		this.tabButton(bar, 'errors', 'Error logs');
 
 		const ctx: PanelContext = {
 			app: this.app,
@@ -84,7 +92,20 @@ export class AIChatBridgeSettingTab extends PluginSettingTab {
 		else if (this.tab === 'general') generalTab(ctx, body);
 		else if (this.tab === 'hermes') hermesTab(ctx, body);
 		else if (this.tab === 'memory') memoryTab(ctx, body);
+		else if (this.tab === 'errors') errorLogsTab(ctx, body, this.errorLogs);
 		else providerTab(ctx, body, this.tab, this.providers[this.tab]);
 		containerEl.scrollTop = scroll;
+		this.stopWatching?.();
+		let pending = false;
+		this.stopWatching = this.tab === 'errors'
+			? onErrorLogChange(() => {
+				if (pending) return;
+				pending = true;
+				window.setTimeout(() => {
+					pending = false;
+					if (this.tab === 'errors') this.display();
+				}, 1000);
+			})
+			: null;
 	}
 }

@@ -6,6 +6,7 @@
 
 import { StopError } from '../api';
 import { isLoggedIn, openHiddenPage, type HiddenPage, type LoginRef } from '../login';
+import { recordError, type ErrorSource } from '../error-log';
 import { sessionKeyPassword, openMasterKeys, unlockUserKeys } from './keys';
 import { checkClientKey, checkConversation, checkFullMessage, checkMasterKeys, checkSpaces, checkUser, parseStoredSession } from './schema';
 import type { LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
@@ -41,14 +42,15 @@ export class LumoApi {
 	userId = '';
 	masterKeys: CryptoKey[] = [];
 
-	private constructor(private readonly page: HiddenPage) {}
+	private constructor(private readonly page: HiddenPage, private readonly source: ErrorSource) {}
 
 	/** Opens Lumo with this account's login and unlocks its chats. Close it when done. */
 	static async connect(login: LoginRef): Promise<LumoApi> {
 		if (!(await isLoggedIn(login))) throw new StopError('Not logged in to Lumo. Select "Log in" for this account in the plugin settings.');
 		const page = await openHiddenPage(login, `${ORIGIN}/`, API_URLS, SESSION_READY, OPEN_TIMEOUT_MS);
+		if (!page) recordError({ provider: 'lumo', accountId: login.id }, { service: 'Lumo', method: 'OPEN', url: `${ORIGIN}/`, status: null, message: 'the Lumo page did not finish opening' });
 		if (!page) throw new StopError('Lumo did not finish opening. Log in again in the plugin settings, with "Keep me signed in" on.');
-		const api = new LumoApi(page);
+		const api = new LumoApi(page, { provider: 'lumo', accountId: login.id });
 		try {
 			await api.unlock();
 			return api;
@@ -97,13 +99,15 @@ export class LumoApi {
 			throw new StopError('Blocked a request to a Lumo address the plugin does not use.');
 		}
 		const headers = { Accept: 'application/vnd.protonmail.v1+json', 'x-pm-uid': this.page.uid, 'x-pm-appversion': this.page.appVersion };
-		const code = `(async () => { const r = await fetch(${JSON.stringify(url.pathname + url.search)}, { credentials: 'same-origin', headers: ${JSON.stringify(headers)} }); return JSON.stringify({ status: r.status, text: await r.text() }); })()`;
-		let res: { status: number; text: string };
+		const code = `(async () => { const r = await fetch(${JSON.stringify(url.pathname + url.search)}, { credentials: 'same-origin', headers: ${JSON.stringify(headers)} }); return JSON.stringify({ status: r.status, text: await r.text(), headers: Object.fromEntries(r.headers) }); })()`;
+		let res: { status: number; text: string; headers?: Record<string, string> };
 		try {
-			res = JSON.parse(await this.page.run(code)) as { status: number; text: string };
+			res = JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> };
 		} catch {
+			recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: null, message: 'Network error while talking to Lumo.' });
 			throw new StopError('Network error while talking to Lumo.');
 		}
+		if (res.status !== 200) recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: res.status, headers: res.headers, body: res.text, message: `Lumo answered ${res.status}`, secrets: [this.page.uid] });
 		if (res.status === 401) throw new StopError('Lumo answered 401 (not logged in). Log in to Lumo again in the plugin settings.');
 		if (res.status === 403) throw new StopError('Lumo answered 403 (forbidden). Log in to Lumo again in the plugin settings.');
 		if (res.status === 429) throw new StopError('Lumo is rate limiting this account. Try again later.');
@@ -111,6 +115,7 @@ export class LumoApi {
 		try {
 			body = JSON.parse(res.text);
 		} catch {
+			if (res.status === 200) recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: 200, headers: res.headers, body: res.text, message: 'answer was not valid JSON', secrets: [this.page.uid] });
 			throw new StopError(`Lumo answered ${res.status} without valid JSON, so the sync stopped.`);
 		}
 		if (res.status !== 200) {

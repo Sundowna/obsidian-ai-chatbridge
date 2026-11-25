@@ -1,6 +1,7 @@
 // A provider's tab: pick an account, then its Web or Desktop side.
 
 import { Notice, setIcon } from 'obsidian';
+import { errorLogAccounts, pruneErrors } from '../error-log';
 import { accountsOf, addAccount, loginRef, nameProblem, PROVIDER_LABEL, removeAccount, SITE_LABEL, type AnyAccount, type DesktopAccount } from '../accounts';
 import { isLoggedIn, logout, type Provider } from '../login';
 import type { Surface } from '../main';
@@ -72,6 +73,7 @@ function accountHeader(ctx: PanelContext, el: HTMLElement, provider: Provider, a
 				}
 				removeAccount(ctx.plugin.settings, provider, account);
 				await ctx.plugin.saveSettings();
+				await pruneErrors(errorLogAccounts(ctx.plugin.settings).map((a) => a.source));
 				ctx.refresh();
 			},
 		).open();

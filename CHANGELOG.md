@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- **Error logs** - a new settings tab keeps the last 20 failed answers of each account (Claude, ChatGPT, Gemini, AI Studio, Lumo, Codex cloud) in full: address, status, response headers and body. **Copy** gives a ready-made block for a GitHub issue. Cookies, session keys and login keys are removed automatically; remove personal data (email addresses, names, chat titles and text) yourself before pasting. Saved in the plugin's folder, not in your notes
+
 ## 0.38.0 - 2026-11-25
 
 ### Changed

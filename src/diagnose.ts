@@ -33,7 +33,7 @@ export async function diagnoseActiveChat(plugin: AIChatBridge): Promise<void> {
 
 	const lines: string[] = [];
 	try {
-		const api = new ClaudeApi(org, getKey);
+		const api = new ClaudeApi(org, getKey, { provider: 'claude', accountId: account.id });
 		await ensureFolder(app, OUT);
 		const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 		for (const v of variants) {

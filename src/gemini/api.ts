@@ -7,6 +7,7 @@
 import { StopError } from '../api';
 import { googleCookies } from '../cookies';
 import { GEMINI_SIGNED_IN, isLoggedIn, openReadyPage, type LoginRef, type PastedCookies, type ReadyPage } from '../login';
+import { recordError, type ErrorSource } from '../error-log';
 import { batchPayload, checkChatId, readChatPage, readListPage } from './wire';
 import type { GeminiListItem } from './types';
 
@@ -32,18 +33,19 @@ export async function googleLogin(login: LoginRef, fallback: string | null): Pro
 }
 
 export class GeminiApi {
-	private constructor(private readonly page: ReadyPage) {}
+	private constructor(private readonly page: ReadyPage, private readonly source: ErrorSource) {}
 
 	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
 	static async connect(login: LoginRef, fallback: string | null = null): Promise<GeminiApi> {
 		const pasted = await googleLogin(login, fallback);
 		const page = await openReadyPage(login, START, GEMINI_SIGNED_IN, OPEN_TIMEOUT_MS, pasted);
 		if (!page) {
+			recordError({ provider: 'gemini', accountId: login.id }, { service: 'Gemini', method: 'OPEN', url: START, status: null, message: 'the Gemini page did not open signed in' });
 			throw new StopError(pasted
 				? 'Gemini did not open signed in with the pasted cookies. They may have expired: paste fresh ones, or log in instead.'
 				: 'Gemini did not open signed in. Log in to Google again in the plugin settings.');
 		}
-		return new GeminiApi(page);
+		return new GeminiApi(page, { provider: 'gemini', accountId: login.id });
 	}
 
 	close(): void {
@@ -95,14 +97,16 @@ export class GeminiApi {
 			const q = new URLSearchParams({ rpcids: ${JSON.stringify(rpcId)}, 'source-path': '/app', bl: w.cfb2h || '', 'f.sid': w.FdrFJe || '', hl: 'en', _reqid: String(100000 + Math.floor(Math.random() * 900000)), rt: 'c' });
 			const body = new URLSearchParams({ 'f.req': JSON.stringify([[[${JSON.stringify(rpcId)}, ${JSON.stringify(JSON.stringify(args))}, null, 'generic']]]), at: w.SNlM0e });
 			const r = await fetch('/_/BardChatUi/data/batchexecute?' + q, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'X-Same-Domain': '1' }, body });
-			return JSON.stringify({ status: r.status, text: await r.text() });
+			return JSON.stringify({ status: r.status, text: await r.text(), headers: Object.fromEntries(r.headers) });
 		})()`;
-		let res: { status: number; text: string };
+		let res: { status: number; text: string; headers?: Record<string, string> };
 		try {
-			res = JSON.parse(await this.page.run(code)) as { status: number; text: string };
+			res = JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> };
 		} catch {
+			recordError(this.source, { service: 'Gemini', method: 'POST', url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=${rpcId}`, status: null, message: 'Network error while talking to Gemini.' });
 			throw new StopError('Network error while talking to Gemini.');
 		}
+		if (res.status !== 200) recordError(this.source, { service: 'Gemini', method: 'POST', url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=${rpcId}`, status: res.status, headers: res.headers, body: res.text, message: `Gemini answered ${res.status}` });
 		if (res.status === 401 || res.status === 403) throw new StopError(`Gemini answered ${res.status} (not logged in). Log in to Google again in the plugin settings.`);
 		if (res.status === 429) throw new StopError('Gemini is rate limiting this account. Try again later.');
 		if (res.status !== 200) throw new StopError(`Gemini answered ${res.status}, so the sync stopped.`);
