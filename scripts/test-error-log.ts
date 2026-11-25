@@ -4,7 +4,7 @@
 (globalThis as unknown as { window: unknown }).window = globalThis;
 
 import {
-	cleanText, clearErrors, entryMarkdown, errorEntries, errorLogAccounts, flushErrorLog, initErrorLog, pruneErrors, recordError, type ErrorSource,
+	cleanText, clearErrors, recordFetchAnswer, entryMarkdown, errorEntries, errorLogAccounts, flushErrorLog, initErrorLog, pruneErrors, recordError, type ErrorSource,
 } from '../src/error-log';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings';
 import { ClaudeApi } from '../src/api';
@@ -69,6 +69,27 @@ async function main() {
 	expect('UUID kept', c.includes(uuid));
 	expect('cf-ray kept', c.includes('cf-ray: 8f2a1c3b9d4e5f60-FRA'));
 	expect('short secret (<8) not split-joined', c.includes('chat '));
+
+	// review fixes: signed links, encrypted session tokens, escaped JSON
+	const signed = cleanText('https://chatgpt.com/backend-api/estuary/content?id=file_00000000abc&ts=123&p=fs&sig=0a1b2c3d4e5f60718293');
+	expect('link signature hidden, file ID kept', signed.includes('sig=[hidden]') && !signed.includes('0a1b2c3d4e5f') && signed.includes('id=file_00000000abc'), signed);
+	const amz = cleanText('https://files.example.com/x?X-Amz-Signature=abcdef123456&X-Goog-Signature=fedcba654321&se=2026&sp=r&sv=1');
+	expect('S3/GCS/SAS signatures hidden', !amz.includes('abcdef123456') && !amz.includes('fedcba654321') && amz.includes('sv=1'), amz);
+	const jwe = 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..aXYxMjNhYmM.Y2lwaGVyNDU2ZGVmZ2hp.dGFnNzg5';
+	expect('encrypted session token (JWE) hidden', !cleanText(`v=${jwe}`).includes('Y2lwaGVyNDU2ZGVmZ2hp'), cleanText(`v=${jwe}`));
+	const escaped = cleanText('{\\"accessToken\\":\\"escapedsecret123\\",\\"x\\":1}');
+	expect('escaped JSON token hidden', !escaped.includes('escapedsecret123'), escaped);
+	const quoteInside = cleanText('{"token":"ab\\"cdsecretrest","n":1}');
+	expect('token with escaped quote hidden whole', !quoteInside.includes('cdsecretrest'), quoteInside);
+
+	// a body that never ends must not hold up the stop
+	const endless = new Response(new ReadableStream({ start() { /* never closes */ } }), { status: 502, headers: { 'content-type': 'text/html' } });
+	const t0 = Date.now();
+	const slowAd = memAdapter();
+	await initErrorLog(slowAd as never, DIR, ENV);
+	await recordFetchAnswer(A, 'ChatGPT', 'GET', 'https://chatgpt.com/', endless, 'start page answered 502', [], 50);
+	expect('stalled body: returns after the time limit', Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
+	expect('stalled body: still recorded', errorEntries(A)[0]?.status === 502 && errorEntries(A)[0]?.headers['content-type'] === 'text/html');
 
 	// --- recording, before init: nothing, no throw ---
 	let threw = false;
@@ -296,6 +317,15 @@ async function apiChecks() {
 	testHooks.requestUrl = async () => answer(200, { 'content-type': 'application/json' }, '{"items":[]}');
 	await gpt.get(gpt.listPath(0, false));
 	expect('ChatGPT: allowed 404 and 200 not recorded', errorEntries(gptSource).length === n);
+
+	testHooks.requestUrl = async () => answer(403, { 'content-type': 'application/xml' }, '<Error>AccessDenied</Error>');
+	try {
+		await gpt.fileBytes('/backend-api/estuary/content?id=file_00000000abc&ts=1&p=fs&sig=99887766554433221100');
+	} catch {
+		// expected stop
+	}
+	e = errorEntries(gptSource)[0];
+	expect('ChatGPT: estuary link saved without its signature', !!e && e.url.includes('estuary/content') && !e.url.includes('99887766554433221100'), e?.url);
 	testHooks.requestUrl = null;
 
 	// Gemini, AI Studio and Lumo: the page sends the request; the test plays the page.
@@ -349,4 +379,14 @@ async function apiChecks() {
 	expect('saved file holds no login value', !saved.includes('TESTKEYVALUE') && !saved.includes('SESSIONCOOKIEVALUE') && !saved.includes('CLEARANCEVALUE1') && !saved.includes(token));
 }
 
-void main();
+let finished = false;
+// A promise that never settles lets Node quit early with code 0; count that as a failure.
+process.on('beforeExit', () => {
+	if (finished) return;
+	console.log('FAIL  the checks never finished (something waited forever)');
+	process.exitCode = 1;
+	finished = true;
+});
+void main().then(() => {
+	finished = true;
+});

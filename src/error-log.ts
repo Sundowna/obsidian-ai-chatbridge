@@ -62,6 +62,10 @@ let timer: number | null = null;
 let saving: Promise<void> = Promise.resolve();
 const listeners = new Set<() => void>();
 
+const TOKEN_FIELDS = 'accessToken|access_token|refreshToken|refresh_token|sessionToken|session_token|token|id_token|sessionKey|AccessToken|RefreshToken|UID';
+/** How long a failed answer's body may take to arrive before the stop goes ahead without it. */
+const BODY_WAIT_MS = 5_000;
+
 const keyOf = (s: ErrorSource) => `${s.provider}:${s.accountId}`;
 
 /**
@@ -75,8 +79,13 @@ export function cleanText(text: string, secrets: (string | null | undefined)[] =
 		.replace(/sessionKey=[^;\s"'&]+/gi, 'sessionKey=[hidden]')
 		.replace(/(__Secure-next-auth\.[\w.-]*=)[^;\s"'&]+/gi, '$1[hidden]')
 		.replace(/(__Secure-[13]PSID[\w-]*=|SAPISID=|AUTH-[\w-]+=|REFRESH-[\w-]+=)[^;\s"'&]+/g, '$1[hidden]')
-		.replace(/eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]+/g, '[key]')
-		.replace(/("(?:accessToken|access_token|refreshToken|refresh_token|sessionToken|session_token|token|id_token|sessionKey|AccessToken|RefreshToken|UID)"\s*:\s*")[^"]*"/g, '$1[hidden]"')
+		// Signed links: the signature (or a key) in the query grants access on its own.
+		.replace(/([?&](?:sig|signature|X-Amz-Signature|X-Amz-Security-Token|X-Amz-Credential|X-Goog-Signature|X-Goog-Credential|token|access_token|key)=)[^&\s"'#<]+/gi, '$1[hidden]')
+		// JWTs, and encrypted ones (JWE: five parts, the second may be empty).
+		.replace(/eyJ[\w-]{5,}\.[\w-]*\.[\w-]+(?:\.[\w-]+)*/g, '[key]')
+		.replace(new RegExp(`("(?:${TOKEN_FIELDS})"\\s*:\\s*")(?:[^"\\\\]|\\\\.)*"`, 'g'), '$1[hidden]"')
+		// The same inside JSON that sits in a string (escaped quotes), as in a page's script.
+		.replace(new RegExp(`(\\\\"(?:${TOKEN_FIELDS})\\\\"\\s*:\\s*\\\\")(?:(?!\\\\").)*\\\\"`, 'g'), '$1[hidden]\\"')
 		.replace(/\b(Bearer|SAPISIDHASH|SAPISID1PHASH|SAPISID3PHASH)\s+[^\s"',]+/g, '$1 [hidden]');
 }
 
@@ -197,20 +206,30 @@ export function recordAnswer(
 	recordError(source, { service, method, url, status: res.status, headers: res.headers, body, message, secrets });
 }
 
-/** A fetch `Response` (login window). Reads a copy of the body; never throws. */
+/**
+ * A fetch `Response` (login window). Reads a copy of the body, but waits for it at most
+ * `waitMs`: a body that does not arrive must not hold up the stop. Never throws.
+ */
 export async function recordFetchAnswer(
-	source: ErrorSource | undefined, service: string, method: string, url: string, res: Response, message: string, secrets: (string | null | undefined)[] = [],
+	source: ErrorSource | undefined, service: string, method: string, url: string, res: Response, message: string,
+	secrets: (string | null | undefined)[] = [], waitMs = BODY_WAIT_MS,
 ): Promise<void> {
 	if (!source) return;
 	const headers: Record<string, string> = {};
-	let body: ArrayBuffer | undefined;
+	let body: ArrayBuffer | string | undefined;
+	let timer: number | undefined;
 	try {
 		res.headers.forEach((v, k) => {
 			headers[k] = v;
 		});
-		body = await res.clone().arrayBuffer();
+		const late = new Promise<string>((done) => {
+			timer = window.setTimeout(() => done(`[the body did not arrive within ${Math.round(waitMs / 1000)} s]`), waitMs);
+		});
+		body = await Promise.race([res.clone().arrayBuffer(), late]);
 	} catch {
 		body = undefined;
+	} finally {
+		window.clearTimeout(timer);
 	}
 	recordError(source, { service, method, url, status: res.status, headers, body, message, secrets });
 }
