@@ -246,7 +246,18 @@ async function apiChecks() {
 		stop = e instanceof Error ? e.message : String(e);
 	}
 	let e = errorEntries(claude)[0];
-	expect('Claude: stop message unchanged', stop === 'claude.ai answered 403 (forbidden) to ReadConversation.', stop);
+	// #46 (PR #47): this refusal skips the chat view instead of stopping, but is still logged.
+	expect('Claude: "not offered" 403 does not stop the sync', stop === '', stop);
+	const plainReply = answer(403, { 'content-type': 'application/json' }, '{"code":"permission_denied","message":"Forbidden"}');
+	testHooks.requestUrl = async () => plainReply;
+	try {
+		await new ClaudeApi(org, () => key, claude).readConversation(chat);
+	} catch (x) {
+		stop = x instanceof Error ? x.message : String(x);
+	}
+	expect('Claude: other 403 stop message unchanged, and logged', stop === 'claude.ai answered 403 (forbidden) to ReadConversation.' && errorEntries(claude)[0]?.body.includes('Forbidden') === true, stop);
+	errorEntries(claude).shift();
+	testHooks.requestUrl = async () => reply;
 	expect('Claude: 403 to ReadConversation recorded', e?.status === 403 && e.method === 'POST' && e.url.endsWith('.ConversationService/ReadConversation'));
 	expect('Claude: whole body kept', !!e && e.body.includes('blocked_by_org_tier') && e.body.includes('This isn’t available for your account.'));
 	expect('Claude: session key not kept', !!e && !e.body.includes('TESTKEYVALUE'));
