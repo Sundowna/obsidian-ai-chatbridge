@@ -1,0 +1,191 @@
+// Error log: whole failed answers per account, secrets removed, capped, saved in the plugin folder.
+// Run: npm run test:error-log
+
+(globalThis as unknown as { window: unknown }).window = globalThis;
+
+import {
+	cleanText, clearErrors, entryMarkdown, errorEntries, errorLogAccounts, flushErrorLog, initErrorLog, pruneErrors, recordError, type ErrorSource,
+} from '../src/error-log';
+import { DEFAULT_SETTINGS, type Settings } from '../src/settings';
+
+let failures = 0;
+function expect(label: string, ok: boolean, detail = '') {
+	console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
+	if (!ok) failures++;
+}
+
+/** In-memory stand-in for Obsidian's vault adapter. */
+function memAdapter(failWrites = false) {
+	const files = new Map<string, string>();
+	return {
+		files,
+		exists: async (p: string) => files.has(p),
+		read: async (p: string) => {
+			const t = files.get(p);
+			if (t === undefined) throw new Error('missing');
+			return t;
+		},
+		write: async (p: string, t: string) => {
+			if (failWrites) throw new Error('read-only');
+			files.set(p, t);
+		},
+	};
+}
+
+const A: ErrorSource = { provider: 'chatgpt', accountId: 'a' };
+const B: ErrorSource = { provider: 'claude', accountId: 'b' };
+const DIR = '.obsidian/plugins/ai-chatbridge';
+const FILE = `${DIR}/error-log.json`;
+const ENV = 'AI ChatBridge 0.38.0 · Obsidian test · Windows';
+
+async function main() {
+	// --- cleaning ---
+	const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJlLXZhbHVl';
+	const uuid = '0b3c9a52-7e1d-4c2a-9f3e-5d6b7a8c9e01';
+	const raw = [
+		'key sk-ant-sid01-SECRETSECRET here',
+		'Cookie: sessionKey=xyz123abc; other=1',
+		`token ${jwt}`,
+		'{"accessToken":"abcdefghijklmnop","user":"x"}',
+		'Authorization: Bearer abc.def.ghi',
+		'__Secure-next-auth.session-token.0=longsessionvalue',
+		`chat ${uuid}`,
+		'cf-ray: 8f2a1c3b9d4e5f60-FRA',
+	].join('\n');
+	const c = cleanText(raw, ['sk-ant-sid01-SECRETSECRET', null, 'short']);
+	expect('passed secret hidden', !c.includes('SECRETSECRET') && c.includes('key [hidden] here'), c);
+	expect('sessionKey= hidden', c.includes('sessionKey=[hidden]') && !c.includes('xyz123abc'));
+	expect('JWT hidden', !c.includes(jwt));
+	expect('accessToken value hidden', c.includes('"accessToken":"[hidden]"') && !c.includes('abcdefghijklmnop'));
+	expect('Bearer hidden', c.includes('Bearer [hidden]') && !c.includes('abc.def.ghi'));
+	expect('ChatGPT session cookie hidden', !c.includes('longsessionvalue'));
+	expect('UUID kept', c.includes(uuid));
+	expect('cf-ray kept', c.includes('cf-ray: 8f2a1c3b9d4e5f60-FRA'));
+	expect('short secret (<8) not split-joined', c.includes('chat '));
+
+	// --- recording, before init: nothing, no throw ---
+	let threw = false;
+	try {
+		recordError(A, { service: 'ChatGPT', method: 'GET', url: 'https://chatgpt.com/', status: 403 });
+	} catch {
+		threw = true;
+	}
+	expect('record before init does not throw', !threw);
+
+	const ad = memAdapter();
+	await initErrorLog(ad as never, DIR, ENV);
+	expect('record before init kept nothing', errorEntries(A).length === 0);
+	recordError(undefined, { service: 'x', method: 'GET', url: 'u', status: 500 });
+
+	recordError(A, {
+		service: 'ChatGPT', method: 'GET', url: 'https://chatgpt.com/backend-api/conversations?offset=0', status: 403,
+		headers: { 'Set-Cookie': 'a=b', 'Content-Type': 'text/html; charset=UTF-8', 'cf-mitigated': 'challenge', Authorization: 'Bearer x' },
+		body: '<!DOCTYPE html><title>Just a moment...</title>',
+	});
+	let e = errorEntries(A)[0];
+	expect('entry saved', !!e && e.status === 403);
+	expect('set-cookie hidden', e?.headers['set-cookie'] === '[hidden]');
+	expect('authorization hidden', e?.headers['authorization'] === '[hidden]');
+	expect('other headers kept', e?.headers['cf-mitigated'] === 'challenge' && e?.headers['content-type'] === 'text/html; charset=UTF-8');
+	expect('body kept whole', e?.body === '<!DOCTYPE html><title>Just a moment...</title>');
+	expect('env kept', e?.env === ENV);
+
+	// cap 20, newest first
+	for (let i = 0; i < 25; i++) recordError(A, { service: 'ChatGPT', method: 'GET', url: `https://chatgpt.com/n${i}`, status: 500 });
+	const list = errorEntries(A);
+	expect('20 kept', list.length === 20, String(list.length));
+	expect('newest first', list[0]?.url === 'https://chatgpt.com/n24' && list[19]?.url === 'https://chatgpt.com/n5');
+	expect('other account empty', errorEntries(B).length === 0);
+
+	// big body
+	recordError(B, { service: 'claude.ai', method: 'GET', url: 'https://claude.ai/api/x', status: 500, body: 'x'.repeat(70_000) });
+	e = errorEntries(B)[0];
+	expect('body cut at 64 KB', !!e && e.body.startsWith('x'.repeat(65_536)) && e.body.length < 65_536 + 40, String(e?.body.length));
+	expect('cut marker', !!e && e.body.endsWith('… cut, 5 KB more'), e?.body.slice(-30));
+	expect('bodyBytes original', e?.bodyBytes === 70_000);
+
+	// binary body
+	recordError(B, { service: 'claude.ai', method: 'POST', url: 'https://claude.ai/rpc', status: 403, body: new Uint8Array([1, 2, 3, 4]).buffer, contentType: 'application/proto' });
+	e = errorEntries(B)[0];
+	expect('binary body summarised', e?.body === '[binary, 4 bytes]', e?.body);
+	// JSON in an ArrayBuffer is text
+	recordError(B, { service: 'claude.ai', method: 'POST', url: 'https://claude.ai/rpc', status: 403, body: new TextEncoder().encode('{"code":"permission_denied"}').buffer, contentType: 'application/json' });
+	expect('text in ArrayBuffer decoded', errorEntries(B)[0]?.body === '{"code":"permission_denied"}');
+
+	// secrets passed with the input are removed from body and message
+	recordError(B, { service: 'claude.ai', method: 'GET', url: 'https://claude.ai/api/organizations', status: 401, body: 'key=sk-ant-REALKEY123', message: 'refused sk-ant-REALKEY123', secrets: ['sk-ant-REALKEY123'] });
+	e = errorEntries(B)[0];
+	expect('secret removed from body and message', !!e && !e.body.includes('REALKEY') && !e.message.includes('REALKEY'));
+
+	// saved to the plugin folder file; a second load restores it
+	await flushErrorLog();
+	expect('file written', ad.files.has(FILE));
+	expect('file holds no secret', !(ad.files.get(FILE) ?? '').includes('REALKEY'));
+	await initErrorLog(ad as never, DIR, ENV);
+	expect('reload restores entries', errorEntries(A).length === 20 && errorEntries(B).length === 4);
+
+	// corrupt file → empty
+	const bad = memAdapter();
+	bad.files.set(FILE, '{not json');
+	await initErrorLog(bad as never, DIR, ENV);
+	expect('corrupt file starts empty', errorEntries(A).length === 0);
+
+	// failing writes never throw
+	const ro = memAdapter(true);
+	await initErrorLog(ro as never, DIR, ENV);
+	threw = false;
+	try {
+		recordError(A, { service: 'ChatGPT', method: 'GET', url: 'https://chatgpt.com/', status: 403 });
+		await flushErrorLog();
+	} catch {
+		threw = true;
+	}
+	expect('failing write does not throw', !threw);
+	expect('entry still in memory', errorEntries(A).length === 1);
+
+	// prune and clear
+	const pa = memAdapter();
+	await initErrorLog(pa as never, DIR, ENV);
+	recordError(A, { service: 'ChatGPT', method: 'GET', url: 'https://chatgpt.com/', status: 403 });
+	recordError(B, { service: 'claude.ai', method: 'GET', url: 'https://claude.ai/', status: 403 });
+	await pruneErrors([A]);
+	expect('prune drops removed account', errorEntries(B).length === 0 && errorEntries(A).length === 1);
+	await clearErrors(A);
+	expect('clear empties account', errorEntries(A).length === 0);
+
+	// Markdown for an issue
+	recordError(A, {
+		service: 'ChatGPT', method: 'GET', url: 'https://chatgpt.com/backend-api/conversations', status: 403,
+		headers: { 'content-type': 'application/json' }, body: '{"detail":"Unusual activity"}',
+	});
+	let md = entryMarkdown(errorEntries(A)[0]!, 'ChatGPT · Default');
+	expect('markdown title', md.startsWith('### ChatGPT · Default'), md.split('\n')[0]);
+	expect('markdown request line', md.includes('GET https://chatgpt.com/backend-api/conversations → **403**'));
+	expect('markdown env', md.includes(ENV));
+	expect('markdown headers block', md.includes('```\ncontent-type: application/json\n```'));
+	expect('markdown json body fence', md.includes('```json\n{"detail":"Unusual activity"}\n```'));
+	recordError(A, { service: 'ChatGPT', method: 'GET', url: 'https://chatgpt.com/', status: 403, headers: { 'content-type': 'text/html' }, body: '<html></html>' });
+	md = entryMarkdown(errorEntries(A)[0]!, 'ChatGPT · Default');
+	expect('markdown html fence', md.includes('```html\n<html></html>\n```'));
+	recordError(A, { service: 'Lumo', method: 'GET', url: 'https://lumo.proton.me/api', status: null, message: 'Network error while talking to Lumo.' });
+	md = entryMarkdown(errorEntries(A)[0]!, 'Lumo · Default');
+	expect('markdown no answer', md.includes('→ **no answer**') && md.includes('Network error while talking to Lumo.'));
+	recordError(A, { service: 'x', method: 'GET', url: 'u', status: 500, body: 'a ``` b' });
+	md = entryMarkdown(errorEntries(A)[0]!, 'x');
+	expect('fence longer than backticks in body', md.includes('````\na ``` b\n````'));
+
+	// accounts for the tab
+	const s = structuredClone(DEFAULT_SETTINGS) as Settings;
+	s.chatgpt.push({ ...s.chatgpt[0]!, id: 'a', label: 'Work' });
+	const accounts = errorLogAccounts(s);
+	expect('every account listed in order', accounts.map((x) => `${x.source.provider}:${x.source.accountId}`).join(',') === `claude:${s.claude[0]!.id},chatgpt:${s.chatgpt[0]!.id},chatgpt:a,lumo:${s.lumo[0]!.id},gemini:${s.gemini[0]!.id}`, accounts.map((x) => x.title).join(','));
+	const work = accounts.find((x) => x.source.accountId === 'a');
+	expect('title and count', work?.title === 'ChatGPT · Work' && work.count === errorEntries(A).length, `${work?.title} ${work?.count}`);
+	s.chatgpt[1]!.label = 'Job';
+	expect('rename keeps entries', errorLogAccounts(s).find((x) => x.source.accountId === 'a')?.title === 'ChatGPT · Job' && errorEntries(A).length > 0);
+
+	console.log(failures ? `\n${failures} FAILED` : '\nAll error log checks passed.');
+	if (failures) process.exit(1);
+}
+
+void main();
