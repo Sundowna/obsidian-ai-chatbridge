@@ -15,6 +15,7 @@ import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
 import { CodexAppServer } from '../cloud/codex-app-server';
 import { describePage, fallbackCookie, findAccessToken, inventoryIdentity, maskSecrets } from './token';
+import { recordAnswer, recordError, recordFetchAnswer, type ErrorSource } from '../error-log';
 
 const ORIGIN = 'https://chatgpt.com';
 
@@ -123,6 +124,7 @@ export class GptApi {
 		}
 		const token = findAccessToken(html);
 		if (!token) {
+			recordError(api.source, { service: 'ChatGPT', method: 'GET', url: `${ORIGIN}/`, status: 200, headers: { 'content-type': 'text/html' }, body: html, message: 'the chatgpt.com page held no login key', secrets: api.secrets });
 			const fix = pasted ? 'the pasted session cookie may have expired – paste a fresh one or log in instead' : 'log in again in the plugin settings';
 			throw new StopError(`chatgpt.com did not hand out a login key – ${fix}. If that does not help, send this to Claude: ${api.redact(describePage(html))}`);
 		}
@@ -135,6 +137,16 @@ export class GptApi {
 			? 'account:' + await fingerprint(JSON.stringify(identity))
 			: 'session:' + await fingerprint(JSON.stringify([token, workspace]));
 		return api;
+	}
+
+	/** The account, so failed answers land in its error log. */
+	private get source(): ErrorSource {
+		return { provider: 'chatgpt', accountId: this.login.id };
+	}
+
+	/** Every login value, removed from what goes into the error log. */
+	private get secrets(): string[] {
+		return [this.token ?? '', ...this.cookie.split('; ').map((c) => c.slice(c.indexOf('=') + 1))];
 	}
 
 	/** Removes the login from any text before it is shown or logged. */
@@ -184,10 +196,14 @@ export class GptApi {
 	async get(path: string): Promise<Raw> {
 		const res = await this.request(path, 'application/json', true, false);
 		const ct = header(res.headers, 'content-type');
-		if (!ct.includes('application/json')) throw new StopError(`chatgpt.com sent "${ct || 'unknown type'}" instead of JSON (maybe a Cloudflare check page).`);
+		if (!ct.includes('application/json')) {
+			recordAnswer(this.source, 'ChatGPT', 'GET', new URL(path, ORIGIN).toString(), res, `sent "${ct || 'unknown type'}" instead of JSON`, this.secrets);
+			throw new StopError(`chatgpt.com sent "${ct || 'unknown type'}" instead of JSON (maybe a Cloudflare check page).`);
+		}
 		try {
 			return { bytes: res.arrayBuffer, json: JSON.parse(res.text) as unknown };
 		} catch {
+			recordAnswer(this.source, 'ChatGPT', 'GET', new URL(path, ORIGIN).toString(), res, 'answer was not valid JSON', this.secrets);
 			throw new StopError('chatgpt.com\'s answer was not valid JSON.');
 		}
 	}
@@ -229,8 +245,10 @@ export class GptApi {
 			try {
 				res = await requestUrl({ url: url.toString(), method: 'GET', headers: { 'User-Agent': this.ua }, throw: false });
 			} catch {
+				recordError(this.source, { service: 'ChatGPT file link', method: 'GET', url: `https://${where}`, status: null, message: 'network error' });
 				throw new BlockedLinkError(`${where} (network error)`);
 			}
+			if (res.status !== 200 && res.status !== 404) recordAnswer(this.source, 'ChatGPT file link', 'GET', `https://${where}`, res, `file link answered ${res.status}`);
 			if (res.status === 429) throw new GptRateLimitError(retryDeadline(header(res.headers, 'retry-after')));
 			if (res.status === 404) return null;
 			if (res.status !== 200) throw new BlockedLinkError(`${where} (answered ${res.status})`);
@@ -252,7 +270,11 @@ export class GptApi {
 		try {
 			res = await loginFetch(this.login, url.href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual' });
 		} catch {
+			recordError(this.source, { service: 'ChatGPT', method: 'GET', url: url.href, status: null, message: 'generated-file request failed' });
 			throw new BlockedLinkError('generated-file request failed');
+		}
+		if (res.status !== 200 && res.status !== 404 && res.status !== 410 && !(res.status >= 300 && res.status < 400)) {
+			await recordFetchAnswer(this.source, 'ChatGPT', 'GET', url.href, res, `generated-file download answered ${res.status}`, this.secrets);
 		}
 		if (res.status === 429) throw new GptRateLimitError(retryDeadline(res.headers.get('retry-after') ?? ''));
 		if (res.status === 401) throw new StopError('ChatGPT login expired. Log in again in the plugin settings.');
@@ -281,9 +303,12 @@ export class GptApi {
 		try {
 			res = await loginFetch(this.login, ORIGIN + '/', { method: 'GET', headers, credentials: 'include', redirect: 'manual' }, 60_000);
 		} catch (e) {
-			throw new StopError(`Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`);
+			const why = `Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`;
+			recordError(this.source, { service: 'ChatGPT', method: 'GET', url: `${ORIGIN}/ (login window)`, status: null, message: why, secrets: this.secrets });
+			throw new StopError(why);
 		}
 		const s = res.status;
+		if (s !== 200) await recordFetchAnswer(this.source, 'ChatGPT', 'GET', `${ORIGIN}/ (login window)`, res, `start page answered ${s}`, this.secrets);
 		if (s === 401) throw new StopError('chatgpt.com answered 401 (not logged in). Log in to ChatGPT again in the plugin settings.');
 		if (s === 403) throw new StopError('chatgpt.com answered 403 (forbidden). Login expired, or Cloudflare blocked the request – log in again.');
 		if (s === 429) throw new GptRateLimitError(retryDeadline(res.headers.get('retry-after') ?? ''));
@@ -315,9 +340,12 @@ export class GptApi {
 		try {
 			res = await requestUrl({ url: url.toString(), method, headers, throw: false });
 		} catch (e) {
-			throw new StopError(`Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`);
+			const why = `Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`;
+			recordError(this.source, { service: 'ChatGPT', method, url: url.toString(), status: null, message: why, secrets: this.secrets });
+			throw new StopError(why);
 		}
 		const s = res.status;
+		if (s !== 200 && !(s === 404 && notFoundOk)) recordAnswer(this.source, 'ChatGPT', method, url.toString(), res, `chatgpt.com answered ${s}`, this.secrets);
 		if (s === 401) throw new StopError('chatgpt.com answered 401 (not logged in). Log in to ChatGPT again in the plugin settings.');
 		if (s === 403) throw new StopError('chatgpt.com answered 403 (forbidden). Login expired, or Cloudflare blocked the request – log in again.');
 		if (s === 429) throw new GptRateLimitError(retryDeadline(header(res.headers, 'retry-after')));

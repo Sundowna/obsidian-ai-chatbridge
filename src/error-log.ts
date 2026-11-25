@@ -182,6 +182,39 @@ export function recordError(source: ErrorSource | undefined, input: ErrorInput):
 	}
 }
 
+/** An Obsidian `requestUrl` answer. */
+export function recordAnswer(
+	source: ErrorSource | undefined, service: string, method: string, url: string,
+	res: { status: number; headers: Record<string, string>; arrayBuffer: ArrayBuffer }, message: string, secrets: (string | null | undefined)[] = [],
+): void {
+	if (!source) return;
+	let body: ArrayBuffer | undefined;
+	try {
+		body = res.arrayBuffer;
+	} catch {
+		body = undefined;
+	}
+	recordError(source, { service, method, url, status: res.status, headers: res.headers, body, message, secrets });
+}
+
+/** A fetch `Response` (login window). Reads a copy of the body; never throws. */
+export async function recordFetchAnswer(
+	source: ErrorSource | undefined, service: string, method: string, url: string, res: Response, message: string, secrets: (string | null | undefined)[] = [],
+): Promise<void> {
+	if (!source) return;
+	const headers: Record<string, string> = {};
+	let body: ArrayBuffer | undefined;
+	try {
+		res.headers.forEach((v, k) => {
+			headers[k] = v;
+		});
+		body = await res.clone().arrayBuffer();
+	} catch {
+		body = undefined;
+	}
+	recordError(source, { service, method, url, status: res.status, headers, body, message, secrets });
+}
+
 /** This account's entries, newest first. */
 export function errorEntries(source: ErrorSource): ErrorEntry[] {
 	return log.accounts[keyOf(source)] ?? [];

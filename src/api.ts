@@ -7,6 +7,7 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { isUuid } from './schema';
+import { recordAnswer, recordError, type ErrorSource } from './error-log';
 
 export class StopError extends Error {}
 
@@ -79,6 +80,8 @@ export class ClaudeApi {
 	constructor(
 		private readonly orgId: string,
 		private readonly getKey: () => string | null,
+		/** The account, so failed answers land in its error log. */
+		private readonly source?: ErrorSource,
 	) {
 		if (!isUuid(orgId)) throw new StopError('Organization ID is missing or not a valid ID. Set it in the plugin settings.');
 	}
@@ -124,12 +127,14 @@ export class ClaudeApi {
 		const res = await this.request(path, 'application/json', false);
 		const ct = header(res.headers, 'content-type');
 		if (!ct.includes('application/json')) {
+			recordAnswer(this.source, 'claude.ai', 'GET', new URL(path, ORIGIN).toString(), res, `expected JSON, got "${ct || 'unknown type'}"`, [this.getKey()]);
 			throw new StopError(`Expected JSON but got "${ct || 'unknown type'}" (maybe a Cloudflare check page).`);
 		}
 		let json: unknown;
 		try {
 			json = JSON.parse(res.text);
 		} catch {
+			recordAnswer(this.source, 'claude.ai', 'GET', new URL(path, ORIGIN).toString(), res, 'answer was not valid JSON', [this.getKey()]);
 			throw new StopError('claude.ai\'s answer was not valid JSON.');
 		}
 		return { bytes: res.arrayBuffer, json };
@@ -162,8 +167,11 @@ export class ClaudeApi {
 				throw: false,
 			});
 		} catch (e) {
-			throw new StopError(`Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`);
+			const why = `Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`;
+			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}${RPC_BASE}${method}`, status: null, message: why, secrets: [key] });
+			throw new StopError(why);
 		}
+		if (res.status !== 200) recordAnswer(this.source, 'claude.ai', 'POST', `${ORIGIN}${RPC_BASE}${method}`, res, `${method} answered ${res.status}`, [key]);
 		let text = '';
 		try {
 			text = res.text;
@@ -221,9 +229,12 @@ export class ClaudeApi {
 				throw: false,
 			});
 		} catch (e) {
-			throw new StopError(`Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`);
+			const why = `Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`;
+			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`, status: null, message: why, secrets: [key] });
+			throw new StopError(why);
 		}
 		const s = res.status;
+		if (s !== 200) recordAnswer(this.source, 'claude.ai', 'POST', `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`, res, `reading memory answered ${s}`, [key]);
 		if (s === 401) throw new StopError('claude.ai answered 401 (not logged in). The login has probably expired – log in again in the plugin settings.');
 		if (s === 403) throw new StopError('claude.ai answered 403 (forbidden) to reading memory.');
 		if (s === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');
@@ -231,6 +242,7 @@ export class ClaudeApi {
 		try {
 			return JSON.parse(res.text) as unknown;
 		} catch {
+			recordAnswer(this.source, 'claude.ai', 'POST', `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`, res, 'memory answer was not valid JSON', [key]);
 			throw new StopError('claude.ai\'s memory answer was not valid JSON.');
 		}
 	}
@@ -273,10 +285,14 @@ export class ClaudeApi {
 				throw: false,
 			});
 		} catch (e) {
-			throw new StopError(`Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`);
+			const why = `Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`;
+			recordError(this.source, { service: 'claude.ai', method: 'GET', url: url.toString(), status: null, message: why, secrets: [key] });
+			throw new StopError(why);
 		}
 
 		const s = res.status;
+		const accepted = s === 200 || (s === 404 && notFoundOk === true) || (notFoundOk === 'any' && s !== 401 && s !== 403 && s !== 429);
+		if (!accepted) recordAnswer(this.source, 'claude.ai', 'GET', url.toString(), res, `claude.ai answered ${s}`, [key]);
 		if (s === 401) throw new StopError('claude.ai answered 401 (not logged in). The login has probably expired – log in again in the plugin settings.');
 		if (s === 403) throw new StopError('claude.ai answered 403 (forbidden). Session key expired, or claude.ai/Cloudflare blocked the request.');
 		if (s === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');

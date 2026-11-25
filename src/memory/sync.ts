@@ -104,7 +104,7 @@ export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn =
 			if (o.claude) api = await o.claude(acc);
 			else {
 				const auth = await claudeAuth(plugin, acc);
-				api = new ClaudeApi(auth.orgId, auth.getKey);
+				api = new ClaudeApi(auth.orgId, auth.getKey, { provider: 'claude', accountId: acc.id });
 			}
 			const pauseMs = o.pauseMs ?? 300;
 			await save(plugin, await captureClaude(api, acc.label, () => (pauseMs > 0 ? new Promise((done) => window.setTimeout(done, pauseMs)) : Promise.resolve())), base, now, result);

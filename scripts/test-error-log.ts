@@ -7,6 +7,9 @@ import {
 	cleanText, clearErrors, entryMarkdown, errorEntries, errorLogAccounts, flushErrorLog, initErrorLog, pruneErrors, recordError, type ErrorSource,
 } from '../src/error-log';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings';
+import { ClaudeApi } from '../src/api';
+import { GptApi } from '../src/chatgpt/api';
+import { testHooks } from 'obsidian';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -184,8 +187,113 @@ async function main() {
 	s.chatgpt[1]!.label = 'Job';
 	expect('rename keeps entries', errorLogAccounts(s).find((x) => x.source.accountId === 'a')?.title === 'ChatGPT · Job' && errorEntries(A).length > 0);
 
+	await apiChecks();
+
 	console.log(failures ? `\n${failures} FAILED` : '\nAll error log checks passed.');
 	if (failures) process.exit(1);
+}
+
+/** A requestUrl answer as Obsidian gives it. */
+function answer(status: number, headers: Record<string, string>, text: string) {
+	const bytes = new TextEncoder().encode(text);
+	return { status, headers, text, arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), json: null };
+}
+
+/** The real Claude and ChatGPT request code, answered by the test. */
+async function apiChecks() {
+	const ad = memAdapter();
+	await initErrorLog(ad as never, DIR, ENV);
+	const org = '11111111-2222-4333-8444-555555555555';
+	const chat = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+	const key = 'sk-ant-sid01-TESTKEYVALUE';
+	const claude: ErrorSource = { provider: 'claude', accountId: 'c1' };
+	let reply = answer(403, { 'content-type': 'application/json' }, JSON.stringify({ code: 'permission_denied', message: 'This isn’t available for your account.', details: [{ debug: { subReason: 'blocked_by_org_tier' } }], echo: `sessionKey=${key}` }));
+	testHooks.requestUrl = async () => reply;
+
+	const api = new ClaudeApi(org, () => key, claude);
+	let stop = '';
+	try {
+		await api.readConversation(chat);
+	} catch (e) {
+		stop = e instanceof Error ? e.message : String(e);
+	}
+	let e = errorEntries(claude)[0];
+	expect('Claude: stop message unchanged', stop === 'claude.ai answered 403 (forbidden) to ReadConversation.', stop);
+	expect('Claude: 403 to ReadConversation recorded', e?.status === 403 && e.method === 'POST' && e.url.endsWith('.ConversationService/ReadConversation'));
+	expect('Claude: whole body kept', !!e && e.body.includes('blocked_by_org_tier') && e.body.includes('This isn’t available for your account.'));
+	expect('Claude: session key not kept', !!e && !e.body.includes('TESTKEYVALUE'));
+
+	reply = answer(403, { 'content-type': 'text/html' }, '<title>Just a moment...</title>');
+	try {
+		await api.get(api.chatPath(chat));
+	} catch {
+		// expected stop
+	}
+	e = errorEntries(claude)[0];
+	expect('Claude: 403 on GET recorded', e?.status === 403 && e.method === 'GET' && e.url.includes(`/chat_conversations/${chat}`) && e.body.includes('Just a moment'));
+
+	reply = answer(200, { 'content-type': 'text/html' }, '<html>check</html>');
+	try {
+		await api.get(api.chatPath(chat));
+	} catch {
+		// expected stop
+	}
+	expect('Claude: 200 that is not JSON recorded', errorEntries(claude)[0]?.status === 200 && errorEntries(claude)[0]?.message.includes('expected JSON'));
+
+	const before = errorEntries(claude).length;
+	reply = answer(404, { 'content-type': 'application/json' }, '{}');
+	await api.getFile(chat);
+	reply = answer(200, { 'content-type': 'application/json' }, '{"ok":true}');
+	await api.get(api.chatPath(chat));
+	expect('Claude: allowed 404 and 200 not recorded', errorEntries(claude).length === before);
+
+	testHooks.requestUrl = async () => {
+		throw new Error(`socket hang up sessionKey=${key}`);
+	};
+	try {
+		await api.get(api.chatPath(chat));
+	} catch {
+		// expected stop
+	}
+	e = errorEntries(claude)[0];
+	expect('Claude: network error recorded without the key', e?.status === null && e.message.startsWith('Network error') && !e.message.includes('TESTKEYVALUE'));
+
+	// ChatGPT: the constructor is private; the test builds the API the way connect() does.
+	const gptSource: ErrorSource = { provider: 'chatgpt', accountId: 'g1' };
+	const token = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJlLXRlc3Q';
+	type Ctor = new (login: unknown, cookie: string, deviceId: string | null, ua: string, token: string | null) => GptApi;
+	const gpt = new (GptApi as unknown as Ctor)({ provider: 'chatgpt', id: 'g1' }, '__Secure-next-auth.session-token=SESSIONCOOKIEVALUE; cf_clearance=CLEARANCEVALUE1', null, 'UA', token);
+	testHooks.requestUrl = async () => answer(403, { 'content-type': 'text/html; charset=UTF-8', 'cf-mitigated': 'challenge', 'set-cookie': '__cf_bm=abc' }, '<!DOCTYPE html><title>Just a moment...</title>');
+	try {
+		await gpt.get(gpt.listPath(0, false));
+	} catch (x) {
+		stop = x instanceof Error ? x.message : String(x);
+	}
+	e = errorEntries(gptSource)[0];
+	expect('ChatGPT: stop message unchanged', stop === 'chatgpt.com answered 403 (forbidden). Login expired, or Cloudflare blocked the request – log in again.', stop);
+	expect('ChatGPT: Cloudflare 403 recorded with headers and body', e?.status === 403 && e.headers['cf-mitigated'] === 'challenge' && e.headers['set-cookie'] === '[hidden]' && e.body.includes('Just a moment'));
+	expect('ChatGPT: address kept', !!e && e.url.startsWith('https://chatgpt.com/backend-api/conversations?'));
+
+	testHooks.requestUrl = async () => answer(403, { 'content-type': 'application/json' }, `{"detail":"Unusual activity","echo":"${token}","c":"SESSIONCOOKIEVALUE"}`);
+	try {
+		await gpt.get(gpt.listPath(0, false));
+	} catch {
+		// expected stop
+	}
+	e = errorEntries(gptSource)[0];
+	expect('ChatGPT: JSON refusal kept, login removed', !!e && e.body.includes('Unusual activity') && !e.body.includes(token) && !e.body.includes('SESSIONCOOKIEVALUE'));
+
+	const n = errorEntries(gptSource).length;
+	testHooks.requestUrl = async () => answer(404, { 'content-type': 'application/json' }, '{}');
+	await gpt.fileInfo('file-AAAAAAAAAAAAAAAAAAAAAAAA', '67e1a2b3-0000-4000-8000-000000000000');
+	testHooks.requestUrl = async () => answer(200, { 'content-type': 'application/json' }, '{"items":[]}');
+	await gpt.get(gpt.listPath(0, false));
+	expect('ChatGPT: allowed 404 and 200 not recorded', errorEntries(gptSource).length === n);
+	testHooks.requestUrl = null;
+
+	await flushErrorLog();
+	const saved = ad.files.get(FILE) ?? '';
+	expect('saved file holds no login value', !saved.includes('TESTKEYVALUE') && !saved.includes('SESSIONCOOKIEVALUE') && !saved.includes('CLEARANCEVALUE1') && !saved.includes(token));
 }
 
 void main();

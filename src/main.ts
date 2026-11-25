@@ -1,4 +1,5 @@
-import { Notice, Platform, Plugin, setIcon } from 'obsidian';
+import { apiVersion, Notice, Platform, Plugin, setIcon } from 'obsidian';
+import { errorLogAccounts, flushErrorLog, initErrorLog, pruneErrors } from './error-log';
 import { handoffNote, MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 import { accountsOf, hasPastedSession, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
 import { normalizeSettings } from './migrate';
@@ -100,6 +101,8 @@ export default class AIChatBridge extends Plugin {
 	async onload() {
 		this.unloaded = false;
 		await this.loadSettings();
+		await initErrorLog(this.app.vault.adapter, this.manifest?.dir, errorLogEnvironment(this.manifest?.version ?? '?'));
+		void pruneErrors(errorLogAccounts(this.settings).map((a) => a.source));
 		// Pick up an active cooldown saved by a version that had no automatic retry.
 		let adopted = false;
 		for (const { web } of this.settings.chatgpt) {
@@ -292,6 +295,7 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	onunload() {
+		void flushErrorLog();
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
@@ -1215,4 +1219,10 @@ export const STOPPED_BY_YOU = 'Stopped by you.';
 export function formatClock(ms: number): string {
 	const d = new Date(ms);
 	return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** Plugin, Obsidian and system, for the error log (no names, no paths). */
+export function errorLogEnvironment(version: string): string {
+	const system = Platform.isIosApp ? 'iOS' : Platform.isAndroidApp ? 'Android' : Platform.isMacOS ? 'macOS' : Platform.isWin ? 'Windows' : Platform.isLinux ? 'Linux' : 'unknown system';
+	return `AI ChatBridge ${version} · Obsidian ${apiVersion} · ${system}`;
 }
