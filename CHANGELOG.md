@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.39.0 - 2026-11-25
 
 ### New
+- **Separate archived chats** - for ChatGPT and Claude web accounts that include archived chats, a new switch (off by default) files archived chats in an `Archived/` folder of their own, with the same project layout as the active ones. **Separate now** moves the chats you already have; turning it off moves them back. A chat you archive or unarchive on the website moves on the next sync, with its raw files and versions. Thanks to The-Aries (#49)
 - **Error logs** - a new settings tab keeps the last 20 failed answers of each account (Claude, ChatGPT, Gemini, AI Studio, Lumo, Codex cloud) in full: address, status, response headers and body. **Copy** gives a ready-made block for a GitHub issue. Cookies, session keys and login keys are removed automatically; remove personal data (email addresses, names, chat titles and text) yourself before pasting. Saved in the plugin's folder, not in your notes
 
 ### Fixed
