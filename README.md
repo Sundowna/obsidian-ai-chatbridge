@@ -146,7 +146,7 @@ My sourdough starter smells like nail polish. Is it ruined?
 
 Coming from an older version? **General → Move into the new layout** shows what would move where and moves it with Obsidian's own move, so links, the sync history and the raw files follow. Folders you picked yourself stay where they are.
 
-On desktop, edit **Chat folder** for a ChatGPT Web account, then press Enter or leave the field. Confirm the move to bring its saved chats along with the raw files that follow that folder. Project folders you set separately keep their paths. Future syncs use the new folder after the move succeeds.
+On desktop, edit a chat or session folder setting, then press Enter or leave the field. Confirm the move to bring its saved notes along with the raw files that follow that folder. Folders emptied by the move are removed. Project folders you set separately keep their paths. Future syncs use the new folder after the move succeeds.
 
 ## When a chat continues
 

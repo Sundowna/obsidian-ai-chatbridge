@@ -39,12 +39,15 @@ export async function writeOver(app: App, path: string, data: string | ArrayBuff
 	else await app.vault.modifyBinary(file, data);
 }
 
-export async function ensureFolder(app: App, folder: string): Promise<void> {
+export async function ensureFolder(app: App, folder: string, onCreate?: (path: string) => void): Promise<void> {
 	const parts = normalizePath(folder).split('/').filter(Boolean);
 	let cur = '';
 	for (const p of parts) {
 		cur = cur ? `${cur}/${p}` : p;
-		if (!findFile(app, cur)) await app.vault.createFolder(cur);
+		if (!findFile(app, cur)) {
+			await app.vault.createFolder(cur);
+			onCreate?.(cur);
+		}
 	}
 }
 

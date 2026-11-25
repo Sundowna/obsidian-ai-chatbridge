@@ -6,7 +6,8 @@ import { defaultRoots, nodeDesktopFs } from '../desktop/scan';
 import type { DesktopApp } from '../desktop/types';
 import type { Provider } from '../login';
 import type { ChatgptAccount, ClaudeAccount } from '../settings';
-import { advanced, bindSyncButton, count, folderSetting, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
+import { advanced, bindSyncButton, count, rawFolderSetting, rawMoveRow, type PanelContext } from './fields';
+import { chatFolderSetting } from './chat-folder';
 import { desktopRawMoves } from '../raw-move';
 import { masterRaw } from '../raw-folders';
 import { hostPlatform } from '../platform';
@@ -53,7 +54,7 @@ export function desktopPanel(ctx: PanelContext, el: HTMLElement, provider: Provi
 	if (!conf.enabled) return;
 
 	const folderName = provider === 'claude' ? 'Code Local folder' : 'Codex Local folder';
-	folderSetting(ctx, el, folderName, 'Where these sessions are saved.', () => conf.folder, (p) => (conf.folder = p));
+	chatFolderSetting(ctx, el, folderName, 'Where these sessions are saved.', { kind: provider === 'claude' ? 'claude-local' : 'codex-local', id: account.id });
 	if (ctx.plugin.settings.desktop.keepRaw) {
 		rawFolderSetting(ctx, el, { name: 'Raw session folder', what: 'the copy of each session file (.jsonl)', partner: folderName, mirrors: true, get: () => conf.rawFolder, set: (p) => (conf.rawFolder = p) });
 		rawMoveRow(ctx, el, () => desktopRawMoves(ctx.app, account, masterRaw(ctx.plugin.settings)), 'raw session file');

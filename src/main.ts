@@ -21,7 +21,8 @@ import { joinSaved, splitSettings } from './computers/split';
 import { ConfirmModal } from './ui/modals';
 import { findFile } from './vaultio';
 import { followRename } from './follow';
-import { moveChatgptFolder } from './chatgpt/folder-move';
+import { moveChatFolder, type ChatFolderMoveResult } from './chat-folder-move';
+import { chatFolderStorage, type ChatFolderTarget } from './chat-folder-target';
 import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { StopError } from './api';
 import { runGptSync } from './chatgpt/sync';
@@ -604,15 +605,15 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
-	async moveChatgptFolder(accountId: string, from: string, to: string): Promise<number | undefined> {
+	async moveChatFolder(target: ChatFolderTarget, from: string, to: string): Promise<ChatFolderMoveResult | undefined> {
 		if (this.busy) throw new StopError('Another operation is running. Try again when it has finished.');
-		let moved: number | undefined;
+		let result: ChatFolderMoveResult | undefined;
 		await this.guarded('manual', async () => {
-			const account = this.settings.chatgpt.find(({ id }) => id === accountId);
-			if (!account || account.web.folder !== from) throw new StopError('The chat folder changed. Open the settings again and retry.');
-			moved = await moveChatgptFolder(this.app, this.settings, account, to, () => this.saveSettings(), () => this.stopRequested);
+			const storage = chatFolderStorage(this.settings, target);
+			if (!storage || storage.folder !== from) throw new StopError('The chat folder changed. Open the settings again and retry.');
+			result = await moveChatFolder(this.app, this.settings, storage, to, () => this.saveSettings(), () => this.stopRequested);
 		}, { folderMove: true });
-		return moved;
+		return result;
 	}
 
 	/** Shows what "Merge chat copies into one note" would do. Reads only. */

@@ -11,7 +11,8 @@ import { homeFolder, isPrivatePath, nodeRequire } from '../hermes/reader';
 import { expandHome, hostPlatform } from '../platform';
 import { hermesIcon } from './icons';
 import { HERMES, lastRunLine } from '../last-run';
-import { advanced, bindSyncButton, count, folderSetting, type PanelContext } from './fields';
+import { advanced, bindSyncButton, count, type PanelContext } from './fields';
+import { chatFolderSetting } from './chat-folder';
 import { ConfirmModal, NameModal } from './modals';
 
 // Kept between redraws (every switch redraws the tab), so the last Refresh result and the
@@ -45,7 +46,7 @@ export function hermesTab(ctx: PanelContext, el: HTMLElement): void {
 		);
 	}
 
-	folderSetting(ctx, el, 'Hermes folder', 'Where Hermes chats are saved. Each profile gets a subfolder named after it.', () => h.folder, (p) => (h.folder = p));
+	chatFolderSetting(ctx, el, 'Hermes folder', 'Where Hermes chats are saved. Each profile gets a subfolder named after it.', { kind: 'hermes' });
 
 	profileList(ctx, el);
 
