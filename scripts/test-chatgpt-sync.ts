@@ -1083,8 +1083,144 @@ async function testFileForbiddenSkipsFile() {
 	console.log('File 403 passed: a JSON 403 on one file skips that file (#48); an HTML 403 or a 403 on a chat still stops.');
 }
 
+/** A Library file link exactly as chatgpt.com handed it out (seen 2026-11-26, IDs made up). */
+const LIB_FILE = 'file_00000000aa1181f4b25c2516dad77baa';
+const LIB_LINK = `https://chatgpt.com/api/library/files/libfile_a1ccd46a034c8191ad570fbdf773da5a/project-content?file_id=${LIB_FILE}`;
+type Answer = { status: number; headers: Record<string, string>; text: string; arrayBuffer: ArrayBuffer };
+const answerOf = (status: number, headers: Record<string, string>, body: string): Answer => ({ status, headers, text: body, arrayBuffer: bytes(body) });
+const libraryFile = (body: string) => answerOf(200, { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': 'attachment; filename="Pasted markdown.md"', 'cache-control': 'private, no-store' }, body);
+const signedInApi = () => {
+	const api = Object.create(GptApi.prototype) as GptApi;
+	Object.assign(api, { cookie: '__Secure-next-auth.session-token=cookie-value-123', deviceId: null, ua: 'test', token: 'login-key-456', login: { id: 'a' } });
+	return api;
+};
+
+/**
+ * Library files (`/api/library/files/libfile_…/project-content?file_id=…`): fetched with the same
+ * login as estuary/content. 200 attachment = the file; 401 stops; 404 = gone; any other answer
+ * (seen: 415 "Could not resolve file URL") or a non-attachment skips only that file; links of any
+ * other shape are refused before a request is sent.
+ */
+async function testLibraryFileLink() {
+	const api = signedInApi();
+	let answer = libraryFile('# Notes\n');
+	const asked: { url: string; headers: Record<string, string> }[] = [];
+	testHooks.requestUrl = async (r) => { asked.push(r as { url: string; headers: Record<string, string> }); return answer; };
+	try {
+		assert.equal(new TextDecoder().decode((await api.fileBytes(LIB_LINK))!), '# Notes\n', 'a Library file is saved as it comes');
+		assert.equal(asked[0]!.url, LIB_LINK);
+		assert.equal(asked[0]!.headers.Cookie, '__Secure-next-auth.session-token=cookie-value-123', 'sent with the login cookies');
+		assert.equal(asked[0]!.headers.Authorization, 'Bearer login-key-456', 'and the login key, as for estuary/content');
+		assert.equal(new TextDecoder().decode((await api.fileBytes(LIB_LINK.replace('https://chatgpt.com', '')))!), '# Notes\n', 'a link without the origin works too');
+
+		answer = answerOf(415, { 'content-type': 'text/plain; charset=utf-8' }, 'Could not resolve file URL');
+		await assert.rejects(api.fileBytes(LIB_LINK), (e: unknown) => e instanceof BlockedLinkError && /library file answered 415/.test(e.where), 'a 415 skips only that file');
+		answer = answerOf(500, { 'content-type': 'text/plain' }, 'oops');
+		await assert.rejects(api.fileBytes(LIB_LINK), (e: unknown) => e instanceof BlockedLinkError && /500/.test(e.where), 'a 500 skips only that file');
+		answer = answerOf(401, { 'content-type': 'text/plain; charset=utf-8' }, 'Missing or invalid access token');
+		await assert.rejects(api.fileBytes(LIB_LINK), (e: unknown) => e instanceof StopError && !(e instanceof BlockedLinkError) && /401/.test(e.message), 'a 401 still stops the sync (login)');
+		answer = answerOf(404, { 'content-type': 'text/plain' }, 'not found');
+		assert.equal(await api.fileBytes(LIB_LINK), null, '404 = download unavailable');
+		answer = answerOf(200, { 'content-type': 'text/html' }, '<html>sign in</html>');
+		await assert.rejects(api.fileBytes(LIB_LINK), (e: unknown) => e instanceof BlockedLinkError && /not a file download/.test(e.where), 'a page instead of an attachment is never saved as the file');
+
+		asked.length = 0;
+		answer = libraryFile('# Notes\n');
+		for (const odd of [
+			`${LIB_LINK}&sig=abc`,
+			LIB_LINK.replace(`file_id=${LIB_FILE}`, 'file_id=../x'),
+			LIB_LINK.replace('?file_id=', '?id='),
+			LIB_LINK.replace('/project-content', '/other'),
+			LIB_LINK.replace('libfile_a1ccd46a034c8191ad570fbdf773da5a', '..'),
+			'https://chatgpt.com/api/library/list',
+		]) {
+			await assert.rejects(api.fileBytes(odd), (e: unknown) => e instanceof BlockedLinkError && /api\/library/.test(e.where), `refused: ${odd}`);
+		}
+		assert.equal(asked.length, 0, 'odd Library links are refused before any request');
+	} finally {
+		testHooks.requestUrl = null;
+	}
+	console.log('Library file links passed: fetched with the login, saved only as an attachment, 415/500 skip one file, 401 stops, 404 = unavailable, odd links refused unsent.');
+}
+
+/**
+ * End to end through the sync: a chat whose file lookup hands out a Library link. Before this
+ * change it waited with "chatgpt.com/api/library/…" for ever. Now: a 415 waits for its retry,
+ * a short answer is a size mismatch, the full file is saved and its wait cleared.
+ */
+async function testLibraryFileSync() {
+	const h = harness();
+	const g = h.settings.chatgpt[0]!.web;
+	g.downloadFiles = true;
+	const content = '# Pasted\n\nLong pasted text.\n';
+	const chat = {
+		conversation_id: id, title: 'Library', create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [{
+			id: 'message-user', author: { role: 'user' }, content: { content_type: 'text', parts: ['See the paste.'] },
+			metadata: { attachments: [{ id: LIB_FILE, is_big_paste: true, library_file_id: 'libfile_a1ccd46a034c8191ad570fbdf773da5a', mime_type: 'text/plain', name: 'Pasted markdown.md', size: content.length, source: 'local' }] },
+		}, message('message-answer', 'Read it.')],
+		page_info: { has_previous_page: false },
+	};
+	let library: Answer = answerOf(415, { 'content-type': 'text/plain; charset=utf-8' }, 'Could not resolve file URL');
+	const asked: string[] = [];
+	testHooks.requestUrl = async (r) => {
+		asked.push(r.url);
+		const url = new URL(r.url);
+		if (url.pathname === `/backend-api/files/download/${LIB_FILE}`) {
+			return answerOf(200, { 'content-type': 'application/json' }, JSON.stringify({ status: 'success', download_url: LIB_LINK, metadata: null, file_name: 'Pasted markdown.md', creation_time: null, no_auth_user_upload: null, mime_type: null, file_size_bytes: content.length }));
+		}
+		if (r.url === LIB_LINK) return library;
+		throw new Error('Unexpected request ' + r.url);
+	};
+	const connect = GptApi.connect;
+	GptApi.connect = async () => Object.assign(signedInApi(), {
+		inventoryKey: 'account:library-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: () => 'chat',
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: [{ id, title: 'Library', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat') return raw(chat);
+			throw new Error('Unexpected request ' + path);
+		},
+	});
+	const due = () => { for (const r of Object.values(g.assetRetries ?? {})) r.nextAttempt = 0; };
+	try {
+		const first = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(first.stopped, undefined, 'a Library file chatgpt.com cannot serve does not stop the sync');
+		assert.equal(first.newCount, 1);
+		assert.equal(first.filesSaved, 0);
+		assert.equal(first.pendingAssets, 1);
+		assert.match(g.assetRetries?.[LIB_FILE]?.reason ?? '', /library file answered 415/, 'it waits with the reason');
+		assert(asked.includes(LIB_LINK), 'the Library link was asked for (no longer refused unsent)');
+
+		due();
+		library = libraryFile(content.slice(0, 10));
+		const short = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(short.filesSaved, 0, 'a file shorter than chatgpt.com said is not saved');
+		assert.equal(g.assetRetries?.[LIB_FILE]?.reason, 'size mismatch', 'the usual size check applies');
+
+		due();
+		library = libraryFile(content);
+		const saved = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(saved.stopped, undefined);
+		assert.equal(saved.filesSaved, 1, 'the Library file is saved');
+		const path = g.fileIndex[LIB_FILE]!;
+		assert.match(path, /Pasted markdown\.md$/);
+		assert.equal(h.read(path), content, 'with exactly the bytes chatgpt.com sent');
+		assert.equal(g.assetRetries?.[LIB_FILE], undefined, 'its wait is cleared');
+	} finally {
+		testHooks.requestUrl = null;
+		GptApi.connect = connect;
+	}
+	console.log('Library file sync passed: 415 waits for its retry without stopping, short answer = size mismatch, full file saved and its wait cleared.');
+}
+
 async function main() {
 	await testFileForbiddenSkipsFile();
+	await testLibraryFileLink();
 	await testSandboxJsonAnswer();
 	assert.equal(retryDeadline('120', 1000), 121000);
 	assert.equal(retryDeadline('invalid', 1000), 601000);
@@ -1095,6 +1231,7 @@ async function main() {
 	await testArchiveSettingTiming();
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();
+	await testLibraryFileSync();
 	await testJsonFolder();
 	await testQuickCheck();
 	await testQuickCheckSameResult();

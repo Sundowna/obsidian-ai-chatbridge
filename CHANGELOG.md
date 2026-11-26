@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **ChatGPT: files from your Library are saved again** - uploads and long pastes that ChatGPT keeps in its Library (for example "Pasted markdown.md", project files, zips and spreadsheets) were never saved: the sync skipped them every time as "chatgpt.com/api/library/…" and kept them waiting. chatgpt.com now hands out a Library address for these files; the plugin fetches them there with your ChatGPT login, the same way as other uploads, and checks the size as usual. A Library file chatgpt.com cannot serve (it answered "Could not resolve file URL" for one pasted item) is skipped and tried again later and no longer stops anything. Files already waiting are fetched as their next try comes due
+
 ## 0.41.1 - 2026-11-26
 
 ### Fixed
