@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.40.1 - 2026-11-26
 
 ### Fixed
 - **Claude-made files are saved again on accounts without the chat view** - on account plans where claude.ai does not offer the chat view (403 "blocked_by_org_tier"), the files Claude creates in a chat (download cards) were left out. The plugin now finds them by their paths in the chat's tool calls and downloads them the way claude.ai's own chat page does, into the chat's `Artifacts/` folder, linked from the note. A file claude.ai no longer has is skipped and remembered; any other refusal is tried again on the next sync and never stops it (#46)
