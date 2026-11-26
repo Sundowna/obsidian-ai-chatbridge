@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.41.1 - 2026-11-26
 
 ### Fixed
 - **ChatGPT: one refused file no longer stops the whole sync** - when chatgpt.com refused a single file in a chat (403 "Forbidden"), the sync stopped there, so later chats and newer messages were not saved. Now only that file is skipped (it shows as "[image – not downloaded]" and is tried again on a later sync), and the rest of the sync goes on. The refusal is still listed in the Error logs tab. A Cloudflare check page or a 403 on a chat itself still stops the sync, as before (#48)
