@@ -18,6 +18,17 @@ export interface GeminiImage {
 	site?: string;
 }
 
+/**
+ * A picture Gemini made itself (image generation). The answer text only holds a placeholder
+ * address; the picture is on Google's servers and opens only while signed in to Google.
+ * Not downloaded.
+ */
+export interface GeminiGenerated {
+	/** Exactly as it stands in the answer: http://googleusercontent.com/image_generation_content/… */
+	placeholder: string;
+	url?: string;
+}
+
 export interface GeminiTurn {
 	id: string;
 	createdAt: string;
@@ -26,6 +37,7 @@ export interface GeminiTurn {
 	reasoning?: string;
 	model?: string;
 	images?: GeminiImage[];
+	generated?: GeminiGenerated[];
 	/** Other drafts Gemini wrote for this prompt; only the one shown is in `answer`. */
 	otherDrafts?: number;
 }

@@ -3,7 +3,7 @@
 // Run: npm run test:gemini
 
 import { batchPayload, buildChat, GeminiError, readChatPage, readListPage, readTurn } from '../src/gemini/wire';
-import { imagesAsLinks, renderGeminiTranscript, renderStudioTranscript } from '../src/gemini/transcript';
+import { generatedAsLinks, imagesAsLinks, renderGeminiTranscript, renderStudioTranscript } from '../src/gemini/transcript';
 import { promptFileId, readPrompt, readPromptList } from '../src/studio/wire';
 import { normalizeSettings } from '../src/migrate';
 import { ShapeError } from '../src/schema';
@@ -93,6 +93,26 @@ function main() {
 	const shown = imagesAsLinks(pt.answer, pt.images);
 	expect('picture becomes a link', shown.includes('*(Image: Tabs at the bottom, [view](<https://example.com/a.png>), from [MageComp](<https://example.com/page>))*'), shown);
 	expect('unknown picture marked not saved', shown.includes('*(Image: picture, not saved)*') && !shown.includes('<Image'));
+
+	// --- pictures Gemini made (seen 2026-11-26) ------------------------------------------
+	const P1 = 'http://googleusercontent.com/image_generation_content/0_1083';
+	const LH3 = 'https://lh3.googleusercontent.com/gg/AAAA-generated';
+	const made: unknown[] = ['rc_bbb', [`Here is the apple:\n\n${P1}\n\nand http://googleusercontent.com/image_generation_content/7\n`]];
+	made[12] = [];
+	(made[12] as unknown[])[7] = [[
+		[[null, null, null, [null, 1, 'name.jpeg', LH3, null, 'x', null, null, null, [1, 2]]], [P1], null, [24]],
+		[[null, null, null, [null, 1, 'bad', 'javascript:alert(1)']], ['http://googleusercontent.com/image_generation_content/9']],
+		[[null], ['not a placeholder']],
+	]];
+	const withMade = turn('r_8', 800, 'draw', 'x');
+	(withMade[3] as unknown[][])[0] = [made];
+	const mt = readTurn(withMade, 0);
+	expect('made picture read', mt.generated?.length === 2 && mt.generated[0]!.url === LH3 && mt.generated[1]!.url === undefined, JSON.stringify(mt.generated));
+	const madeShown = generatedAsLinks(mt.answer, mt.generated);
+	expect('made picture becomes a link', madeShown.includes(`*(Generated image, [view](<${LH3}>), opens while signed in to Google)*`) && !madeShown.includes(P1), madeShown);
+	expect('made picture without address marked not saved', madeShown.includes('*(Generated image, not saved)*') && !madeShown.includes('image_generation_content'), madeShown);
+	const madeMd = renderGeminiTranscript({ ...chat, turns: [mt] }, 'x.json');
+	expect('transcript shows the made picture', madeMd.includes(`[view](<${LH3}>)`) && !madeMd.includes('image_generation_content'));
 
 	// --- AI Studio ------------------------------------------------------------------
 	const meta = ['AI Optimization for Agriland', null, ['Owner', 1, 'photo'], null, [['1788164186', 894000000], ['Owner', 1, 'photo']], [1, 1, 1]];
