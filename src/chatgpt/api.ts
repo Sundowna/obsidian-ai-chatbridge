@@ -31,6 +31,8 @@ const ALLOWED = [
 	/^\/backend-api\/memories$/,
 	/^\/backend-api\/user_system_messages$/,
 ];
+/** The per-file lookup: a JSON 403 here skips only that file. */
+const FILE_INFO = /^\/backend-api\/files\/download\//;
 
 /** The one path that is read with POST, always without a body (see the rules above). */
 const SUMMARY_STREAM = '/backend-api/memories/about_you/summary/stream';
@@ -372,6 +374,11 @@ export class GptApi {
 		const s = res.status;
 		if (s !== 200 && !(s === 404 && notFoundOk)) recordAnswer(this.source, 'ChatGPT', method, url.toString(), res, `chatgpt.com answered ${s}`, this.secrets);
 		if (s === 401) throw new StopError('chatgpt.com answered 401 (not logged in). Log in to ChatGPT again in the plugin settings.');
+		// One file refused with a JSON 403 ({"detail":"Forbidden"}, issue #48) while the chat itself
+		// loaded: skip only that file (retried later). A Cloudflare page (HTML) or any other 403 still stops.
+		if (s === 403 && FILE_INFO.test(url.pathname) && header(res.headers, 'content-type').includes('application/json')) {
+			throw new BlockedLinkError('chatgpt.com refused this file (403), will retry');
+		}
 		if (s === 403) throw new StopError('chatgpt.com answered 403 (forbidden). Login expired, or Cloudflare blocked the request – log in again.');
 		if (s === 429) throw new GptRateLimitError(retryDeadline(header(res.headers, 'retry-after')));
 		if (s === 404 && notFoundOk) return null;
