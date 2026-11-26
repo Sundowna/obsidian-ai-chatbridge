@@ -28,11 +28,21 @@ const ALLOWED = [
 	/^\/backend-api\/gizmos\/snorlax\/sidebar$/,
 	/^\/backend-api\/files\/download\/file[-_][0-9A-Za-z]{10,64}$/,
 	/^\/backend-api\/estuary\/content$/,
+	/^\/api\/library\/files\/libfile_[0-9A-Za-z]{10,64}\/project-content$/,
 	/^\/backend-api\/memories$/,
 	/^\/backend-api\/user_system_messages$/,
 ];
 /** The per-file lookup: a JSON 403 here skips only that file. */
 const FILE_INFO = /^\/backend-api\/files\/download\//;
+
+/**
+ * A ChatGPT Library file (uploads and long pastes saved in the Library). Seen 2026-11-26 with the owner's
+ * login: the file lookup hands out `/api/library/files/libfile_…/project-content?file_id=file_…`
+ * (no signature). With the login it answers 200 with the exact bytes as an attachment
+ * (size = file_size_bytes); without it 401 "Missing or invalid access token"; for one pasted
+ * item 415 "Could not resolve file URL".
+ */
+const LIBRARY_FILE = /^\/api\/library\/files\/libfile_[0-9A-Za-z]{10,64}\/project-content$/;
 
 /** The one path that is read with POST, always without a body (see the rules above). */
 const SUMMARY_STREAM = '/backend-api/memories/about_you/summary/stream';
@@ -244,7 +254,8 @@ export class GptApi {
 
 	/**
 	 * A file's exact bytes from the download link chatgpt.com handed out, or null on 404.
-	 * chatgpt.com links: only estuary/content, with the login. Links to other addresses
+	 * chatgpt.com links: only estuary/content and Library files (only `?file_id=<file ID>`), with
+	 * the login; a Library file must come back as an attachment. Links to other addresses
 	 * (decided 2026-11-06: trust what chatgpt.com hands out): https only, and WITHOUT any
 	 * login – no cookies, no key; the signed link itself grants access. If such a link
 	 * fails, only that file is skipped (BlockedLinkError).
@@ -266,6 +277,14 @@ export class GptApi {
 			if (res.status === 429) throw new GptRateLimitError(retryDeadline(header(res.headers, 'retry-after')));
 			if (res.status === 404) return null;
 			if (res.status !== 200) throw new BlockedLinkError(`${where} (answered ${res.status})`);
+			return res.arrayBuffer;
+		}
+		if (LIBRARY_FILE.test(url.pathname)) {
+			const keys = [...url.searchParams.keys()];
+			if (keys.length !== 1 || keys[0] !== 'file_id' || !isFileId(url.searchParams.get('file_id'))) throw new BlockedLinkError(`${where} (unexpected link)`);
+			const res = await this.request(url.pathname + url.search, '*/*', true, true);
+			if (!res) return null;
+			if (!/attachment/i.test(header(res.headers, 'content-disposition'))) throw new BlockedLinkError(`${where} (not a file download)`);
 			return res.arrayBuffer;
 		}
 		if (url.pathname !== '/backend-api/estuary/content') throw new BlockedLinkError(where);
@@ -382,6 +401,8 @@ export class GptApi {
 		if (s === 403) throw new StopError('chatgpt.com answered 403 (forbidden). Login expired, or Cloudflare blocked the request – log in again.');
 		if (s === 429) throw new GptRateLimitError(retryDeadline(header(res.headers, 'retry-after')));
 		if (s === 404 && notFoundOk) return null;
+		// One Library file it cannot serve (seen: 415 "Could not resolve file URL"): skip only that file, retried later.
+		if (s !== 200 && LIBRARY_FILE.test(url.pathname)) throw new BlockedLinkError(`chatgpt.com library file answered ${s}, will retry`);
 		if (s !== 200) {
 			let why = '';
 			try {
