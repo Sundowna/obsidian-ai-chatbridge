@@ -1,9 +1,11 @@
 <img src="chatBridgeLogo.png" width="120" alt="AI ChatBridge logo"><h1 align="left">AI ChatBridge</h1>
 
-**All your AI chats in your Obsidian vault.** AI ChatBridge saves your chats from **Claude**, **ChatGPT**, **Gemini**, **Google AI Studio**, **Proton Lumo** and **Hermes Agent**, plus your **Claude Code** and **Codex** sessions, as readable Markdown notes. Projects become folders, and files, images and artifacts come along.
+**All your AI chats in your Obsidian vault.** AI ChatBridge saves your chats from **Claude**, **ChatGPT**, **Gemini**, **Google AI Studio**, **Proton Lumo** and **Hermes Agent**, plus your **Claude Code** and **Codex** sessions, as readable Markdown notes. Projects become folders, and it downloads your files, images and artifacts.
 
-- **What each AI remembers about you:** Claude, ChatGPT, Claude Code and Codex memories, saved as dated snapshots ([AI memory](#ai-memory))
-- **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** a low-friction, easy way into Karpathy-style LLM second brains and project brains. Works well with [OneNote Style](https://community.obsidian.md/plugins/onenote-style) (the ribbon) and the [OneNote Style theme](https://community.obsidian.md/themes/onenote-style) (the look)
+- **Memories: See what each AI remembers about you:** Claude, ChatGPT, Claude Code and Codex memories, saved as dated snapshots ([AI memory](#ai-memory)) - so you can tweak behaviour.
+- **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** a low-friction, easy way into Karpathy-style LLM Wikis, second brains and project brains.
+- 	[OneNote Style](https://community.obsidian.md/plugins/onenote-style): The ribbon you already know - fully customisable.
+- 	[OneNote Style theme](https://community.obsidian.md/themes/onenote-style): the look you already know.
 
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is changed or deleted on their side. The plugin reads the same web pages your browser uses, which can change without notice.
