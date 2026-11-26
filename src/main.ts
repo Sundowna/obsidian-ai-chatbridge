@@ -22,6 +22,8 @@ import { joinSaved, splitSettings } from './computers/split';
 import { ConfirmModal } from './ui/modals';
 import { findFile } from './vaultio';
 import { followRename } from './follow';
+import { moveChatFolder, type ChatFolderMoveResult } from './chat-folder-move';
+import { chatFolderStorage, type ChatFolderTarget } from './chat-folder-target';
 import { closeLoginWindows, isLoggedIn, type Provider } from './login';
 import { StopError } from './api';
 import { runGptSync } from './chatgpt/sync';
@@ -680,6 +682,17 @@ export default class AIChatBridge extends Plugin {
 		});
 	}
 
+	async moveChatFolder(target: ChatFolderTarget, from: string, to: string): Promise<ChatFolderMoveResult | undefined> {
+		if (this.busy) throw new StopError('Another operation is running. Try again when it has finished.');
+		let result: ChatFolderMoveResult | undefined;
+		await this.guarded('manual', async () => {
+			const storage = chatFolderStorage(this.settings, target);
+			if (!storage || storage.folder !== from) throw new StopError('The chat folder changed. Open the settings again and retry.');
+			result = await moveChatFolder(this.app, this.settings, storage, to, () => this.saveSettings(), () => this.stopRequested);
+		}, { folderMove: true });
+		return result;
+	}
+
 	/** Shows what "Merge chat copies into one note" would do. Reads only. */
 	openMergePreview(): void {
 		if (this.mergeWaiting || this.merging) {
@@ -877,7 +890,7 @@ export default class AIChatBridge extends Plugin {
 	}
 
 	/** One sync at a time. (A source that stopped with an error is skipped by runOne, not here.) */
-	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>, opts: { merge?: boolean } = {}) {
+	private async guarded(trigger: SyncTrigger, fn: () => Promise<unknown>, opts: { merge?: boolean; folderMove?: boolean } = {}) {
 		if (this.unloaded) return;
 		// A phone or tablet cannot sync by itself yet: it has no login windows and must not write
 		// beside the computer that does. There the sync button asks the computer (remote/).
@@ -895,6 +908,7 @@ export default class AIChatBridge extends Plugin {
 		// go ahead by hand; the automatic sync, a retry and another device's request just wait.
 		const other = await this.computers.busyElsewhere();
 		if (other) {
+			if (opts.folderMove) throw new StopError('Another computer is syncing. Wait for that sync before moving the folder.');
 			if (trigger !== 'manual') return;
 			if (!(await this.syncAnyway(other))) return;
 		}

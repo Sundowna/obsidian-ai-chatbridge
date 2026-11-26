@@ -64,22 +64,47 @@ export const count =(n: number, noun: string): string => `${n.toLocaleString()} 
 export const FOLDERS_CHANGED = 'ccs-folders-changed';
 export const foldersChanged = (from: HTMLElement): boolean => from.dispatchEvent(new CustomEvent(FOLDERS_CHANGED, { bubbles: true }));
 
-export function folderSetting(ctx: PanelContext, el: HTMLElement, name: string, desc: string, get: () => string, set: (p: string) => void): void {
+export function folderSetting(ctx: PanelContext, el: HTMLElement, name: string, desc: string, get: () => string, setter: ((p: string) => void) | { commit: (p: string) => Promise<void> }): void {
+	const commit = typeof setter === 'function' ? undefined : setter.commit;
+	let text: TextComponent | null = null;
+	let committing = false;
 	const save = async (v: string) => {
 		const p = cleanFolder(v);
-		if (!p) return; // ignore empty / hidden folders
-		set(p);
-		await ctx.plugin.saveSettings();
+		if (commit) {
+			if (committing) return;
+			committing = true;
+			try {
+				if (p && p !== get()) await commit(p);
+			} finally {
+				committing = false;
+				text?.setValue(get());
+				foldersChanged(el);
+			}
+			return;
+		}
+		if (p && typeof setter === 'function') {
+			setter(p);
+			await ctx.plugin.saveSettings();
+		}
 	};
-	let text: TextComponent | null = null;
 	new Setting(el)
 		.setName(name)
 		.setDesc(desc)
 		.addText((t) => {
 			text = t;
-			t.setPlaceholder('AI Chats/…').setValue(get()).onChange(save);
-			t.inputEl.addEventListener('change', () => foldersChanged(t.inputEl));
-			new FolderSuggest(ctx.app, t.inputEl, (path) => void save(path).then(() => foldersChanged(t.inputEl)));
+			t.setPlaceholder('AI Chats/…').setValue(get());
+			if (commit) {
+				t.inputEl.addEventListener('change', () => void save(t.getValue()));
+				t.inputEl.addEventListener('keydown', (e) => {
+					if (e.key === 'Enter' && !e.defaultPrevented) t.inputEl.blur();
+				});
+			} else {
+				t.onChange(save);
+				t.inputEl.addEventListener('change', () => foldersChanged(t.inputEl));
+			}
+			new FolderSuggest(ctx.app, t.inputEl, (path) => void save(path).then(() => {
+				if (!commit) foldersChanged(t.inputEl);
+			}));
 		})
 		.addButton((b) =>
 			b
@@ -94,7 +119,7 @@ export function folderSetting(ctx: PanelContext, el: HTMLElement, name: string, 
 					}
 					text?.setValue(r.path);
 					await save(r.path);
-					foldersChanged(el);
+					if (!commit) foldersChanged(el);
 				}),
 		);
 }
