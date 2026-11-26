@@ -1112,6 +1112,13 @@ async function testLibraryFileLink() {
 		assert.equal(asked[0]!.headers.Cookie, '__Secure-next-auth.session-token=cookie-value-123', 'sent with the login cookies');
 		assert.equal(asked[0]!.headers.Authorization, 'Bearer login-key-456', 'and the login key, as for estuary/content');
 		assert.equal(new TextDecoder().decode((await api.fileBytes(LIB_LINK.replace('https://chatgpt.com', '')))!), '# Notes\n', 'a link without the origin works too');
+		// Pasted text comes back "inline" with its name (seen in the owner's sync after 0.41.2): still the file.
+		answer = answerOf(200, { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'inline; filename="Pasted text(20260916-105510).txt"; filename*=UTF-8\'\'Pasted%20text%2820260916-105510%29.txt' }, '<!DOCTYPE html> pasted page source');
+		assert.equal(new TextDecoder().decode((await api.fileBytes(LIB_LINK))!), '<!DOCTYPE html> pasted page source', 'pasted text named inline is saved as it comes');
+		for (const disposition of ['inline', 'attachment', 'form-data; name="x"']) {
+			answer = answerOf(200, { 'content-type': 'text/plain', 'content-disposition': disposition }, 'x');
+			await assert.rejects(api.fileBytes(LIB_LINK), (e: unknown) => e instanceof BlockedLinkError && /not a file download/.test(e.where), `refused without a file name: ${disposition}`);
+		}
 
 		answer = answerOf(415, { 'content-type': 'text/plain; charset=utf-8' }, 'Could not resolve file URL');
 		await assert.rejects(api.fileBytes(LIB_LINK), (e: unknown) => e instanceof BlockedLinkError && /library file answered 415/.test(e.where), 'a 415 skips only that file');
@@ -1140,7 +1147,7 @@ async function testLibraryFileLink() {
 	} finally {
 		testHooks.requestUrl = null;
 	}
-	console.log('Library file links passed: fetched with the login, saved only as an attachment, 415/500 skip one file, 401 stops, 404 = unavailable, odd links refused unsent.');
+	console.log('Library file links passed: fetched with the login, saved only when named as a file (attachment, or inline for pasted text), 415/500 skip one file, 401 stops, 404 = unavailable, odd links refused unsent.');
 }
 
 /**

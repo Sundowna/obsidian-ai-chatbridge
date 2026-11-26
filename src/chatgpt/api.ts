@@ -38,11 +38,15 @@ const FILE_INFO = /^\/backend-api\/files\/download\//;
 /**
  * A ChatGPT Library file (uploads and long pastes saved in the Library). Seen 2026-11-26 with the owner's
  * login: the file lookup hands out `/api/library/files/libfile_…/project-content?file_id=file_…`
- * (no signature). With the login it answers 200 with the exact bytes as an attachment
- * (size = file_size_bytes); without it 401 "Missing or invalid access token"; for one pasted
- * item 415 "Could not resolve file URL".
+ * (no signature). With the login it answers 200 with the exact bytes (size = file_size_bytes),
+ * named in `content-disposition`: `attachment; filename=…` for most files, `inline; filename=…`
+ * for pasted text (`text/plain`, "Pasted text(…).txt", seen in the owner's sync after 0.41.2).
+ * Without the login: 401 "Missing or invalid access token"; for one pasted item: 415
+ * "Could not resolve file URL".
  */
 const LIBRARY_FILE = /^\/api\/library\/files\/libfile_[0-9A-Za-z]{10,64}\/project-content$/;
+/** A Library answer that names its file (attachment or inline); a page without one is never saved. */
+const NAMED_FILE = /^\s*(attachment|inline)\s*;.*\bfilename\*?\s*=/i;
 
 /** The one path that is read with POST, always without a body (see the rules above). */
 const SUMMARY_STREAM = '/backend-api/memories/about_you/summary/stream';
@@ -255,7 +259,7 @@ export class GptApi {
 	/**
 	 * A file's exact bytes from the download link chatgpt.com handed out, or null on 404.
 	 * chatgpt.com links: only estuary/content and Library files (only `?file_id=<file ID>`), with
-	 * the login; a Library file must come back as an attachment. Links to other addresses
+	 * the login; a Library file must come back named as a file (attachment or inline). Links to other addresses
 	 * (decided 2026-11-06: trust what chatgpt.com hands out): https only, and WITHOUT any
 	 * login – no cookies, no key; the signed link itself grants access. If such a link
 	 * fails, only that file is skipped (BlockedLinkError).
@@ -284,7 +288,7 @@ export class GptApi {
 			if (keys.length !== 1 || keys[0] !== 'file_id' || !isFileId(url.searchParams.get('file_id'))) throw new BlockedLinkError(`${where} (unexpected link)`);
 			const res = await this.request(url.pathname + url.search, '*/*', true, true);
 			if (!res) return null;
-			if (!/attachment/i.test(header(res.headers, 'content-disposition'))) throw new BlockedLinkError(`${where} (not a file download)`);
+			if (!NAMED_FILE.test(header(res.headers, 'content-disposition'))) throw new BlockedLinkError(`${where} (not a file download)`);
 			return res.arrayBuffer;
 		}
 		if (url.pathname !== '/backend-api/estuary/content') throw new BlockedLinkError(where);
