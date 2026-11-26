@@ -17,8 +17,11 @@
 - **0.39:** an **Error logs** tab with a **Copy** button for bug reports
 - **0.38:** [Active Context](#active-context), a handover note listing your live chats for the next AI
 
-Default sorting structure:
+
+**Default sorting structure:**
+
 <img width="371" height="646" alt="image" src="https://github.com/user-attachments/assets/63471285-d0fd-48bf-862e-e26470c3eaf4" />
+
 
 Older changes are in the [changelog](CHANGELOG.md).
 
