@@ -1,15 +1,21 @@
 <img src="chatBridgeLogo.png" width="120" alt="AI ChatBridge logo"><h1 align="left">AI ChatBridge</h1>
 
-**All your AI chats in your Obsidian vault.** AI ChatBridge mirrors your chats from **Claude**, **ChatGPT**, **Gemini**, **Google AI Studio**, **Proton Lumo** and **Hermes Agent** - plus your **Claude Code** and **Codex** sessions - into readable Markdown notes, in the same folders and projects you know from the apps. Files, images and artifacts come along too.
+**All your AI chats in your Obsidian vault.** AI ChatBridge saves your chats from **Claude**, **ChatGPT**, **Gemini**, **Google AI Studio**, **Proton Lumo** and **Hermes Agent**, plus your **Claude Code** and **Codex** sessions, as readable Markdown notes. Projects become folders, and files, images and artifacts come along.
 
-**And what each AI remembers about you.** Claude, ChatGPT, Claude Code and Codex each keep a memory of you between chats. AI ChatBridge saves it as dated snapshots, so you can read what is stored and see how it changes (see [AI memory](#ai-memory)).
-
-**Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite)** - an easy, low-friction second brain in Obsidian, in the spirit of Karpathy's LLM wiki. The other pieces: [OneNote Style](https://community.obsidian.md/plugins/onenote-style) (the ribbon you already know) and the [OneNote Style theme](https://community.obsidian.md/themes/onenote-style) (the look you already know).
+- **What each AI remembers about you:** Claude, ChatGPT, Claude Code and Codex memories, saved as dated snapshots ([AI memory](#ai-memory))
+- **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** works well with [OneNote Style](https://community.obsidian.md/plugins/onenote-style) (the ribbon) and the [OneNote Style theme](https://community.obsidian.md/themes/onenote-style) (the look)
 
 > [!NOTE]
-> **Unofficial and read-only.** Not affiliated with, endorsed by, or supported by Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is ever changed or deleted on the provider's side. The plugin reads the same web endpoints your browser uses, which can change without notice.
+> **Unofficial and read-only.** Not affiliated with Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is changed or deleted on their side. The plugin reads the same web pages your browser uses, which can change without notice.
 
-**New in 0.38: [Active Context](#active-context)** - a handover note that lists your live chats after every sync, so the next AI knows where things stand, and **Hand over a chat to another AI**. The plugin's own files now [start with "_"](#system-files-start-with-_), and unchanged chats are no longer reread on every sync. **0.37:** [archived claude.ai chats](#choosing-what-to-sync) - turn on **Include archived chats** for a Claude account and the chats you archived on claude.ai are synced too, in their normal folders. **0.34:** [Codex cloud tasks](#codex-cloud-tasks) - the tasks Codex ran in OpenAI's cloud, started on chatgpt.com/codex or from ChatGPT, saved as notes. And the plugin now loads on your phone: its sync button [asks your computer to sync](#phone-and-tablet). **0.33:** [AI memory](#ai-memory) - what Claude, ChatGPT, Claude Code and Codex keep about you, saved as dated snapshots with a privacy filter. **0.31:** better on [macOS and Linux](#windows-macos-and-linux) - the folder picker, `~` paths and where local sessions are found. **0.30:** every account shows [how its last sync went](#see-how-the-last-sync-went) - when it ran, what it saved, and why it stopped if it did. **0.29** added [Claude Code cloud sessions](#claude-code-cloud-sessions) from claude.ai/code. See the [changelog](CHANGELOG.md) for everything else.
+**What's new**
+
+- **0.41:** changing a chat folder moves the notes already saved there
+- **0.40:** **Use browser login…** for ChatGPT accounts made with Google ([FAQ](#faq))
+- **0.39:** an **Error logs** tab with a **Copy** button for bug reports
+- **0.38:** [Active Context](#active-context), a handover note listing your live chats for the next AI
+
+Older changes are in the [changelog](CHANGELOG.md).
 
 ## Contents
 
