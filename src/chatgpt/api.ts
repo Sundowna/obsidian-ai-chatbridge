@@ -10,7 +10,7 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
 import { cookieHeader, cookieValue, hasLoginFetch, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
-import { isChatId, isFileId, isMessageId } from './schema';
+import { checkGptFileInfo, isChatId, isFileId, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
 import { CodexAppServer } from '../cloud/codex-app-server';
@@ -52,6 +52,18 @@ export class BlockedLinkError extends Error {
 export interface Raw {
 	bytes: ArrayBuffer;
 	json: unknown;
+}
+
+/**
+ * The download link inside a JSON answer of the generated-file route, or null if the answer is
+ * not { status: "success", download_url } (then it is a preview or an error, not the file).
+ */
+export function sandboxLink(text: string): string | null {
+	try {
+		return checkGptFileInfo(JSON.parse(text)).url;
+	} catch {
+		return null;
+	}
 }
 
 function header(headers: Record<string, string>, name: string): string {
@@ -268,7 +280,7 @@ export class GptApi {
 		url.search = new URLSearchParams({ message_id: messageId, sandbox_path: path, download_intent: 'true' }).toString();
 		let res: Response;
 		try {
-			res = await loginFetch(this.login, url.href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual' });
+			res = await this.sandboxFetch(url.href);
 		} catch {
 			recordError(this.source, { service: 'ChatGPT', method: 'GET', url: url.href, status: null, message: 'generated-file request failed' });
 			throw new BlockedLinkError('generated-file request failed');
@@ -286,10 +298,23 @@ export class GptApi {
 		}
 		const type = res.headers.get('content-type') ?? '';
 		const attachment = /attachment/i.test(res.headers.get('content-disposition') ?? '');
+		if (res.ok && !attachment && /application\/json/i.test(type)) {
+			// Seen 2026-11-26: the route answers 200 with the same JSON as a file-ID download
+			// ({ status: "success", download_url: …/backend-api/estuary/content?… }) instead of a
+			// redirect. The bytes come from that link, under fileBytes' usual rules.
+			const link = sandboxLink(await res.text());
+			if (!link) throw new BlockedLinkError('generated-file download returned JSON without a download link');
+			return this.fileBytes(link);
+		}
 		if (!res.ok || (!attachment && /text\/html|application\/json/i.test(type))) {
 			throw new BlockedLinkError(`generated-file download returned ${res.status} or a preview`);
 		}
 		return res.arrayBuffer();
+	}
+
+	/** The generated-file request itself, through the login window (redirects left to the caller). */
+	protected async sandboxFetch(href: string): Promise<Response> {
+		return loginFetch(this.login, href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual' });
 	}
 
 	/**

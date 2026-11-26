@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Notice, Platform, TFile, TFolder } from 'obsidian';
-import { GptApi } from '../src/chatgpt/api';
+import { GptApi, sandboxLink } from '../src/chatgpt/api';
 import { runGptSync } from '../src/chatgpt/sync';
 import { GptRateLimitError, retryDeadline } from '../src/chatgpt/recovery';
 import { sandboxKey } from '../src/chatgpt/files';
@@ -1016,7 +1016,53 @@ async function testQuickCheckSavedInBatches() {
 	}
 }
 
+/**
+ * Generated files (code interpreter): seen 2026-11-26, the route answers 200 with the same JSON as a
+ * file-ID download instead of a redirect. The bytes must come from its download_url; a JSON answer
+ * without one is still refused as a preview; a redirect and a real attachment still work.
+ */
+async function testSandboxJsonAnswer() {
+	const CHAT = '6b07f8d8-f574-83ea-881e-18216fb4a0c8';
+	const MSG = '11111111-2222-4333-8444-555555555555';
+	const LINK = 'https://chatgpt.com/backend-api/estuary/content?id=file_00000000aaaa&sig=abc';
+	assert.equal(sandboxLink(JSON.stringify({ status: 'success', download_url: LINK, file_name: 'test-rows.csv', mime_type: 'text/csv', file_size_bytes: null })), LINK);
+	assert.equal(sandboxLink('{"status":"error","error_code":"x"}'), null);
+	assert.equal(sandboxLink('<html>'), null);
+
+	const api = Object.create(GptApi.prototype) as GptApi & { sandboxFetch: (href: string) => Promise<Response> };
+	let answer: Response = new Response('');
+	const asked: string[] = [];
+	const followed: string[] = [];
+	api.sandboxFetch = async (href) => { asked.push(href); return answer; };
+	api.fileBytes = async (link: string) => { followed.push(link); return new TextEncoder().encode('id,name\n1,a\n').buffer; };
+	const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+
+	answer = json({ status: 'success', download_url: LINK, file_name: 'test-rows.csv' });
+	const csv = await api.sandboxBytes(CHAT, MSG, '/mnt/data/test-rows.csv');
+	assert.equal(new TextDecoder().decode(csv!), 'id,name\n1,a\n', 'JSON answer: bytes come from its download link');
+	assert.deepEqual(followed, [LINK]);
+	const askedUrl = new URL(asked[0]!);
+	assert.equal(askedUrl.pathname, `/backend-api/conversation/${CHAT}/interpreter/download`);
+	assert.equal(askedUrl.searchParams.get('sandbox_path'), '/mnt/data/test-rows.csv');
+
+	answer = json({ status: 'error' });
+	await assert.rejects(api.sandboxBytes(CHAT, MSG, '/mnt/data/test-rows.csv'), /without a download link/, 'JSON without a link is not saved as the file');
+
+	answer = new Response(null, { status: 302, headers: { location: LINK } });
+	followed.length = 0;
+	await api.sandboxBytes(CHAT, MSG, '/mnt/data/test-rows.csv');
+	assert.deepEqual(followed, [LINK], 'a redirect is still followed');
+
+	answer = new Response('id,name\n', { status: 200, headers: { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="test-rows.csv"' } });
+	assert.equal(new TextDecoder().decode((await api.sandboxBytes(CHAT, MSG, '/mnt/data/test-rows.csv'))!), 'id,name\n', 'a direct attachment is still saved');
+
+	answer = new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+	await assert.rejects(api.sandboxBytes(CHAT, MSG, '/mnt/data/test-rows.csv'), /preview/, 'an HTML page is still refused');
+	console.log('Generated-file route passed: JSON answer followed to its download link, JSON without a link refused, redirect and attachment unchanged, HTML refused.');
+}
+
 async function main() {
+	await testSandboxJsonAnswer();
 	assert.equal(retryDeadline('120', 1000), 121000);
 	assert.equal(retryDeadline('invalid', 1000), 601000);
 	assert.equal(retryDeadline('Thu, 01 Jan 1970 00:02:00 GMT', 1000), 120000);
