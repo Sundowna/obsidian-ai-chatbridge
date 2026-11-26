@@ -7,6 +7,7 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { isUuid } from './schema';
+import { isOutputPath } from './files';
 import { recordAnswer, recordError, type ErrorSource } from './error-log';
 
 export class StopError extends Error {}
@@ -126,6 +127,42 @@ export class ClaudeApi {
 	filePath(fileUuid: string): string {
 		if (!isUuid(fileUuid)) throw new StopError('Refusing to fetch: file ID has an odd format.');
 		return `/api/organizations/${this.orgId}/files/${fileUuid}/contents`;
+	}
+
+	/** The chat JSON with every tool call drawn in (the plain one leaves them out). */
+	chatWithToolsPath(uuid: string): string {
+		return `${this.chatPath(uuid)}&render_all_tools=true`;
+	}
+
+	/** A Claude-made file by its path in the chat's file store (what the chat view's download card asks for). */
+	outputFilePath(chatUuid: string, path: string): string {
+		if (!isUuid(chatUuid)) throw new StopError('Refusing to fetch: chat ID has an odd format.');
+		if (!isOutputPath(path)) throw new StopError('Refusing to fetch: file path has an odd format.');
+		return `/api/organizations/${this.orgId}/conversations/${chatUuid}/wiggle/download-file?path=${encodeURIComponent(path)}`;
+	}
+
+	/**
+	 * The chat JSON with its tool calls, or null if claude.ai would not give it (any status
+	 * but 200 JSON; 401 and 429 still stop the sync). Only asked for when the chat view is
+	 * not offered for the account (issue #46).
+	 */
+	async chatWithTools(uuid: string): Promise<unknown> {
+		const res = await this.request(this.chatWithToolsPath(uuid), 'application/json', 'soft');
+		if (res.status !== 200) return null;
+		try {
+			return JSON.parse(res.text) as unknown;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * A Claude-made file's bytes by its path. status 404 = no longer there; any other status
+	 * but 200 = not now (tried again next run). 401 and 429 still stop the sync.
+	 */
+	async getOutputFile(chatUuid: string, path: string): Promise<{ status: number; bytes: ArrayBuffer | null }> {
+		const res = await this.request(this.outputFilePath(chatUuid, path), '*/*', 'soft');
+		return { status: res.status, bytes: res.status === 200 ? res.arrayBuffer : null };
 	}
 
 	/**
@@ -278,11 +315,15 @@ export class ClaudeApi {
 		return { status: res.status, contentType: header(res.headers, 'content-type'), text: res.text };
 	}
 
-	/** The single GET used by everything above. Stops on anything but 200 (and 404 if allowed). */
-	private async request(path: string, accept: string, notFoundOk: 'any'): Promise<RequestUrlResponse>;
+	/**
+	 * The single GET used by everything above. Stops on anything but 200 (and 404 if allowed).
+	 * 'any' (diagnostics) and 'soft' (optional extras) hand back the answer instead; both still
+	 * stop on 401 and 429, 'any' also on 403. 'soft' records every answer but 200 and 404.
+	 */
+	private async request(path: string, accept: string, notFoundOk: 'any' | 'soft'): Promise<RequestUrlResponse>;
 	private async request(path: string, accept: string, notFoundOk: true): Promise<RequestUrlResponse | null>;
 	private async request(path: string, accept: string, notFoundOk: false): Promise<RequestUrlResponse>;
-	private async request(path: string, accept: string, notFoundOk: boolean | 'any'): Promise<RequestUrlResponse | null> {
+	private async request(path: string, accept: string, notFoundOk: boolean | 'any' | 'soft'): Promise<RequestUrlResponse | null> {
 		const url = new URL(path, ORIGIN);
 		// Safety guard: never anything but claude.ai/api/organizations/<your org>/...,
 		// the Claude Code session list (claude.ai/v1/code/sessions…) or the account profile, and only GET.
@@ -313,12 +354,12 @@ export class ClaudeApi {
 		}
 
 		const s = res.status;
-		const accepted = s === 200 || (s === 404 && notFoundOk === true) || (notFoundOk === 'any' && s !== 401 && s !== 403 && s !== 429);
+		const accepted = s === 200 || (s === 404 && (notFoundOk === true || notFoundOk === 'soft')) || (notFoundOk === 'any' && s !== 401 && s !== 403 && s !== 429);
 		if (!accepted) recordAnswer(this.source, 'claude.ai', 'GET', url.toString(), res, `claude.ai answered ${s}`, [key]);
 		if (s === 401) throw new StopError('claude.ai answered 401 (not logged in). The login has probably expired – log in again in the plugin settings.');
-		if (s === 403) throw new StopError('claude.ai answered 403 (forbidden). Session key expired, or claude.ai/Cloudflare blocked the request.');
+		if (s === 403 && notFoundOk !== 'soft') throw new StopError('claude.ai answered 403 (forbidden). Session key expired, or claude.ai/Cloudflare blocked the request.');
 		if (s === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');
-		if (notFoundOk === 'any') return res; // diagnostics: caller looks at the status
+		if (notFoundOk === 'any' || notFoundOk === 'soft') return res; // caller looks at the status
 		if (s === 404 && notFoundOk) return null;
 		if (s !== 200) throw new StopError(`claude.ai answered ${s} – unexpected, so the sync stopped.`);
 		return res;

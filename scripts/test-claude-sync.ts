@@ -2,7 +2,8 @@
 // and the version before is kept as raw JSON. No network: ClaudeApi.get answers from fixtures.
 // Run: npm run test:claude
 
-import { TFile, TFolder } from 'obsidian';
+import { TFile, TFolder, testHooks } from 'obsidian';
+import { isOutputPath, outputFiles, outputKey, OUTPUTS_DIR } from '../src/files';
 import { ClaudeApi, chatViewNotOffered, StopError } from '../src/api';
 import { addAccount } from '../src/accounts';
 import { normalizeSettings } from '../src/migrate';
@@ -306,9 +307,68 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	const plain = await new ClaudeApi(ORG, () => 'k').readConversation(CHAT).then(() => 'no stop', (e: unknown) => (e instanceof Error ? e.message : String(e)));
 	expect('#46: any other 403 still stops the sync', plain.includes('403 (forbidden) to ReadConversation'), plain);
 	rpcAnswer = { ...rpcAnswer, text: NOT_OFFERED };
+
+	// Issue #46, part 2: on such an account the Claude-made files are found by their paths in the
+	// chat's tool calls (chat JSON with render_all_tools=true) and fetched like the chat view does
+	// (…/conversations/<chat>/wiggle/download-file?path=…). Real request code, fake network.
+	const OUT = '/mnt/user-data/outputs/report.md';
+	const OUT2 = '/mnt/user-data/outputs/sub/data.csv';
+	let outPaths = [OUT];
+	let outputStatus = 200;
+	let outputCalls = 0;
+	const urls: string[] = [];
+	const toolsChat = () => {
+		const c = chat();
+		return { ...c, chat_messages: [...c.chat_messages, { uuid: 'tools', sender: 'assistant', text: '', created_at: '2026-11-06T09:00:00Z', content: [
+			{ type: 'tool_use', name: 'present_files', input: { filepaths: outPaths } },
+			{ type: 'tool_use', name: 'bash_tool', input: { command: 'cp a /mnt/user-data/outputs/in-a-command.md' } },
+			{ type: 'text', text: '/mnt/user-data/outputs/only-mentioned.md' },
+		] }] };
+	};
+	const answer = (status: number, body: string, type: string) => ({ status, headers: { 'content-type': type }, text: body, arrayBuffer: new TextEncoder().encode(body).buffer });
+	testHooks.requestUrl = async (r) => {
+		const u = new URL(r.url);
+		urls.push(u.pathname + u.search);
+		if (u.pathname === `/api/organizations/${ORG}/conversations/${CHAT}/wiggle/download-file`) {
+			outputCalls++;
+			return outputStatus === 200 ? answer(200, 'report', 'application/octet-stream') : answer(outputStatus, '{"type":"error"}', 'application/json');
+		}
+		if (u.pathname === `/api/organizations/${ORG}/chat_conversations/${CHAT}` && u.searchParams.get('render_all_tools') === 'true') return answer(200, JSON.stringify(toolsChat()), 'application/json');
+		throw new Error('unexpected request ' + r.url);
+	};
+	expect('#46 paths: only exact output paths in tool calls count', JSON.stringify(outputFiles(toolsChat(), CHAT).map((f) => f.output?.path)) === JSON.stringify([OUT]));
+	expect('#46 paths: odd paths are refused', isOutputPath(OUT2) && ![OUTPUTS_DIR, `${OUTPUTS_DIR}a/../b`, `${OUTPUTS_DIR}x/`, '/mnt/user-data/uploads/a.md', `${OUTPUTS_DIR}a\nb`, `${OUTPUTS_DIR}./a`].some(isOutputPath));
+	expect('#46 paths: the download address carries the path encoded', new ClaudeApi(ORG, () => 'k').outputFilePath(CHAT, OUT).endsWith(`/conversations/${CHAT}/wiggle/download-file?path=%2Fmnt%2Fuser-data%2Foutputs%2Freport.md`));
+
 	updated = '2026-11-11T08:00:00Z';
 	turns = [...turns, 'Fourth question'];
 	const blocked = await runSync(plugin, account);
+	const outSaved = account.web.fileIndex[outputKey(CHAT, OUT)] ?? '';
+	expect('#46 paths: the Claude-made file is saved in Artifacts and linked from the note', outSaved.includes('/Artifacts/') && outSaved.endsWith('/report.md') && files.has(outSaved) && files.get(account.web.index[CHAT]!.md)!.includes('report.md'), outSaved);
+	expect('#46 paths: paths only mentioned in text or commands are not fetched', outputCalls === 1 && !urls.some((u) => u.includes('only-mentioned') || u.includes('in-a-command')), urls.join(' | '));
+	expect('#46 paths: the log says the files were looked up by path', (files.get('log.md') ?? '').includes('looked up by path instead (1 chats)'));
+
+	updated = '2026-11-11T09:00:00Z';
+	turns = [...turns, 'Fifth question'];
+	await runSync(plugin, account);
+	expect('#46 paths: a saved file is not fetched again', outputCalls === 1, String(outputCalls));
+
+	outPaths = [OUT, OUT2];
+	outputStatus = 403;
+	updated = '2026-11-11T10:00:00Z';
+	turns = [...turns, 'Sixth question'];
+	const refused = await runSync(plugin, account);
+	expect('#46 paths: a refused file does not stop the sync and is tried again later', !refused.stopped && refused.changedCount === 1 && refused.filesSkipped.some((f) => f.includes('data.csv') && f.includes('will retry')) && account.web.fileIndex[outputKey(CHAT, OUT2)] === undefined, JSON.stringify({ stopped: refused.stopped, skipped: refused.filesSkipped }));
+	outputStatus = 404;
+	updated = '2026-11-11T11:00:00Z';
+	turns = [...turns, 'Seventh question'];
+	await runSync(plugin, account);
+	const goneCalls = outputCalls;
+	updated = '2026-11-11T12:00:00Z';
+	turns = [...turns, 'Eighth question'];
+	await runSync(plugin, account);
+	expect('#46 paths: a file gone from claude.ai (404) is remembered and not asked for again', (account.web.fileIndex[outputKey(CHAT, OUT2)] ?? '').startsWith('skipped: ') && outputCalls === goneCalls, `${account.web.fileIndex[outputKey(CHAT, OUT2)]} ${outputCalls - goneCalls}`);
+	testHooks.requestUrl = null;
 	expect('#46: the sync is not stopped and the chat is saved', !blocked.stopped && blocked.changedCount === 1 && files.get(account.web.index[CHAT]!.md)!.includes('Fourth question'), JSON.stringify({ stopped: blocked.stopped, changed: blocked.changedCount }));
 	expect('#46: reported once as not offered, not as "will retry" per chat', blocked.viewUnavailable === true && blocked.viewNotRead.length === 0 && (files.get('log.md') ?? '').includes('claude.ai does not offer them for this account'), JSON.stringify(blocked.viewNotRead));
 
