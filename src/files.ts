@@ -12,11 +12,29 @@ export type FileKind = 'artifact' | 'attachment';
 export const KIND_FOLDER: Record<FileKind, string> = { artifact: 'Artifacts', attachment: 'Attachments' };
 
 export interface FileTask {
+	/** The file's ID; for a Claude-made file known only by its path, a key from outputKey(). */
 	fileUuid: string;
 	name: string;
 	sizeBytes?: number;
 	kind: FileKind;
 	isImage: boolean;
+	/** Set for a Claude-made file fetched by its path in the chat's file store (issue #46). */
+	output?: { chatUuid: string; path: string };
+}
+
+/** Folder in a chat's file store where Claude's own files (download cards) live. */
+export const OUTPUTS_DIR = '/mnt/user-data/outputs/';
+
+/** An exact file path inside OUTPUTS_DIR: no "." or ".." parts, no line breaks, not a folder. */
+export function isOutputPath(p: string): boolean {
+	if (!p.startsWith(OUTPUTS_DIR) || p.length <= OUTPUTS_DIR.length || p.length > 1024 || p.endsWith('/')) return false;
+	if ([...p].some((ch) => ch.charCodeAt(0) < 32)) return false; // no control characters
+	return p.slice(OUTPUTS_DIR.length).split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+}
+
+/** Key in the file index for a file known only by its path in one chat's file store. */
+export function outputKey(chatUuid: string, path: string): string {
+	return `output:${chatUuid}:${path}`;
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
@@ -93,6 +111,39 @@ export function visibleFiles(answer: unknown): FileTask[] {
 		}
 	}
 	return out;
+}
+
+/**
+ * Claude-made files named by their path in the chat's tool calls, for accounts where claude.ai
+ * does not offer the chat view (ReadConversation 403 "blocked_by_org_tier", issue #46).
+ * Read from the chat JSON asked for with render_all_tools=true; the plain chat JSON has no
+ * tool calls. Seen 2026-11-26: tool_use inputs such as files[].stagedPath or file_path hold
+ * the path. Every string in a tool_use input that is exactly a path under OUTPUTS_DIR counts,
+ * whatever the field is called; paths merely mentioned in text or in a command are ignored.
+ */
+export function outputFiles(chat: unknown, chatUuid: string): FileTask[] {
+	const paths = new Set<string>();
+	const collect = (x: unknown, depth: number): void => {
+		if (depth > 8) return;
+		if (typeof x === 'string') {
+			if (isOutputPath(x)) paths.add(x);
+		} else if (Array.isArray(x)) {
+			for (const v of x) collect(v, depth + 1);
+		} else {
+			const o = obj(x);
+			if (o) for (const v of Object.values(o)) collect(v, depth + 1);
+		}
+	};
+	for (const m of arr(obj(chat)?.chat_messages)) {
+		for (const b of arr(obj(m)?.content)) {
+			const block = obj(b);
+			if (block?.type === 'tool_use') collect(block.input, 0);
+		}
+	}
+	return [...paths].map((path) => {
+		const name = path.slice(path.lastIndexOf('/') + 1);
+		return { fileUuid: outputKey(chatUuid, path), name, kind: 'artifact', isImage: IMAGE_EXT.test(name), output: { chatUuid, path } };
+	});
 }
 
 /** Joins file lists; the first list wins for duplicates (same file ID). */

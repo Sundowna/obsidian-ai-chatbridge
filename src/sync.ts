@@ -16,7 +16,7 @@ import { appendLog } from './log';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
 import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
-import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, safeFileName, visibleFiles } from './files';
+import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, safeFileName, visibleFiles } from './files';
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
 import type { ProgressFn } from './progress';
@@ -49,6 +49,8 @@ export interface SyncResult {
 	viewNotRead: string[];
 	/** claude.ai does not offer the chat view (ReadConversation) for this account's plan. */
 	viewUnavailable?: boolean;
+	/** Chats whose Claude-made files were looked up by path instead (chat view not offered). */
+	outputsRead?: number;
 	/** Chats whose deleted .json/.md were written again. */
 	restored: string[];
 	/** Notes you had edited whose chat continued. */
@@ -120,7 +122,17 @@ async function fetchFiles(
 		await sleep(delayMs);
 		let bytes: ArrayBuffer | null;
 		try {
-			bytes = await api.getFile(task.fileUuid);
+			if (task.output) {
+				// A Claude-made file known by its path (issue #46): 404 = gone; any other refusal = try next run.
+				const r = await api.getOutputFile(task.output.chatUuid, task.output.path);
+				if (r.status !== 200 && r.status !== 404) {
+					result.filesSkipped.push(`${task.name} (claude.ai answered ${r.status}, will retry)`);
+					continue;
+				}
+				bytes = r.bytes;
+			} else {
+				bytes = await api.getFile(task.fileUuid);
+			}
 		} catch (e) {
 			// Name the file in the stop message.
 			if (e instanceof StopError) throw new StopError(`While fetching file "${task.name}": ${e.message}`);
@@ -199,9 +211,21 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const readVisible = async (api: ClaudeApi, item: ListItem, name: string): Promise<FileTask[] | null> => {
 		if (!api.chatViewUnavailable) await sleep(delayMs);
 		const rc = await api.readConversation(item.uuid);
+		if (rc === null && api.chatViewUnavailable) {
+			// Not offered for this account (issue #46): the Claude-made files are found by their
+			// paths in the chat's tool calls instead, and fetched the way the chat view does.
+			result.viewUnavailable = true;
+			await sleep(delayMs);
+			const withTools = await api.chatWithTools(item.uuid);
+			if (withTools === null) {
+				result.viewNotRead.push(name);
+				return null;
+			}
+			result.outputsRead = (result.outputsRead ?? 0) + 1;
+			return outputFiles(withTools, item.uuid);
+		}
 		if (rc === null) {
-			if (api.chatViewUnavailable) result.viewUnavailable = true;
-			else result.viewNotRead.push(name);
+			result.viewNotRead.push(name);
 			return null;
 		}
 		return visibleFiles(rc);
@@ -544,7 +568,11 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 	parts.push(...editsLog(r.edits));
 	if (r.filesSaved) parts.push(`${r.filesSaved} files saved${r.backfilledChats ? ` (incl. files for ${r.backfilledChats} older chats)` : ''}`);
 	if (r.filesDeduped) parts.push(`${r.filesDeduped} files already there under another ID (not copied)`);
-	if (r.viewUnavailable) parts.push('chat-view files: claude.ai does not offer them for this account, chats saved without them');
+	if (r.viewUnavailable) {
+		parts.push(r.outputsRead
+			? `chat-view files: claude.ai does not offer them for this account, Claude-made files looked up by path instead (${r.outputsRead} chats)`
+			: 'chat-view files: claude.ai does not offer them for this account, chats saved without them');
+	}
 	if (r.viewNotRead.length) parts.push(`chat-view files not readable (will retry): ${r.viewNotRead.join(', ')}`);
 	if (r.filesSkipped.length) parts.push(`files not saved: ${r.filesSkipped.join(', ')}`);
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);

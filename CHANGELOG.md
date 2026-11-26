@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- **Claude-made files are saved again on accounts without the chat view** - on account plans where claude.ai does not offer the chat view (403 "blocked_by_org_tier"), the files Claude creates in a chat (download cards) were left out. The plugin now finds them by their paths in the chat's tool calls and downloads them the way claude.ai's own chat page does, into the chat's `Artifacts/` folder, linked from the note. A file claude.ai no longer has is skipped and remembered; any other refusal is tried again on the next sync and never stops it (#46)
 - **ChatGPT files made with code are saved again** - files ChatGPT creates with Python (the download cards in a chat, such as a CSV or text file) were skipped as "generated-file download returned 200 or a preview". chatgpt.com now answers that download with a short note that points to the file instead of the file itself; the plugin follows that link the same way it does for uploads and pictures
 
 ## 0.40.0 - 2026-11-25
