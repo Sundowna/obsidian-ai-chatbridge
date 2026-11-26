@@ -3,7 +3,13 @@
 ## 0.41.0 - 2026-11-26
 
 ### New
-- **Changing a chat folder moves the notes already saved there** - before, a new chat or session folder only applied to new chats, so later updates of older chats still landed in the old folder. Now, when you change the folder (press Enter, leave the field, pick a suggestion or use **Browse…**), the plugin asks first and then moves the saved notes, keeping their subfolders, along with the raw files that follow them and their earlier versions. Links and the index are updated, and old folders left empty are moved to the trash. Custom project folders, a separate JSON folder and unrelated notes stay where they are. It refuses to start if a file is missing or the new place is already taken, and puts files back if a move fails partway. Typing alone no longer creates folders. Works for Claude, ChatGPT, Lumo, Gemini, AI Studio, Claude Code and Codex cloud and local sessions, and Hermes, on desktop (thanks @The-Aries, #50)
+- **New: changing a chat folder moves your saved notes too.** Before, only new chats went to the new folder.
+- **New: you're asked first.** The move starts when you press Enter, leave the field, pick a suggestion or use **Browse…**. Cancel keeps the old folder.
+- **New: everything comes along.** Subfolders, raw files and earlier versions move with the notes, and links and the index are updated.
+- **New: tidy clean-up.** Old folders left empty go to the trash. Custom project folders, a separate JSON folder and other notes stay put.
+- **New: safe if something goes wrong.** A missing file or a taken destination stops the move before it starts, and a move that fails partway puts the files back.
+- **New: no stray folders.** Typing a folder name no longer creates folders letter by letter.
+- Works for Claude, ChatGPT, Lumo, Gemini, AI Studio, Claude Code, Codex (cloud and local) and Hermes, on desktop. Thanks @The-Aries (#50)
 
 ## 0.40.1 - 2026-11-26
 
