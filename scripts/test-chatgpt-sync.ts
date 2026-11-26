@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { Notice, Platform, TFile, TFolder } from 'obsidian';
-import { GptApi, sandboxLink } from '../src/chatgpt/api';
+import { Notice, Platform, TFile, TFolder, testHooks } from 'obsidian';
+import { BlockedLinkError, GptApi, sandboxLink } from '../src/chatgpt/api';
 import { runGptSync } from '../src/chatgpt/sync';
 import { GptRateLimitError, retryDeadline } from '../src/chatgpt/recovery';
 import { sandboxKey } from '../src/chatgpt/files';
@@ -1061,7 +1061,30 @@ async function testSandboxJsonAnswer() {
 	console.log('Generated-file route passed: JSON answer followed to its download link, JSON without a link refused, redirect and attachment unchanged, HTML refused.');
 }
 
+/** Issue #48: one file refused with a JSON 403 skips that file; the sync goes on. Other 403s still stop. */
+async function testFileForbiddenSkipsFile() {
+	const CHAT = '6b07f8d8-f574-83ea-881e-18216fb4a0c8';
+	const FILE = 'file_00000000abcdef0123456789';
+	const api = Object.create(GptApi.prototype) as GptApi;
+	Object.assign(api, { cookie: 'c', deviceId: null, ua: 'test', token: 'key', login: { id: "a" } });
+	let answer: { status: number; headers: Record<string, string>; text: string } = { status: 403, headers: { 'content-type': 'application/json' }, text: '{"detail":"Forbidden"}' };
+	const asked: string[] = [];
+	testHooks.requestUrl = async (r) => { asked.push(r.url); return { ...answer, arrayBuffer: new ArrayBuffer(0), json: null }; };
+	try {
+		await assert.rejects(api.fileInfo(FILE, CHAT), (e: unknown) => e instanceof BlockedLinkError && /403/.test(e.where), 'a JSON 403 on one file skips only that file');
+		assert.ok(asked[0]?.includes(`/backend-api/files/download/${FILE}`));
+		answer = { status: 403, headers: { 'content-type': 'text/html' }, text: '<html>Just a moment...</html>' };
+		await assert.rejects(api.fileInfo(FILE, CHAT), (e: unknown) => e instanceof StopError, 'a Cloudflare page (HTML 403) on a file still stops the sync');
+		answer = { status: 403, headers: { 'content-type': 'application/json' }, text: '{"detail":"Forbidden"}' };
+		await assert.rejects(api.get(`/backend-api/conversations/${CHAT}`), (e: unknown) => e instanceof StopError && !(e instanceof BlockedLinkError), 'a 403 on a chat still stops the sync');
+	} finally {
+		testHooks.requestUrl = null;
+	}
+	console.log('File 403 passed: a JSON 403 on one file skips that file (#48); an HTML 403 or a 403 on a chat still stops.');
+}
+
 async function main() {
+	await testFileForbiddenSkipsFile();
 	await testSandboxJsonAnswer();
 	assert.equal(retryDeadline('120', 1000), 121000);
 	assert.equal(retryDeadline('invalid', 1000), 601000);
