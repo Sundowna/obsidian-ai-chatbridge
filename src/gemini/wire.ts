@@ -3,7 +3,7 @@
 // Positions below were read from live replies on 2026-11-10. Pure code, testable offline.
 
 import { ShapeError } from '../schema';
-import type { GeminiChat, GeminiImage, GeminiListItem, GeminiTurn } from './types';
+import type { GeminiChat, GeminiGenerated, GeminiImage, GeminiListItem, GeminiTurn } from './types';
 
 type List = unknown[];
 
@@ -118,6 +118,25 @@ export function readImages(candidate: List): GeminiImage[] {
 	});
 }
 
+/** The placeholder Gemini writes into an answer where a picture it made goes. */
+export const GENERATED_PLACEHOLDER = /http:\/\/googleusercontent\.com\/image_generation_content\/\d+(?:_\d+)?/g;
+
+/**
+ * Pictures Gemini made, in a candidate's [12][7][0] (seen 2026-11-26):
+ * each row [[…, [3]=[…, [3]="https://lh3.googleusercontent.com/gg/…"]], ["<placeholder>"], …].
+ * Anything unreadable is left out; the raw rows still have it.
+ */
+export function readGenerated(candidate: List): GeminiGenerated[] {
+	const rows = at(candidate, 12, 7, 0);
+	if (!isList(rows)) return [];
+	return rows.flatMap((r): GeminiGenerated[] => {
+		const placeholder = at(r, 1, 0);
+		if (!str(placeholder) || placeholder.match(GENERATED_PLACEHOLDER)?.[0] !== placeholder) return [];
+		const url = webUrl(at(r, 0, 3, 3));
+		return [url?.startsWith('https://') ? { placeholder, url } : { placeholder }];
+	});
+}
+
 /**
  * One turn: [[chatId, turnId], …, [2]=your prompt, [3]=the answers, [4]=time].
  * [3] = [[candidate, …], …, [3]=the chosen candidate's ID, …, [21]=model name].
@@ -145,6 +164,8 @@ export function readTurn(t: List, i: number): GeminiTurn {
 	if (str(answers[21]) && answers[21]) turn.model = answers[21];
 	const images = chosen ? readImages(chosen) : [];
 	if (images.length) turn.images = images;
+	const generated = chosen ? readGenerated(chosen) : [];
+	if (generated.length) turn.generated = generated;
 	if (candidates.length > 1) turn.otherDrafts = candidates.length - 1;
 	return turn;
 }

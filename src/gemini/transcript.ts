@@ -1,7 +1,8 @@
 // Gemini chats and AI Studio prompts as Markdown transcripts. Pure code, no AI.
 
 import { localDateTime } from '../naming';
-import type { GeminiChat, GeminiImage, StudioPrompt } from './types';
+import type { GeminiChat, GeminiGenerated, GeminiImage, StudioPrompt } from './types';
+import { GENERATED_PLACEHOLDER } from './wire';
 
 const y = (s: string): string => JSON.stringify(s);
 
@@ -28,6 +29,18 @@ export function imagesAsLinks(answer: string, images: readonly GeminiImage[] = [
 	});
 }
 
+/**
+ * Pictures Gemini made stand in its answers as a placeholder address that leads nowhere.
+ * Each becomes a line with a link to the picture on Google's servers (it opens only while
+ * signed in to Google), or "not saved" when the chat data gave no address.
+ */
+export function generatedAsLinks(answer: string, generated: readonly GeminiGenerated[] = []): string {
+	return answer.replace(GENERATED_PLACEHOLDER, (placeholder) => {
+		const url = generated.find((g) => g.placeholder === placeholder)?.url;
+		return url ? `*(Generated image, [view](<${url}>), opens while signed in to Google)*` : '*(Generated image, not saved)*';
+	});
+}
+
 export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string): string {
 	const fm = ['---', `uuid: ${chat.id}`, `created: ${chat.createdAt}`, `updated: ${chat.updatedAt}`];
 	if (chat.pinned) fm.push('pinned: true');
@@ -35,7 +48,7 @@ export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string): 
 	const body = chat.turns.flatMap((t) => {
 		const answer: string[] = [];
 		if (t.reasoning) answer.push(callout('Reasoning', t.reasoning));
-		answer.push(imagesAsLinks(t.answer, t.images).trim() || '*(no text)*');
+		answer.push(generatedAsLinks(imagesAsLinks(t.answer, t.images), t.generated).trim() || '*(no text)*');
 		if (t.otherDrafts) answer.push(`*(${t.otherDrafts} other draft${t.otherDrafts === 1 ? '' : 's'} in the raw file)*`);
 		return [
 			`## You · ${localDateTime(t.createdAt)}`, '', t.prompt.trim() || '*(no text)*', '',

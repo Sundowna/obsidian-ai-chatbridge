@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Gemini: pictures Gemini made no longer show as a dead link** - where Gemini generated a picture, the note showed a placeholder address (`googleusercontent.com/image_generation_content/…`) that leads nowhere. It now shows "Generated image" with a link to the picture on Google's servers, which opens while you are signed in to Google. The picture itself is still not downloaded. Notes saved before are updated the next time their chat changes
+
 ## 0.40.0 - 2026-11-25
 
 ### New
