@@ -213,7 +213,7 @@ Every selected or active state needs a visible signal in light and dark theme.
 
 ## 7. Other providers [readme]
 
-- [ ] ChatGPT: projects, pinned chats (own inventory lists, on by default; turning it off leaves them out of the inventory), archived optional, custom GPT chats to `Recent`, generated files and uploads, visual answers as HTML and pictures (nothing executed, no remote loads), voice chats as text, incremental sync with weekly full inventory, delayed-file retries
+- [ ] ChatGPT: projects, pinned chats (own inventory lists, on by default; turning it off leaves them out of the inventory), archived optional, custom GPT chats to `Recent`, generated files (code-interpreter `sandbox:/mnt/data/…` links: the download route's redirect, attachment, or – seen 2026-11-26 – JSON `{status:"success", download_url}` whose link is fetched under the usual file-link rules; JSON without a link or an HTML page is refused; `npm run test:sync`) and uploads, visual answers as HTML and pictures (nothing executed, no remote loads), voice chats as text, incremental sync with weekly full inventory, delayed-file retries
 - [ ] ChatGPT archive separation uses a full inventory at the first web reconciliation. Later syncs detect archive changes from list observations, with the weekly full inventory covering chats outside the recent overlap.
 - [ ] Gemini: chats with shown reasoning, pictures as links. AI Studio: chats and prompts
 - [ ] Gemini: a chat Google sends in an odd shape is skipped, named in the log under "could not read" and tried again next run; the third such chat in one run stops the sync ("could not be verified"), as a format change would

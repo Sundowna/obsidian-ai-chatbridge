@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **ChatGPT files made with code are saved again** - files ChatGPT creates with Python (the download cards in a chat, such as a CSV or text file) were skipped as "generated-file download returned 200 or a preview". chatgpt.com now answers that download with a short note that points to the file instead of the file itself; the plugin follows that link the same way it does for uploads and pictures
+
 ## 0.40.0 - 2026-11-25
 
 ### New
