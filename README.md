@@ -3,7 +3,7 @@
 **All your AI chats in your Obsidian vault.** AI ChatBridge saves your chats from **Claude**, **ChatGPT**, **Gemini**, **Google AI Studio**, **Proton Lumo** and **Hermes Agent**, plus your **Claude Code** and **Codex** sessions, as readable Markdown notes. Projects become folders, and files, images and artifacts come along.
 
 - **What each AI remembers about you:** Claude, ChatGPT, Claude Code and Codex memories, saved as dated snapshots ([AI memory](#ai-memory))
-- **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** works well with [OneNote Style](https://community.obsidian.md/plugins/onenote-style) (the ribbon) and the [OneNote Style theme](https://community.obsidian.md/themes/onenote-style) (the look)
+- **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** a low-friction, easy way into Karpathy-style LLM second brains and project brains. Works well with [OneNote Style](https://community.obsidian.md/plugins/onenote-style) (the ribbon) and the [OneNote Style theme](https://community.obsidian.md/themes/onenote-style) (the look)
 
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is changed or deleted on their side. The plugin reads the same web pages your browser uses, which can change without notice.
