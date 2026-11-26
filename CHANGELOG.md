@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- **Claude-made files are saved again on accounts without the chat view** - on account plans where claude.ai does not offer the chat view (403 "blocked_by_org_tier"), the files Claude creates in a chat (download cards) were left out. The plugin now finds them by their paths in the chat's tool calls and downloads them the way claude.ai's own chat page does, into the chat's `Artifacts/` folder, linked from the note. A file claude.ai no longer has is skipped and remembered; any other refusal is tried again on the next sync and never stops it (#46)
 - **Gemini: pictures Gemini made no longer show as a dead link** - where Gemini generated a picture, the note showed a placeholder address (`googleusercontent.com/image_generation_content/…`) that leads nowhere. It now shows "Generated image" with a link to the picture on Google's servers, which opens while you are signed in to Google. The picture itself is still not downloaded. Notes saved before are updated the next time their chat changes
 
 ## 0.40.0 - 2026-11-25
