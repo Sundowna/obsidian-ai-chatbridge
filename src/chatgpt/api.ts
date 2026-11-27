@@ -10,7 +10,7 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
 import { cookieHeader, cookieValue, hasLoginFetch, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
-import { checkGptFileInfo, isChatId, isFileId, isMessageId } from './schema';
+import { checkGptFileInfo, isChatId, isFileId, isGptFileGone, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
 import { CodexAppServer } from '../cloud/codex-app-server';
@@ -32,6 +32,8 @@ const ALLOWED = [
 	/^\/backend-api\/memories$/,
 	/^\/backend-api\/user_system_messages$/,
 ];
+/** A file's own download link on chatgpt.com. */
+const ESTUARY = '/backend-api/estuary/content';
 /** The per-file lookup: a JSON 403 here skips only that file. */
 const FILE_INFO = /^\/backend-api\/files\/download\//;
 
@@ -85,6 +87,15 @@ export function sandboxLink(text: string): string | null {
 		return checkGptFileInfo(JSON.parse(text)).url;
 	} catch {
 		return null;
+	}
+}
+
+/** A JSON answer saying chatgpt.com no longer has the file (`file_not_found`). */
+function gone(text: string): boolean {
+	try {
+		return isGptFileGone(JSON.parse(text));
+	} catch {
+		return false;
 	}
 }
 
@@ -297,7 +308,7 @@ export class GptApi {
 			if (!NAMED_FILE.test(header(res.headers, 'content-disposition'))) throw new BlockedLinkError(`${where} (not a file download)`);
 			return res.arrayBuffer;
 		}
-		if (url.pathname !== '/backend-api/estuary/content') throw new BlockedLinkError(where);
+		if (url.pathname !== ESTUARY) throw new BlockedLinkError(where);
 		const res = await this.request(url.pathname + url.search, '*/*', true, true);
 		return res ? res.arrayBuffer : null;
 	}
@@ -333,7 +344,9 @@ export class GptApi {
 			// Seen 2026-11-26: the route answers 200 with the same JSON as a file-ID download
 			// ({ status: "success", download_url: …/backend-api/estuary/content?… }) instead of a
 			// redirect. The bytes come from that link, under fileBytes' usual rules.
-			const link = sandboxLink(await res.text());
+			const text = await res.text();
+			const link = sandboxLink(text);
+			if (!link && gone(text)) return null;
 			if (!link) throw new BlockedLinkError('generated-file download returned JSON without a download link');
 			return this.fileBytes(link);
 		}
@@ -431,6 +444,9 @@ export class GptApi {
 		if (s === 404 && notFoundOk) return null;
 		// One Library file it cannot serve (seen: 415 "Could not resolve file URL"): skip only that file, retried later.
 		if (s !== 200 && LIBRARY_FILE.test(url.pathname)) throw new BlockedLinkError(`chatgpt.com library file answered ${s}, will retry`);
+		// The same for a file's own download (seen 2026-11-27: 415 for one generated .js file), which
+		// used to stop the whole sync.
+		if (s !== 200 && url.pathname === ESTUARY) throw new BlockedLinkError(`chatgpt.com file download answered ${s}, will retry`);
 		if (s !== 200) {
 			let why = '';
 			try {

@@ -1047,6 +1047,9 @@ async function testSandboxJsonAnswer() {
 
 	answer = json({ status: 'error' });
 	await assert.rejects(api.sandboxBytes(CHAT, MSG, '/mnt/data/test-rows.csv'), /without a download link/, 'JSON without a link is not saved as the file');
+	// Seen 2026-11-27 for expired generated files: the file is gone, so "download unavailable".
+	answer = json({ status: 'error', error_code: 'file_not_found', error_type: 'GetDownloadLinkError', error_message: null });
+	assert.equal(await api.sandboxBytes(CHAT, MSG, '/mnt/data/test-rows.csv'), null, 'file_not_found = download unavailable');
 
 	answer = new Response(null, { status: 302, headers: { location: LINK } });
 	followed.length = 0;
@@ -1264,6 +1267,80 @@ async function testLibraryFileSync() {
 	console.log('Library file sync passed: 415 waits for its retry without stopping, short answer = size mismatch, full file saved and its wait cleared.');
 }
 
+/**
+ * Seen 2026-11-27 in the owner's waiting files: a file's own download (estuary/content) answered
+ * 415 for one generated .js file, which stopped the whole sync; and the file lookup answers
+ * 200 { status: "error", error_code: "file_not_found" } for deleted uploads, which waited as
+ * "unexpected file response". Now: the 415 skips only that file; a gone file is "download unavailable".
+ */
+async function testRefusedDownloadAndGoneFile() {
+	const ESTUARY_LINK = 'https://chatgpt.com/backend-api/estuary/content?id=file_00000000f4788210ad8d881a71cbbd2c&ts=1&p=fs&cid=1&sig=abc&v=0';
+	const api = signedInApi();
+	let answer = answerOf(415, { 'content-disposition': 'attachment; filename="x.js"' }, 'Unsupported Media Type');
+	testHooks.requestUrl = async () => answer;
+	try {
+		await assert.rejects(api.fileBytes(ESTUARY_LINK), (e: unknown) => e instanceof BlockedLinkError && /file download answered 415/.test(e.where), 'a 415 on a download skips only that file');
+		answer = answerOf(500, { 'content-type': 'application/json' }, '{"detail":"Internal Server Error"}');
+		await assert.rejects(api.fileBytes(ESTUARY_LINK), (e: unknown) => e instanceof BlockedLinkError && /500/.test(e.where), 'a 500 on a download skips only that file');
+		answer = answerOf(401, { 'content-type': 'text/plain' }, 'no');
+		await assert.rejects(api.fileBytes(ESTUARY_LINK), (e: unknown) => e instanceof StopError && !(e instanceof BlockedLinkError), 'a 401 still stops the sync (login)');
+		answer = answerOf(404, { 'content-type': 'application/json' }, '{"detail":"File not found"}');
+		assert.equal(await api.fileBytes(ESTUARY_LINK), null, '404 = download unavailable');
+		answer = answerOf(500, { 'content-type': 'application/json' }, '{"detail":"Internal Server Error"}');
+		await assert.rejects(api.get(`/backend-api/conversations/${id}`), (e: unknown) => e instanceof StopError && !(e instanceof BlockedLinkError), 'a 500 on a chat still stops the sync');
+	} finally {
+		testHooks.requestUrl = null;
+	}
+
+	// Through the sync: a deleted upload and a refused download next to each other; the sync goes on.
+	const h = harness();
+	const g = h.settings.chatgpt[0]!.web;
+	g.downloadFiles = true;
+	const GONE = 'file_00000000aaaa8210ad8d881a71cbbd2c';
+	const REFUSED = 'file_00000000bbbb8210ad8d881a71cbbd2c';
+	const chat = {
+		conversation_id: id, title: 'Files', create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [{
+			id: 'message-user', author: { role: 'user' }, content: { content_type: 'text', parts: ['Two files.'] },
+			metadata: { attachments: [{ id: GONE, name: 'old.pdf', size: 10, mime_type: 'application/pdf' }, { id: REFUSED, name: 'script.js', size: 10, mime_type: 'text/javascript' }] },
+		}, message('message-answer', 'Read them.')],
+		page_info: { has_previous_page: false },
+	};
+	testHooks.requestUrl = async (r) => {
+		const url = new URL(r.url);
+		if (url.pathname === `/backend-api/files/download/${GONE}`) return answerOf(200, { 'content-type': 'application/json' }, JSON.stringify({ status: 'error', error_code: 'file_not_found', error_type: 'GetDownloadLinkError', error_message: null }));
+		if (url.pathname === `/backend-api/files/download/${REFUSED}`) return answerOf(200, { 'content-type': 'application/json' }, JSON.stringify({ status: 'success', download_url: ESTUARY_LINK, file_size_bytes: null }));
+		if (r.url === ESTUARY_LINK) return answerOf(415, {}, 'Unsupported Media Type');
+		throw new Error('Unexpected request ' + r.url);
+	};
+	const connect = GptApi.connect;
+	GptApi.connect = async () => Object.assign(signedInApi(), {
+		inventoryKey: 'account:waiting-files-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: () => 'chat',
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: [{ id, title: 'Files', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat') return raw(chat);
+			throw new Error('Unexpected request ' + path);
+		},
+	});
+	try {
+		const r = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(r.stopped, undefined, 'a refused download no longer stops the sync');
+		assert.equal(r.newCount, 1, 'the chat is still saved');
+		assert.equal(r.pendingAssets, 2);
+		assert.equal(g.assetRetries?.[GONE]?.reason, 'download unavailable', 'a deleted upload says so');
+		assert.match(g.assetRetries?.[REFUSED]?.reason ?? '', /file download answered 415, will retry/, 'the refused download waits for its retry');
+	} finally {
+		testHooks.requestUrl = null;
+		GptApi.connect = connect;
+	}
+	console.log('Refused download and gone file passed: a 415/500 on a download skips only that file (401 and a chat 500 still stop), file_not_found = download unavailable, the sync goes on.');
+}
+
 async function main() {
 	await testFileForbiddenSkipsFile();
 	await testNetworkErrorRetried();
@@ -1279,6 +1356,7 @@ async function main() {
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();
 	await testLibraryFileSync();
+	await testRefusedDownloadAndGoneFile();
 	await testJsonFolder();
 	await testQuickCheck();
 	await testQuickCheckSameResult();

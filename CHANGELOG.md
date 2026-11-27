@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **ChatGPT: one file that will not download no longer stops the whole sync** - when chatgpt.com refused to hand over a single file (seen: a generated script file answered "415"), the sync stopped there. Now only that file is skipped and tried again later, and the rest of the sync goes on. A missing login still stops the sync, as before
+- **ChatGPT: deleted files are named as such** - files chatgpt.com no longer has (old uploads, and files made with code that have expired) were listed as "unexpected file response" or "JSON without a download link". They now show as "download unavailable", which is what they are
+
 ## 0.41.4 - 2026-11-27
 
 ### Fixed

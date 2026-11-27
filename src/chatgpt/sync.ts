@@ -18,7 +18,7 @@ import { KIND_FOLDER, numbered, safeFileName } from '../files';
 import type { IndexEntry, ListItem } from '../types';
 import { BlockedLinkError, GptApi } from './api';
 import { pastedSession } from '../cookies';
-import { checkGptChat, checkGptFileInfo, checkGptOlderPage, checkGptSidebar, isMessageId } from './schema';
+import { checkGptChat, checkGptFileInfo, checkGptOlderPage, checkGptSidebar, isGptFileGone, isMessageId } from './schema';
 import { joinParts, olderPartPath } from './parts';
 import { toListItems } from './select';
 import { gptChatFiles, type GptFileTask } from './files';
@@ -186,7 +186,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		}
 		requestStage = `looking up file "${file}"`;
 		const info = await a.fileInfo(task.fileUuid, chatId);
-		if (info === null) return { bytes: null };
+		if (info === null || isGptFileGone(info)) return { bytes: null };
 		const { url, size } = checkGptFileInfo(info);
 		await sleep(delayMs);
 		requestStage = `downloading file "${file}"`;
