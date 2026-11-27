@@ -6,7 +6,7 @@
 
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { BrowserLinkError, BrowserLinkUnavailable } from './errors';
-import { isBrowserId, LEGACY_BROWSER, readTokens, writeTokens } from './account';
+import { browserKind, isBrowserId, LEGACY_BROWSER, readTokens, writeTokens } from './account';
 import { isExtensionOrigin, isLinkImage, isLinkPage, isLinkTarget, LINK_OPEN_PATH } from './sites';
 import {
 	BodyAssembler, MAX_FRAME_BYTES, toBase64,
@@ -29,6 +29,8 @@ export interface LinkServerOptions {
 	now?: () => number;
 	/** A browser was paired (its ID): the plugin names it. */
 	onPaired?: (browser: string) => void;
+	/** A paired browser connected; `kind` is what its User-Agent says it is (Chrome, Edge, Firefox…). */
+	onLinked?: (browser: string, kind: string | undefined) => void;
 }
 
 /** The page behind the "Open in browser" button; the extension turns it into its own page. */
@@ -149,7 +151,7 @@ export class LinkServer {
 			// Any web page can try ws://127.0.0.1, so only extension pages get in, and only by this address.
 			verifyClient: ({ origin, req }: { origin: string; req: IncomingMessage }) => isExtensionOrigin(origin) && this.hostOk(req),
 		});
-		this.wss.on('connection', (ws, req: IncomingMessage) => this.onConnection(ws, req.headers.origin));
+		this.wss.on('connection', (ws, req: IncomingMessage) => this.onConnection(ws, req.headers.origin, req.headers['user-agent']));
 		return this.boundPort;
 	}
 
@@ -235,7 +237,7 @@ export class LinkServer {
 		}
 	}
 
-	private onConnection(ws: WebSocket, origin?: string): void {
+	private onConnection(ws: WebSocket, origin?: string, userAgent?: string): void {
 		const timer = window.setTimeout(() => ws.close(1008), this.opts.helloTimeoutMs ?? 5000);
 		ws.once('message', (raw) => {
 			window.clearTimeout(timer);
@@ -259,6 +261,7 @@ export class LinkServer {
 				this.failAll(new BrowserLinkUnavailable('browser-closed'), browser);
 			});
 			ws.send(JSON.stringify(welcome));
+			this.opts.onLinked?.(browser, browserKind(userAgent));
 		});
 	}
 

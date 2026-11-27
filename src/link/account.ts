@@ -85,3 +85,23 @@ export function pairButtonText(state: LinkState): string {
 
 /** Unpair from an account without a browser of its own forgets every paired browser: with several, it asks first. */
 export const unpairForgetsAll = (own: string | undefined, paired: number): boolean => !own && paired > 1;
+
+/** Which browser a connection comes from, by its User-Agent; undefined when it does not say. */
+export function browserKind(userAgent: string | undefined): string | undefined {
+	const ua = userAgent ?? '';
+	if (/\bEdg\//.test(ua)) return 'Edge';
+	if (/\bOPR\//.test(ua)) return 'Opera';
+	if (/\bVivaldi\//.test(ua)) return 'Vivaldi';
+	if (/\bFirefox\//.test(ua)) return 'Firefox';
+	if (/\bChrome\//.test(ua)) return 'Chrome';
+	return undefined;
+}
+
+/** A name the plugin made up ("Browser 2"), which a browser's own kind may replace. */
+export const isMadeUpBrowserName = (name: string | undefined): boolean => !name || /^Browser( \d+| \(paired before names\))?$/.test(name);
+
+/** "Chrome", or "Chrome 2" when another browser already has that name. */
+export function kindName(kind: string, taken: readonly string[]): string {
+	if (!taken.includes(kind)) return kind;
+	for (let n = 2; ; n++) if (!taken.includes(`${kind} ${n}`)) return `${kind} ${n}`;
+}
