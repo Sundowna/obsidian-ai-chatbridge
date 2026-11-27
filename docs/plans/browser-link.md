@@ -1,7 +1,7 @@
 # Browser link: plan and implementation plan
 
 Handover document. Written 27 Nov 2026 by the session that did the kickoff (reading and research only).
-**Progress: stages 0–5 done and merged as 0.45.1 (PR #70); Claude and ChatGPT live run passed. Next: Stage 6 (login-window fixes). See each "Stage N status" below.**
+**Progress: all stages done: 0–5 as 0.45.1 (PR #70), 6 as 0.47.1 (PR #72), 7 as 0.48.1. Owner's acceptance check: `docs/browser-link-acceptance.md`. See each "Stage N status" below.**
 
 The next session should read this file top to bottom, then start at [Stage 0](#stage-0-proof-in-the-real-browser).
 
@@ -299,6 +299,24 @@ Merge with main: `accountId()` (parity) now reads a named page value (`google-ac
 |---|---|
 | Google mode in every partition | Done in `src/login.ts`: a header rule for Google's sign-in hosts in the claude.ai and ChatGPT storages (Firefox name, no client hints) plus the page's own browser name switched on main-frame navigation to Google and back. Gemini's window unchanged. Tested against a stand-in Electron (8 checks, proven to bite); a real "Continue with Google" in the login window still needs the owner |
 | Popups as real child windows with a live `window.opener` | **Not possible from a plugin**: Obsidian's main process decides through `setWindowOpenHandler`, which must answer at once, and a plugin's handler only runs later through `electron.remote` (seen in 0.4x, see the comment in `openLogin`). Today's behaviour stays: the popup's address opens in the same window. Accounts that need a popup sign-in use the Browser link instead |
+
+### Stage 7 status (27 Nov 2026)
+
+| Part | Result |
+|---|---|
+| Firefox | `extension/dist-firefox` from the same build; `npm run test:extension-firefox` (real Firefox 161, WebDriver BiDi, `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1` for the throwaway instance only): 20 checks pass, including reconnect after Firefox suspends the background. Site access was granted at install for the temporary add-on |
+| Pairing UX | Options page opens after install; code field focused; Enter pairs; **Allow site access** when needed |
+| Acceptance checklist | `docs/browser-link-acceptance.md` |
+| README, CHANGELOG, FEATURES | Firefox added; 0.48.1 |
+| Handoff note | In the Brain vault under `D:\BrainTest` (Active Context and the daily note) |
+
+Known limitations (for the handoff):
+- The browser must be open while a Browser link account syncs; one paired browser, one login per site in it.
+- The extension is not in a store: built from the repository and loaded unpacked (Firefox: temporary, removed when Firefox closes).
+- Edge and Brave use the Chrome build but were not tried by hand.
+- Login-window popups with `window.opener` are not possible from a plugin (Stage 6).
+- A closed browser shows one notice for Gemini and one for AI Studio.
+- The status bar has no lasting link state, only notices.
 
 Not done in Stage 3: Edge and Brave by hand; a signed-in run through the real extension (Stage 4 does it with the plugin wired in); attribution file (nothing was copied from sho7650/obsidian-AI-exporter or browser-tools-mcp, only the manifest idea, so no notice is needed yet).
 
