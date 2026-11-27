@@ -51,8 +51,8 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 			const p = await readOrSkip(odd, item.name, () => a.prompt(item.uuid, wait));
 			if (!p) return null;
 			const created = p.messages.find((m) => m.createdAt)?.createdAt ?? p.updatedAt;
-			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name), account.label) };
-		}, progress, result, { label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label) });
+			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name, account.web.showReasoning !== false), account.label) };
+		}, progress, result, { label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label, account.web.showReasoning !== false) });
 	} catch (e) {
 		const paused = pausedBy(e, st, result);
 		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.

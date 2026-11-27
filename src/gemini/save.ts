@@ -68,9 +68,9 @@ export function sameGoogleLogin(accounts: readonly GeminiAccount[], account: Gem
 export const SAME_GOOGLE_LOGIN = (label: string): string => `This login is the same Google account as "${label}". Log in with a different account, or remove this one.`;
 
 /** A Gemini chat's note from its saved raw file. */
-export const geminiFromRaw = (label: string): FromRaw => (raw, link, uuid) => tagAccount(renderGeminiTranscript(savedChat<GeminiChat>(raw, uuid, 'turns'), link), label);
+export const geminiFromRaw = (label: string, showReasoning = true): FromRaw => (raw, link, uuid) => tagAccount(renderGeminiTranscript(savedChat<GeminiChat>(raw, uuid, 'turns'), link, showReasoning), label);
 /** An AI Studio prompt's note from its saved raw file. */
-export const studioFromRaw = (label: string): FromRaw => (raw, link, uuid) => tagAccount(renderStudioTranscript(savedChat<StudioPrompt>(raw, uuid, 'messages'), link), label);
+export const studioFromRaw = (label: string, showReasoning = true): FromRaw => (raw, link, uuid) => tagAccount(renderStudioTranscript(savedChat<StudioPrompt>(raw, uuid, 'messages'), link, showReasoning), label);
 
 /** A yes/no mark the provider's chat list carries for every chat (Gemini: pinned), kept up to date in the note. */
 export interface ChatFlag {

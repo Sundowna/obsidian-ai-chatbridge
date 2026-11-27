@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.50.0 - 2026-11-27
+
+### Added
+- **Gemini, AI Studio and Lumo: reasoning switch** - each account gets **Show reasoning in the note**, like Claude and ChatGPT. It starts on, so your notes look as before; turn it off to leave the AI's reasoning out of the notes (it stays in the raw file).
+
 ## 0.49.4 - 2026-11-27
 
 ### Fixed

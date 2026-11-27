@@ -38,10 +38,10 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 const nameOf = (path: string): string => path.split('/').pop() ?? path;
 const fileLink = (path: string, name = nameOf(path)): string => (IMAGE_EXT.test(path) ? `![[${path}]]` : `📎 [[${path}|${name}]]`);
 
-function messageBody(m: LumoMessage, links?: LumoFileLinks): string {
+function messageBody(m: LumoMessage, links?: LumoFileLinks, showReasoning = true): string {
 	const parts: string[] = [];
 	const p = m.private;
-	if (typeof p.reasoning === 'string' && p.reasoning.trim()) parts.push(reasoningCallout(p.reasoning));
+	if (showReasoning && typeof p.reasoning === 'string' && p.reasoning.trim()) parts.push(reasoningCallout(p.reasoning));
 	if (typeof p.content === 'string' && p.content.trim()) parts.push(p.content.trim());
 	const blocks = Array.isArray(p.blocks) ? p.blocks as { type?: unknown }[] : [];
 	const tools = blocks.filter((b) => b?.type === 'tool_call').length || (p.toolCall ? 1 : 0);
@@ -64,14 +64,15 @@ function messageBody(m: LumoMessage, links?: LumoFileLinks): string {
 	return parts.join('\n\n') || '*(no text)*';
 }
 
-export function renderLumoTranscript(chat: LumoChat, jsonFileName: string, links?: LumoFileLinks): string {
+/** `showReasoning`: the AI's reasoning, folded, above each answer (the account's switch; on unless turned off). */
+export function renderLumoTranscript(chat: LumoChat, jsonFileName: string, links?: LumoFileLinks, showReasoning = true): string {
 	const fm = ['---', `uuid: ${chat.id}`, `created: ${chat.createdAt}`, `updated: ${chat.updatedAt}`];
 	if (chat.project) fm.push(`project: ${y(chat.project)}`);
 	if (chat.starred) fm.push('starred: true');
 	fm.push(...modelProperty(shownBranch(chat.messages).filter((m) => m.role === 'assistant').map((m) => m.private.modelID)));
 	fm.push(`raw: ${y(`[[${jsonFileName}]]`)}`, 'unread: true', '---', '');
 	const body = shownBranch(chat.messages).flatMap((m) =>
-		[`## ${m.role === 'user' ? 'You' : 'Lumo'} · ${localDateTime(m.createdAt)}`, '', messageBody(m, links), '']);
+		[`## ${m.role === 'user' ? 'You' : 'Lumo'} · ${localDateTime(m.createdAt)}`, '', messageBody(m, links, showReasoning), '']);
 	if (links?.extras.length) body.push('## Files', '', ...links.extras.map((path) => fileLink(path)), '');
 	return fm.join('\n') + body.join('\n');
 }

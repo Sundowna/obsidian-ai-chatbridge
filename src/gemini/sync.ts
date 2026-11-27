@@ -68,8 +68,8 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 				if (odd.skip(e, item.name)) return null;
 				throw e;
 			}
-			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
-		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true } });
+			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name, g.showReasoning !== false), account.label) };
+		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label, g.showReasoning !== false), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true } });
 	} catch (e) {
 		const paused = pausedBy(e, g, result);
 		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
