@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.55.2 - 2026-11-27
+
+### Fixed
+- **"Any connected browser" caught by another account's browser** - after a second browser (say, a work profile in Edge) was paired for one account, accounts left on "Any connected browser" could be sent there and found no login. They now prefer a browser no other account has picked.
+
 ## 0.55.1 - 2026-11-27
 
 ### Fixed

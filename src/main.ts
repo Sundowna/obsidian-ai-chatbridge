@@ -45,7 +45,7 @@ import { hasArchiveToRestore, restoreSavedChats, separateSavedChats, type Archiv
 import { archiveSummary } from './archive-move';
 import { LinkManager } from './link/manager';
 import type { TokenStore } from './link/server';
-import { secretTokenStore, usesBrowserLink } from './link/account';
+import { LINK_PROVIDERS, pickBrowser, secretTokenStore, usesBrowserLink } from './link/account';
 import { setBrowserLink } from './transport';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
@@ -171,7 +171,13 @@ export default class AIChatBridge extends Plugin {
 			return !!account && usesBrowserLink(login.provider, account as GeminiAccount);
 		}, () => this.browserLink.server, (login) => {
 			const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
-			return (account as GeminiAccount | undefined)?.web.linkBrowser || undefined;
+			const own = (account as GeminiAccount | undefined)?.web.linkBrowser || undefined;
+			if (own) return own;
+			const claimed = LINK_PROVIDERS.flatMap((p) => accountsOf(this.settings, p)
+				.filter((a) => a !== account)
+				.map((a) => (a as GeminiAccount).web.linkBrowser)
+				.filter((b): b is string => !!b));
+			return pickBrowser(undefined, claimed, this.browserLink.server?.linkedBrowsers() ?? []);
 		});
 		void this.updateBrowserLink();
 		registerLayoutIcons(this);
