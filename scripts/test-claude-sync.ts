@@ -88,10 +88,11 @@ let project: typeof PROJECT | null = PROJECT;
 let turns = ['First question', 'First answer'];
 const FILE = '55555555-5555-4555-8555-555555555555';
 let attach = false;
+let pastes: Record<string, unknown>[] = [];
 const chat = () => ({
 	uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated,
 	chat_messages: turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z',
-		...(attach && i === 0 ? { attachments: [{ file_uuid: FILE, file_name: 'notes.txt', size_bytes: 5 }] } : {}) })),
+		...((attach || pastes.length) && i === 0 ? { attachments: [...(attach ? [{ file_uuid: FILE, file_name: 'notes.txt', size_bytes: 5 }] : []), ...pastes] } : {}) })),
 });
 let fileFetches = 0;
 ClaudeApi.prototype.getFile = async () => { fileFetches++; return new TextEncoder().encode('notes').buffer; };
@@ -368,6 +369,47 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	turns = [...turns, 'Eighth question'];
 	await runSync(plugin, account);
 	expect('#46 paths: a file gone from claude.ai (404) is remembered and not asked for again', (account.web.fileIndex[outputKey(CHAT, OUT2)] ?? '').startsWith('skipped: ') && outputCalls === goneCalls, `${account.web.fileIndex[outputKey(CHAT, OUT2)]} ${outputCalls - goneCalls}`);
+
+	// Issue #64: claude.ai keeps a long paste as a "Pasted" card: an attachment with no name and
+	// no file ID, its text in extracted_content. Short ones go into the note, long ones into a
+	// file in Attachments/ (no download needed), or folded into the note with downloads off.
+	const SHORT = 'Short pasted line one\n\n## A heading inside the paste\nline three';
+	const LONG = Array.from({ length: 80 }, (_, i) => `Long paste line ${i + 1}`).join('\n');
+	const LONG_KEY = 'pasted:66666666-6666-4666-8666-666666666666';
+	pastes = [
+		{ id: '77777777-7777-4777-8777-777777777777', file_name: '', file_size: SHORT.length, file_type: 'txt', extracted_content: SHORT },
+		{ id: LONG_KEY.slice(7), file_name: '', file_size: LONG.length, file_type: 'txt', extracted_content: LONG },
+		{ id: '88888888-8888-4888-8888-888888888888', file_name: 'notes.md', file_size: 15, file_type: 'text/markdown', extracted_content: 'Named file text' },
+		{ id: '99999999-9999-4999-8999-999999999999', file_name: '', file_size: 0, file_type: 'txt', extracted_content: '  ' },
+	];
+	const fetchesBeforePaste = fileFetches;
+	const callsBeforePaste = outputCalls;
+	updated = '2026-11-11T13:00:00Z';
+	turns = [...turns, 'Ninth question'];
+	const pasted = await runSync(plugin, account);
+	const pNote = files.get(account.web.index[CHAT]!.md) ?? '';
+	const pFile = account.web.fileIndex[LONG_KEY] ?? '';
+	expect('#64: a short paste is in the note, every line quoted', !pasted.stopped && pNote.includes('> [!quote] Pasted text\n> Short pasted line one\n>\n> ## A heading inside the paste\n> line three'), pasted.stopped ?? pNote.slice(pNote.indexOf('Pasted') - 20, pNote.indexOf('Pasted') + 200));
+	expect('#64: a heading in a paste never becomes a transcript heading', !/^## A heading/m.test(pNote));
+	expect('#64: a short text file is in the note under its own name', pNote.includes('> [!quote] notes.md\n> Named file text'));
+	expect('#64: a long paste is saved in Attachments/ with its exact text', pFile.includes('/Attachments/') && pFile.endsWith('/Pasted text.md') && files.get(pFile) === LONG, pFile);
+	expect('#64: the note links the long paste instead of holding it', pNote.includes(`📎 [[${pFile}|Pasted text]]`) && !pNote.includes('Long paste line 80'));
+	expect('#64: an empty paste adds nothing', (pNote.match(/\[!quote\]/g) ?? []).length === 2);
+	expect('#64: pastes need no download', fileFetches === fetchesBeforePaste && outputCalls === callsBeforePaste, `${fileFetches - fetchesBeforePaste} files, ${outputCalls - callsBeforePaste} outputs`);
+	const again = await runSync(plugin, account);
+	expect('#64: an unchanged chat saves its paste only once', again.filesSaved === 0 && again.unchanged >= 1 && [...files.keys()].filter((k) => k.includes('/Pasted text')).length === 1);
+	files.delete(pFile);
+	const back = await runSync(plugin, account);
+	expect('#64: a deleted paste file is written again', back.backfilledChats === 1 && files.get(account.web.fileIndex[LONG_KEY]!) === LONG, JSON.stringify({ backfilled: back.backfilledChats, path: account.web.fileIndex[LONG_KEY] }));
+	files.delete(account.web.fileIndex[LONG_KEY]!);
+	account.web.downloadFiles = false;
+	updated = '2026-11-11T14:00:00Z';
+	turns = [...turns, 'Tenth question'];
+	await runSync(plugin, account);
+	const folded = files.get(account.web.index[CHAT]!.md) ?? '';
+	expect('#64: downloads off: the long paste is folded into the note, all of it', folded.includes('> [!quote]- Pasted text (80 lines)\n> Long paste line 1\n') && folded.includes('> Long paste line 80') && !files.has(account.web.fileIndex[LONG_KEY]!));
+	account.web.downloadFiles = true;
+	pastes = [];
 	testHooks.requestUrl = null;
 	expect('#46: the sync is not stopped and the chat is saved', !blocked.stopped && blocked.changedCount === 1 && files.get(account.web.index[CHAT]!.md)!.includes('Fourth question'), JSON.stringify({ stopped: blocked.stopped, changed: blocked.changedCount }));
 	expect('#46: reported once as not offered, not as "will retry" per chat', blocked.viewUnavailable === true && blocked.viewNotRead.length === 0 && (files.get('log.md') ?? '').includes('claude.ai does not offer them for this account'), JSON.stringify(blocked.viewNotRead));
