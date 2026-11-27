@@ -94,6 +94,15 @@ export function checkGptOlderPage(x: unknown): Pick<GptChat, 'messages' | 'page_
 	return x as unknown as Pick<GptChat, 'messages' | 'page_info'>;
 }
 
+/**
+ * chatgpt.com no longer has the file. Seen 2026-11-27 for old uploads (file lookup) and expired
+ * generated files (generated-file route), both 200 with
+ * { status: "error", error_code: "file_not_found", error_type: "GetDownloadLinkError", error_message: null }.
+ */
+export function isGptFileGone(x: unknown): boolean {
+	return isObj(x) && x.status === 'error' && x.error_code === 'file_not_found';
+}
+
 /** The answer of GET /backend-api/files/download/<id>?… */
 export function checkGptFileInfo(x: unknown): { url: string; size?: number } {
 	if (!isObj(x) || x.status !== 'success' || typeof x.download_url !== 'string') {
