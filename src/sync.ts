@@ -20,6 +20,7 @@ import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, setNo
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
 import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
 import { ListRead, needsFullList } from './quick-list';
+import { checkLogin } from './login-check';
 import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, hasPastedText, pastedFiles, safeFileName, visibleFiles, type PasteMode } from './files';
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
@@ -335,6 +336,12 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		if (auth.linkProblem) throw auth.linkProblem;
 		if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Select "Log in" for this account in the plugin settings.');
 		const api = new ClaudeApi(auth.orgId, getKey, { provider: 'claude', accountId: account.id }, auth.transport);
+		// Which claude.ai user this login is: the one this account was first synced with, and no other account's.
+		const me = (await api.get('/api/account')).json as { uuid?: unknown; email_address?: unknown } | null;
+		if (me && typeof me.uuid === 'string' && me.uuid) {
+			const others = plugin.settings.claude.filter((a) => a !== account);
+			if (checkLogin('claude.ai', s, { id: me.uuid, ...(typeof me.email_address === 'string' ? { email: me.email_address } : {}) }, others, auth.source === 'browser link')) await plugin.saveSettings();
+		}
 
 		// 1. Read the chat list, 30 at a time: all of it, or only its recent part when the rest
 		//    is known from the last runs (quick-list.ts).

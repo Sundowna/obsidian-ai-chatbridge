@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.54.0 - 2026-11-27
+
+### Added
+- **Personal and work accounts through the Browser link** - pair several browsers or browser profiles (each with the extension, each named when you pair it) and choose for each account which one it uses. Before, the link took one browser, and every account read whatever login that browser had. Update the extension to 0.2.6 (it keeps its pairing).
+- **Login check** - Claude, ChatGPT and Gemini accounts remember the login they were first synced with. When the browser (or the login window) shows another login, the account is skipped and says who is logged in and who it expects, instead of saving the other account's chats. **Accept this login** in the account's settings takes a new login on purpose.
+- **Several Google accounts in one browser** - Gemini and AI Studio find this account's place in Google's account switcher and use it, instead of the browser's first Google account.
+
 ## 0.53.1 - 2026-11-27
 
 ### Fixed

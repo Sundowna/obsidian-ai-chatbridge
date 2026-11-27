@@ -28,19 +28,20 @@ const MAX_PAGES = 300;
 const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class StudioApi {
-	private constructor(private readonly page: SitePage, private readonly source: ErrorSource) {}
+	private constructor(private readonly page: SitePage, private readonly source: ErrorSource, private readonly googleUser = 0) {}
 
 	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
-	static async connect(login: LoginRef, fallback: string | null = null): Promise<StudioApi> {
+	/** `googleUser`: the Nth Google account signed in to the browser (as for Gemini); missing = the first. */
+	static async connect(login: LoginRef, fallback: string | null = null, googleUser?: number): Promise<StudioApi> {
 		const pasted = await googleLogin(login, fallback);
-		const page = await transportFor(login).openPage(START, 'studio-ready', OPEN_TIMEOUT_MS, pasted);
+		const page = await transportFor(login).openPage(googleUser === undefined ? START : `${START}?authuser=${googleUser}`, 'studio-ready', OPEN_TIMEOUT_MS, pasted);
 		if (!page) {
 			recordError({ provider: 'gemini', accountId: login.id }, { service: 'AI Studio', method: 'OPEN', url: START, status: null, message: 'the AI Studio page did not open signed in' });
 			throw new StopError(pasted
 				? 'AI Studio did not open signed in with the pasted cookies. They may have expired: paste fresh ones, or log in instead.'
 				: 'AI Studio did not open signed in. Open aistudio.google.com once in the login window to accept its terms, or log in again.');
 		}
-		return new StudioApi(page, { provider: 'gemini', accountId: login.id });
+		return new StudioApi(page, { provider: 'gemini', accountId: login.id }, googleUser ?? 0);
 	}
 
 	close(): void {
@@ -78,7 +79,7 @@ export class StudioApi {
 			res = await sendWithRetry(() => this.page.call({
 				url: SERVICE + method,
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json+protobuf', 'X-Goog-AuthUser': '0' },
+				headers: { 'Content-Type': 'application/json+protobuf', 'X-Goog-AuthUser': String(this.googleUser) },
 				body: JSON.stringify(body),
 				sign: 'sapisidhash',
 			}));

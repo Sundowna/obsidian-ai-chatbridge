@@ -230,6 +230,18 @@ function disconnected(sock: WebSocket, refused: boolean): void {
 }
 
 /**
+ * This install's own random ID (one per browser or browser profile), so the plugin can pair
+ * several browsers and send each account's requests to its own one. Made once, kept.
+ */
+async function browserId(): Promise<string> {
+	const { browserId: saved } = await chrome.storage.local.get<{ browserId?: string }>('browserId');
+	if (typeof saved === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(saved)) return saved;
+	const id = self.crypto.randomUUID().replace(/-/g, '');
+	await chrome.storage.local.set({ browserId: id });
+	return id;
+}
+
+/**
  * Opens the link with the saved pairing, or with `code` to pair. Resolves with the state
  * once the plugin has answered (or the attempt failed).
  */
@@ -247,12 +259,13 @@ async function connect(code?: string): Promise<LinkState> {
 		old.close();
 	}
 	await setState('connecting');
+	const browser = await browserId();
 	const sock = new WebSocket(`ws://127.0.0.1:${port}`);
 	ws = sock;
 	return new Promise<LinkState>((resolve) => {
 		let answered = false;
 		sock.onopen = () => {
-			sock.send(JSON.stringify(code ? { op: 'pair', code: code.trim() } : { op: 'hello', token: pairing?.token ?? '' }));
+			sock.send(JSON.stringify(code ? { op: 'pair', code: code.trim(), browser } : { op: 'hello', token: pairing?.token ?? '', browser }));
 		};
 		sock.onmessage = (ev) => {
 			const text = String(ev.data);

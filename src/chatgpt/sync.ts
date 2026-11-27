@@ -33,6 +33,8 @@ import type { GptChat, GptListItem, GptProject } from './types';
 import type { ProgressFn } from '../progress';
 import { archiveRoot } from '../archive-folders';
 import { ArchiveObservations } from '../archive-state';
+import { checkLogin } from '../login-check';
+import { usesBrowserLink } from '../link/account';
 import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, rememberArchiveObservations, type ArchiveReport } from '../archive-move';
 import { CodexCloudShapeError } from '../cloud/codex-cloud';
 import { syncCodexCloud } from '../cloud/codex-sync';
@@ -262,6 +264,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		api = a;
 		const twin = s.chatgpt.find((other) => other !== account && other.web.inventories?.accounts[a.inventoryKey]);
 		if (twin) throw new StopError(`This login is the same ChatGPT account and workspace as "${twin.label}". Log in with a different account, or remove this one.`);
+		// The user (and workspace) this account was first synced with; another one in the browser is skipped.
+		if (a.inventoryKey && checkLogin('ChatGPT', g, { id: a.inventoryKey }, s.chatgpt.filter((o) => o !== account), usesBrowserLink('chatgpt', account))) await plugin.saveSettings();
 		if (a.workspaceId && g.workspaceId !== a.workspaceId) {
 			g.workspaceId = a.workspaceId;
 			await plugin.saveSettings();

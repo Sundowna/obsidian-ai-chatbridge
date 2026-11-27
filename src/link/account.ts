@@ -40,3 +40,29 @@ export function secretTokenStore(secrets: { getSecret(id: string): string | null
 		set: (t) => secrets.setSecret(LINK_SECRET_ID, t ?? ''),
 	};
 }
+
+/** The browser of an extension that sends no ID of its own (before 0.2.6), and of a token saved before then. */
+export const LEGACY_BROWSER = 'default';
+
+/** A browser ID as the extension sends it: random, short, plain. */
+export const isBrowserId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(v);
+
+/** The saved tokens, by browser. An older plain token belongs to LEGACY_BROWSER. */
+export function readTokens(raw: string | null): Record<string, string> {
+	if (!raw) return {};
+	if (!raw.startsWith('{')) return { [LEGACY_BROWSER]: raw };
+	try {
+		const o = JSON.parse(raw) as unknown;
+		if (typeof o !== 'object' || o === null || Array.isArray(o)) return {};
+		const out: Record<string, string> = {};
+		for (const [k, v] of Object.entries(o as Record<string, unknown>)) if ((k === LEGACY_BROWSER || isBrowserId(k)) && typeof v === 'string' && v) out[k] = v;
+		return out;
+	} catch {
+		return {};
+	}
+}
+
+/** The tokens as they are saved; null when none is left. */
+export function writeTokens(tokens: Record<string, string>): string | null {
+	return Object.keys(tokens).length ? JSON.stringify(tokens) : null;
+}

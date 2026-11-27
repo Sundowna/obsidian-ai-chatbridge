@@ -12,14 +12,16 @@ export type { PageAnswer, PageCall, PageSigning, PageValue, ReadyCheck, SiteValu
 
 let usesLink: (login: LoginRef) => boolean = () => false;
 let linkServer: () => LinkServer | null = () => null;
+let browserOf: (login: LoginRef) => string | undefined = () => undefined;
 
-/** Set by the plugin on load: which logins use the Browser link, and its running server. */
-export function setBrowserLink(uses: (login: LoginRef) => boolean, server: () => LinkServer | null): void {
+/** Set by the plugin on load: which logins use the Browser link, its running server, and the browser each login uses. */
+export function setBrowserLink(uses: (login: LoginRef) => boolean, server: () => LinkServer | null, browser: (login: LoginRef) => string | undefined = () => undefined): void {
 	usesLink = uses;
 	linkServer = server;
+	browserOf = browser;
 }
 
 export function transportFor(login: LoginRef): Transport {
-	if (login.provider !== 'lumo' && usesLink(login)) return new BrowserLinkTransport(() => linkServer());
+	if (login.provider !== 'lumo' && usesLink(login)) return new BrowserLinkTransport(() => linkServer(), browserOf(login));
 	return new LoginWindowTransport(login);
 }

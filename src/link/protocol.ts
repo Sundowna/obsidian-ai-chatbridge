@@ -14,7 +14,11 @@ export const MAX_BODY_BYTES = 200 * 1024 * 1024;
 // ---- Before the link is trusted ---------------------------------------------------------
 
 /** First frame from the extension: its saved token, or a one-time pairing code. */
-export type Hello = { op: 'hello'; token: string } | { op: 'pair'; code: string };
+/**
+ * First frame. `browser`: the extension install's own random ID (one per browser or browser
+ * profile), so several browsers can be paired at once; missing = an older extension.
+ */
+export type Hello = { op: 'hello'; token: string; browser?: string } | { op: 'pair'; code: string; browser?: string };
 /** The plugin's answer to a good hello (`welcome`) or pairing (`paired`, with the token to keep). */
 export type Welcome = { op: 'welcome' } | { op: 'paired'; token: string };
 

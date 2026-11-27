@@ -17,6 +17,7 @@ import { MassMissingError } from '../missing-guard';
 import { StudioApi } from './api';
 import { BrowserLinkUnavailable } from '../link/errors';
 import { listFailed, readList } from '../quick-list';
+import { usesBrowserLink } from '../link/account';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
@@ -34,7 +35,7 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 		const folder = cleanFolder(st.folder);
 		if (!folder) throw new StopError('The AI Studio folder setting is empty or invalid.');
 		progress('opening AI Studio…');
-		const a = await StudioApi.connect(loginRef('gemini', account), pastedSession(plugin.app, account.web.secretId));
+		const a = await StudioApi.connect(loginRef('gemini', account), pastedSession(plugin.app, account.web.secretId), usesBrowserLink('gemini', account) ? account.web.googleUser : undefined);
 		api = a;
 		// AI Studio shares the Gemini login: the Google account the Gemini sync found decides.
 		const twin = sameGoogleLogin(plugin.settings.gemini, account, account.web.userId);

@@ -20,8 +20,12 @@ import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
 import { BrowserLinkUnavailable } from '../link/errors';
 import { listFailed, readList } from '../quick-list';
+import { checkLogin } from '../login-check';
+import { usesBrowserLink } from '../link/account';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+/** How many Google accounts of one browser are looked through for the right one. */
+const MAX_GOOGLE_ACCOUNTS = 6;
 
 export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount, progress: ProgressFn = () => undefined): Promise<GoogleSyncResult> {
 	const g = account.web;
@@ -37,15 +41,51 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 		const folder = cleanFolder(g.folder);
 		if (!folder) throw new StopError('The Gemini folder setting is empty or invalid.');
 		progress('opening Gemini…');
-		const a = await GeminiApi.connect(loginRef('gemini', account), pastedSession(plugin.app, g.secretId));
+		const viaBrowser = usesBrowserLink('gemini', account);
+		const connect = (n?: number) => GeminiApi.connect(loginRef('gemini', account), pastedSession(plugin.app, g.secretId), viaBrowser ? n : undefined);
+		let a = await connect(g.googleUser);
 		api = a;
+		let who = await a.accountId();
+		// Several Google accounts in the browser (Google's switcher): the one this account belongs to
+		// may not be the first. Look through the others once and remember its place.
+		if (viaBrowser && g.userId && who && who !== g.userId) {
+			const seen = new Set([who]);
+			for (let n = 0; n < MAX_GOOGLE_ACCOUNTS; n++) {
+				if (n === (g.googleUser ?? 0)) continue;
+				progress(`looking for this Google account in your browser… ${n + 1}`);
+				let other: GeminiApi;
+				try {
+					other = await connect(n);
+				} catch {
+					break; // no Nth account
+				}
+				const id = await other.accountId();
+				if (id === g.userId) {
+					a.close();
+					a = other;
+					api = a;
+					who = id;
+					g.googleUser = n;
+					await plugin.saveSettings();
+					break;
+				}
+				other.close();
+				// Google sends a number past the last account back to the first one: stop there.
+				if (!id || seen.has(id)) break;
+				seen.add(id);
+			}
+		}
 		// The same Google account under two of the plugin's accounts would save every chat twice.
-		const who = await a.accountId();
 		const twin = sameGoogleLogin(plugin.settings.gemini, account, who);
 		if (twin) throw new StopError(SAME_GOOGLE_LOGIN(twin.label));
-		if (who && g.userId !== who) {
-			g.userId = who;
-			await plugin.saveSettings();
+		// The Google account this account was first synced with; another one in the browser is skipped, not saved here.
+		if (who) {
+			const bound = { loginUser: g.userId, loginEmail: g.loginEmail };
+			const changed = checkLogin('Gemini', bound, { id: who }, [], viaBrowser);
+			if (changed || g.userId !== who) {
+				g.userId = who;
+				await plugin.saveSettings();
+			}
 		}
 		// The chat list: all of it, or only its recent part when the rest is known (quick-list.ts).
 		// The pinned chats are a short list of their own, always read whole, so an unpin shows at once.

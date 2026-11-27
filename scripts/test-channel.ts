@@ -10,6 +10,7 @@ import { request as httpRequest } from 'node:http';
 import WebSocket from 'ws';
 import { LinkManager } from '../src/link/manager';
 import { LinkServer, type TokenStore } from '../src/link/server';
+import { LEGACY_BROWSER, readTokens } from '../src/link/account';
 import { BrowserLinkError, BrowserLinkUnavailable } from '../src/link/errors';
 import { fetchFrames, fromBase64, PART_BYTES, toBase64 } from '../src/link/protocol';
 import { isExtensionOrigin, isLinkPage, isLinkTarget } from '../src/link/sites';
@@ -137,7 +138,7 @@ async function testPairing() {
 
 		const a = await extension(port, { op: 'pair', code: code.toLowerCase() });
 		const token = String(a.reply?.token ?? '');
-		expect('pairing: the right code pairs once and hands out a token', a.ok && a.reply?.op === 'paired' && token.length >= 40 && store.value === token);
+		expect('pairing: the right code pairs once and hands out a token', a.ok && a.reply?.op === 'paired' && token.length >= 40 && readTokens(store.value)[LEGACY_BROWSER] === token);
 		expect('pairing: the browser is linked', s.linked && s.paired);
 		a.ws.close();
 		await closed(a.ws);
@@ -167,12 +168,12 @@ async function testPairing() {
 		const tries = s.newPairingCode();
 		for (let i = 0; i < 5; i++) await extension(port, { op: 'pair', code: `${port}-AAAA-AAAA-AAAA` });
 		const late = await extension(port, { op: 'pair', code: tries });
-		expect('pairing: after 5 wrong codes the code is void', !late.ok && store.value === token);
+		expect('pairing: after 5 wrong codes the code is void', !late.ok && readTokens(store.value)[LEGACY_BROWSER] === token);
 
 		const old = s.newPairingCode();
 		t += 5 * 60_000 + 1;
 		const expired = await extension(port, { op: 'pair', code: old });
-		expect('pairing: a code older than 5 minutes is refused', !expired.ok && store.value === token);
+		expect('pairing: a code older than 5 minutes is refused', !expired.ok && readTokens(store.value)[LEGACY_BROWSER] === token);
 
 		s.unpair();
 		await closed(c.ws);
@@ -225,7 +226,7 @@ async function testRequests() {
 				send({ id: m.id, ok: true, tabOpen: true });
 			}
 		});
-		const token = store.value ?? '';
+		const token = readTokens(store.value)[LEGACY_BROWSER] ?? '';
 
 		const r = await s.fetch('https://claude.ai/api/organizations', 'GET', { Accept: 'application/json' });
 		expect('fetch: goes to the browser and comes back', r.status === 200 && new TextDecoder().decode(r.body) === 'GET https://claude.ai/api/organizations');
@@ -280,7 +281,7 @@ async function testRequests() {
 		const tp = await timeout.start();
 		const silentExt = await extension(tp, { op: 'hello', token });
 		const slow = await rejection(timeout.fetch('https://claude.ai/api/x', 'GET', {}, undefined, undefined, 300));
-		expect('no answer: times out with a plain message', slow instanceof BrowserLinkError && /did not answer within/.test(slow.message));
+		expect('no answer: times out with a plain message', slow instanceof BrowserLinkError && /did not answer within/.test(slow.message), `${slow?.name}: ${slow?.message}`);
 		silentExt.ws.close();
 		await timeout.stop();
 

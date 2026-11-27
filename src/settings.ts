@@ -32,6 +32,11 @@ export function cleanFolder(v: string): string | null {
 export interface ClaudeWebSettings {
 	/** Login window (missing) or the Browser link (your own browser, through the extension). */
 	loginMethod?: LoginMethod;
+	/** Browser link: the paired browser this account uses (its extension's ID, kept on this computer); missing = whichever is connected. */
+	linkBrowser?: string;
+	/** The login this account was first synced with (not secret: an account number and its email), so another login in the browser is noticed. */
+	loginUser?: string;
+	loginEmail?: string;
 	orgId: string;
 	/** The organization the login window reported last, to notice a different login. Not secret. */
 	loginOrg?: string;
@@ -98,6 +103,11 @@ export interface CloudIndexEntry extends NoteState {
 export interface GptSettings {
 	/** Login window (missing) or the Browser link (your own browser, through the extension). */
 	loginMethod?: LoginMethod;
+	/** Browser link: the paired browser this account uses (its extension's ID, kept on this computer); missing = whichever is connected. */
+	linkBrowser?: string;
+	/** The login this account was first synced with (not secret: an account number and its email), so another login in the browser is noticed. */
+	loginUser?: string;
+	loginEmail?: string;
 	folder: string;
 	/** Folder for the raw .json files. Empty = next to the transcripts. */
 	rawFolder?: string;
@@ -193,10 +203,17 @@ export interface GeminiSettings {
 	userId?: string;
 	/** Login window (missing) or the Browser link (your own browser, through the extension). */
 	loginMethod?: LoginMethod;
+	/** Browser link: the paired browser this account uses (its extension's ID, kept on this computer); missing = whichever is connected. */
+	linkBrowser?: string;
+	/** The login this account was first synced with (not secret: an account number and its email), so another login in the browser is noticed. */
+	loginUser?: string;
+	loginEmail?: string;
 	/** Gemini's reasoning and AI Studio's thinking in the notes, folded. Missing = on (as before the switch); always in the raw file. */
 	showReasoning?: boolean;
 	/** Save the pictures Gemini made beside the chat (Attachments/<chat>/). Missing = on. */
 	downloadFiles?: boolean;
+	/** Browser link: this Google account's place in the browser's account switcher (0 = first), found by the sync; also used for AI Studio. */
+	googleUser?: number;
 }
 
 /** The same login's Google AI Studio prompts, which AI Studio keeps in Google Drive. */
