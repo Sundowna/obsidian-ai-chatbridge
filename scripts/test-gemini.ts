@@ -15,6 +15,9 @@ import { tagAccount } from '../src/naming';
 import type { IndexEntry, ListItem } from '../src/types';
 import { noteHash } from '../src/versions';
 import { readWrite } from './fake-vault';
+import { pictureUrl } from '../src/gemini/api';
+import { chatPictures } from '../src/gemini/transcript';
+import { isLinkImage, isLinkTarget } from '../src/link/sites';
 import { GeminiApi } from '../src/gemini/api';
 import { StudioApi } from '../src/studio/api';
 import { FULL_LIST_EVERY, listFailed, readList, type ListHolder } from '../src/quick-list';
@@ -340,6 +343,46 @@ function reasoningSwitch() {
 	expect('reasoning switch: missing setting means on', normalizeSettings({}).settings.gemini[0]!.web.showReasoning !== false && normalizeSettings({}).settings.lumo[0]!.web.showReasoning !== false);
 }
 
+/** Pictures Gemini made: saved beside the chat, shown in the note (pictureUrl, chatPictures, saveChats). */
+async function geminiPictures() {
+	const G = 'https://lh3.googleusercontent.com';
+	expect('pictures: a Gemini picture address becomes its full size', pictureUrl(`${G}/gg/AbC-d_9=s1408-rw?alr=yes`) === `${G}/gg/AbC-d_9=s0` && pictureUrl(`${G}/rd-gg/XyZ`) === `${G}/rd-gg/XyZ=s0`);
+	expect('pictures: any other address is refused', [`${G}/a/AbC`, 'https://evil.example/gg/AbC', 'http://lh3.googleusercontent.com/gg/AbC', `${G}/gg/a/b`, 'not a url'].every((u) => pictureUrl(u) === null));
+	expect('pictures: the Browser link allows only those addresses, as pictures', isLinkImage(`${G}/gg/AbC=s0`) && isLinkImage(`${G}/rd-gg/AbC`) && !isLinkImage(`${G}/a/AbC`) && !isLinkImage('https://gemini.google.com/app') && !isLinkTarget(`${G}/gg/AbC`));
+	const chat = { id: 'c_9', title: 'Brains', createdAt: '2026-03-01T10:00:00.000Z', updatedAt: '2026-03-01T10:00:00.000Z', turns: [
+		{ rid: 'r1', createdAt: '2026-03-01T10:00:00.000Z', prompt: 'Draw', answer: 'Here: http://googleusercontent.com/image_generation_content/0', generated: [{ placeholder: 'http://googleusercontent.com/image_generation_content/0', url: `${G}/gg/One=s1408` }] },
+		{ rid: 'r2', createdAt: '2026-03-01T10:01:00.000Z', prompt: 'Again', answer: 'http://googleusercontent.com/image_generation_content/1', generated: [{ placeholder: 'http://googleusercontent.com/image_generation_content/1', url: `${G}/rd-gg/Two=s1408` }] },
+	] } as unknown as GeminiChat;
+	expect('pictures: one name per picture, by turn', chatPictures(chat).map((p) => p.name).join() === 'Gemini picture 1-1,Gemini picture 2-1');
+	const { settings } = normalizeSettings({});
+	const { files, vault } = fakeVault();
+	const plugin = { app: { vault, fileManager: { processFrontMatter: async () => undefined } }, settings, saveSettings: async () => undefined } as never;
+	const index: Record<string, IndexEntry> = {};
+	const item: ListItem = { uuid: 'c_9', name: 'Brains', created_at: chat.createdAt, updated_at: chat.updatedAt };
+	const read = async (): Promise<Saved> => ({ createdAt: chat.createdAt, json: '{}', md: (link, pics) => renderGeminiTranscript(chat, link, true, pics), pictures: chatPictures(chat) });
+	const asked: string[] = [];
+	let refuse = false;
+	const fetchPic = async (url: string) => (asked.push(url), refuse && url.includes('Two') ? null : { bytes: new Uint8Array([1, 2, 3]).buffer, type: url.includes('Two') ? 'image/jpeg' : 'image/png' });
+	refuse = true;
+	const r1 = emptyResult();
+	await saveChats(plugin, [item], index, 'G/Chat', 'Raw/G', read, () => undefined, r1, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main'), pictures: fetchPic });
+	const note = files.get(index.c_9!.md) ?? '';
+	const dir = 'G/Chat/Attachments/2026-03-01 Brains';
+	expect('pictures: a picture is saved beside the chat and shown in the note', files.has(`${dir}/Gemini picture 1-1.png`) && note.includes(`![[${dir}/Gemini picture 1-1.png]]`) && r1.picturesSaved === 1, [...files.keys()].join(' | '));
+	expect('pictures: one that cannot be fetched keeps its link and is counted', note.includes(`[view](<${G}/rd-gg/Two=s1408>)`) && r1.picturesSkipped === 1);
+	refuse = false;
+	asked.length = 0;
+	const later = { ...item, updated_at: '2026-03-02T10:00:00.000Z' };
+	const r2 = emptyResult();
+	await saveChats(plugin, [later], index, 'G/Chat', 'Raw/G', read, () => undefined, r2, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main'), pictures: fetchPic });
+	expect('pictures: next time a saved one is not fetched again, the missing one is', asked.join() === `${G}/rd-gg/Two=s1408` && files.has(`${dir}/Gemini picture 2-1.jpg`) && r2.picturesSaved === 1, asked.join());
+	asked.length = 0;
+	const r3 = emptyResult();
+	await saveChats(plugin, [{ ...later, updated_at: '2026-03-03T10:00:00.000Z' }], index, 'G/Chat', 'Raw/G', read, () => undefined, r3, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main') });
+	expect('pictures: with the switch off nothing is fetched and the links stay', !asked.length && (files.get(index.c_9!.md) ?? '').includes(`[view](<${G}/gg/One=s1408>)`));
+	expect('pictures: the switch is on unless turned off', normalizeSettings({}).settings.gemini[0]!.web.downloadFiles !== false);
+}
+
 async function main() {
 	// --- batchexecute framing --------------------------------------------------
 	const list = [null, 'next-token', [['c_238ce75d1feb162e', 'Website review', null, null, null, at(1788451602)], ['c_421ec87547ddea3f', '', null, null, null, at(1788426966)]]];
@@ -456,6 +499,7 @@ async function main() {
 	await saveLoop();
 	await quickLists();
 	reasoningSwitch();
+	await geminiPictures();
 
 	console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 	if (failures) process.exit(1);

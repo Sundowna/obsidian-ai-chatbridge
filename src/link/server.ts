@@ -6,7 +6,7 @@
 
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { BrowserLinkError, BrowserLinkUnavailable } from './errors';
-import { isExtensionOrigin, isLinkPage, isLinkTarget, LINK_OPEN_PATH } from './sites';
+import { isExtensionOrigin, isLinkImage, isLinkPage, isLinkTarget, LINK_OPEN_PATH } from './sites';
 import {
 	BodyAssembler, MAX_FRAME_BYTES, toBase64,
 	type CallAnswer, type ReadAnswer, type FetchHead, type FetchPart, type FetchResult, type Hello, type LinkFailure, type LinkRequest, type OpenAnswer, type StatusAnswer, type Welcome,
@@ -324,7 +324,8 @@ export class LinkServer {
 
 	/** A request from a tab of the site, with the browser's own cookies. */
 	async fetch(url: string, method: 'GET' | 'POST', headers: Record<string, string>, body?: string | ArrayBuffer, redirect?: 'follow' | 'manual', timeoutMs = 120_000): Promise<FetchResult> {
-		if (!isLinkTarget(url)) throw new BrowserLinkError('Blocked: not a site the Browser link may reach.');
+		const picture = isLinkImage(url) && method === 'GET' && body === undefined;
+		if (!isLinkTarget(url) && !picture) throw new BrowserLinkError('Blocked: not a site the Browser link may reach.');
 		if (method !== 'GET' && method !== 'POST') throw new BrowserLinkError('Blocked: only GET and POST go through the Browser link.');
 		const bytes = body === undefined ? undefined : typeof body === 'string' ? new TextEncoder().encode(body) : new Uint8Array(body);
 		const req: LinkRequest = { op: 'fetch', url, method, headers, ...(bytes ? { body64: toBase64(bytes) } : {}), ...(redirect ? { redirect } : {}) };

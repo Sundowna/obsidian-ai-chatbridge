@@ -8,7 +8,7 @@ import { RateLimitError, StopError } from '../api';
 import { googleCookies } from '../cookies';
 import type { LoginRef, PastedCookies } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
-import { transportFor, type PageAnswer, type SitePage } from '../transport';
+import { transportFor, type PageAnswer, type SitePage, type Transport } from '../transport';
 import { googleAccountId } from './save';
 import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
 import { retryDeadline } from '../rate-limit';
@@ -41,7 +41,7 @@ export async function googleLogin(login: LoginRef, fallback: string | null): Pro
 const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class GeminiApi {
-	private constructor(private readonly page: SitePage, private readonly source: ErrorSource) {}
+	private constructor(private readonly page: SitePage, private readonly source: ErrorSource, private readonly transport?: Transport) {}
 
 	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
 	static async connect(login: LoginRef, fallback: string | null = null): Promise<GeminiApi> {
@@ -53,7 +53,7 @@ export class GeminiApi {
 				? 'Gemini did not open signed in with the pasted cookies. They may have expired: paste fresh ones, or log in instead.'
 				: 'Gemini did not open signed in. Log in to Google again in the plugin settings.');
 		}
-		return new GeminiApi(page, { provider: 'gemini', accountId: login.id });
+		return new GeminiApi(page, { provider: 'gemini', accountId: login.id }, transportFor(login));
 	}
 
 	close(): void {
@@ -92,6 +92,28 @@ export class GeminiApi {
 			} while (cursor);
 		}
 		return [...byId.values()];
+	}
+
+	/**
+	 * A picture Gemini made, full size, with the Google login (it answers 403 without one), or null
+	 * when it cannot be fetched here (a pasted-cookie login, or Google refused it). Only Gemini's
+	 * own picture addresses are asked for. Seen 2026-11-27: `=s0` gives the full size.
+	 */
+	async picture(url: string): Promise<{ bytes: ArrayBuffer; type: string } | null> {
+		const full = pictureUrl(url);
+		if (!full || !this.transport?.canFetchInBrowser()) return null;
+		let res: Response;
+		try {
+			res = await this.transport.fetchInBrowser(full, { method: 'GET', credentials: 'include' }, 60_000);
+		} catch (e) {
+			if (e instanceof BrowserLinkUnavailable) throw e;
+			return null;
+		}
+		const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+		if (res.status === 429) throw new RateLimitError('Gemini', retryDeadline(res.headers.get('retry-after') ?? ''));
+		if (res.status !== 200 || !type.startsWith('image/')) return null;
+		const bytes = await res.arrayBuffer();
+		return bytes.byteLength ? { bytes, type } : null;
 	}
 
 	/** Every turn of a chat, newest first, as Google sends them. */
@@ -137,4 +159,17 @@ export class GeminiApi {
 		if (res.status !== 200) throw new StopError(`Gemini answered ${res.status}, so the sync stopped.`);
 		return batchPayload(res.text, rpcId);
 	}
+}
+
+/** A picture Gemini made, as its full-size address; null for any other address. */
+export function pictureUrl(url: string): string | null {
+	let u: URL;
+	try {
+		u = new URL(url);
+	} catch {
+		return null;
+	}
+	if (u.protocol !== 'https:' || u.host !== 'lh3.googleusercontent.com' || u.username || u.password) return null;
+	const m = /^\/(gg|rd-gg)\/([\w-]+)(?:=[\w-]*)?$/.exec(u.pathname);
+	return m ? `https://lh3.googleusercontent.com/${m[1]}/${m[2]}=s0` : null;
 }

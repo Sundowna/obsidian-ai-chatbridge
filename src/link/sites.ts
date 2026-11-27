@@ -59,3 +59,18 @@ export function isExtensionOrigin(origin: string | undefined): boolean {
 	// Chrome, Edge and Brave: 32 letters a–p. Firefox: a UUID per install.
 	return !!origin && /^(chrome-extension:\/\/[a-p]{32}|moz-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(origin);
 }
+
+/**
+ * Pictures Gemini made (lh3.googleusercontent.com/gg/… and /rd-gg/…). They open only with the
+ * Google login, so they are fetched from a Gemini tab, the way Gemini's own page loads them.
+ * GET only; nothing else on that host.
+ */
+export const LINK_IMAGE_ORIGIN = 'https://lh3.googleusercontent.com';
+/** The page a picture is fetched from. */
+export const LINK_IMAGE_PAGE = 'https://gemini.google.com';
+
+export function isLinkImage(url: string): boolean {
+	if (originOf(url) !== LINK_IMAGE_ORIGIN) return false;
+	const path = new URL(url).pathname;
+	return /^\/(?:gg|rd-gg)\/[\w-]+(?:=[\w-]*)?$/.test(path);
+}
