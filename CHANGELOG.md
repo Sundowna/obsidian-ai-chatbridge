@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.41.5 - 2026-11-27
 
 ### Fixed
 - **ChatGPT: one file that will not download no longer stops the whole sync** - when chatgpt.com refused to hand over a single file (seen: a generated script file answered "415"), the sync stopped there. Now only that file is skipped and tried again later, and the rest of the sync goes on. A missing login still stops the sync, as before
