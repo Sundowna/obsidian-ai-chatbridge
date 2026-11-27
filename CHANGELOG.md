@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.49.4 - 2026-11-27
+
+### Fixed
+- **Obsidian's plugin review: all source-code and CSS findings cleared** except the settings-search suggestion - no change to what the plugin does. The Browser link extension (0.2.2 in this release) uses its own timers and the page's own `fetch` explicitly, two type checks were tidied, an unused value was removed, and two layout styles no longer need `!important`.
+
 ## 0.49.3 - 2026-11-27
 
 ### Fixed

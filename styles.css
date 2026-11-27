@@ -663,8 +663,9 @@
 }
 
 .ccs-gpt .ccs-gpt-row > * { min-width: 0; flex: 0 1 auto; }
-.ccs-gpt .ccs-gpt-grow { flex: 1 1 0 !important; }
-.ccs-gpt .ccs-gpt-fixed { flex: none !important; }
+/* The class is doubled to outweigh the other .ccs-gpt rules (such as a spacer's flex) without a priority flag. */
+.ccs-gpt .ccs-gpt-grow.ccs-gpt-grow { flex: 1 1 0; }
+.ccs-gpt .ccs-gpt-fixed.ccs-gpt-fixed { flex: none; }
 .ccs-gpt .ccs-gpt-align-start { align-items: flex-start; }
 .ccs-gpt .ccs-gpt-justify-center { justify-content: center; }
 .ccs-gpt .ccs-gpt-justify-between { justify-content: space-between; }

@@ -256,7 +256,6 @@ export async function saveLumoChats(
 export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, progress: ProgressFn = () => undefined): Promise<LumoSyncResult> {
 	const s = plugin.settings;
 	const g = account.web;
-	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
 	const wait = async (): Promise<void> => { await sleep(delayMs); };
 	const result: LumoSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, filesSkipped: [], backfilledChats: 0, flagChanges: 0, failed: [], edits: noEdits() };
