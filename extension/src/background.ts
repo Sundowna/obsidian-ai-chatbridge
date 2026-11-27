@@ -299,7 +299,11 @@ chrome.runtime.onMessage.addListener((m: { op?: string; code?: string }, sender,
 });
 
 chrome.action?.onClicked.addListener(() => void chrome.runtime.openOptionsPage());
-// Obsidian's "Open in browser" opens a small page on 127.0.0.1; this tab becomes the extension's page.
+// Obsidian's "Open in browser" opens a small page on 127.0.0.1; that tab becomes the extension's
+// page. Chrome: the page asks for it (works without site access); also: the tab is seen loading.
+chrome.runtime.onMessageExternal?.addListener((m: { op?: string }, sender) => {
+	if (m?.op === 'open-options' && sender.tab?.id !== undefined && isLinkOpenPage(sender.url)) void chrome.tabs.update(sender.tab.id, { url: chrome.runtime.getURL('options.html') });
+});
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 	if (isLinkOpenPage(info.url ?? (info.status === 'loading' ? tab.url : undefined))) void chrome.tabs.update(tabId, { url: chrome.runtime.getURL('options.html') });
 });

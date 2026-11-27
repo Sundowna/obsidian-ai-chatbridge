@@ -28,13 +28,24 @@ export interface LinkServerOptions {
 	now?: () => number;
 }
 
-/** The page behind the "Open in browser" button. The extension switches it to its own page. */
-export const OPEN_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI ChatBridge Browser link</title>
+/** The page behind the "Open in browser" button; the extension turns it into its own page. */
+export function openPageHtml(script = ''): string {
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI ChatBridge Browser link</title>
 <style>:root{color-scheme:light dark}body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;background:#fff;color:#1d1d1f}@media (prefers-color-scheme:dark){body{background:#1e1e1e;color:#e6e6e6}}h1{font-size:1.25rem}code{font-size:.9em}</style></head>
 <body><h1>AI ChatBridge Browser link</h1>
 <p>If the ChatBridge extension is installed in this browser, its page opens now.</p>
 <p>Nothing happens? Then the extension is not in this browser: install it from the plugin's release page (github.com/Sundowna/obsidian-ai-chatbridge/releases), or open this address in the browser where it is installed.</p>
-<p><strong>Keep that browser open while Obsidian syncs.</strong></p></body></html>`;
+<p><strong>Keep that browser open while Obsidian syncs.</strong></p>${script ? `<script>${script}</script>` : ''}</body></html>`;
+}
+
+/**
+ * The page's one script, for Chrome, Edge and Brave: it asks the linked extension (by its ID,
+ * learnt from its connection) to open its page in this tab. This needs no site access; the
+ * extension accepts it from this local page only. Firefox switches the tab by itself instead.
+ */
+export function openPageScript(extensionId: string): string {
+	return `try{chrome.runtime.sendMessage(${JSON.stringify(extensionId)},{op:"open-options"})}catch(e){}`;
+}
 
 /** Node's own modules, loaded when the server starts: only on a computer, never on a phone. */
 function node<T>(name: string): T {
@@ -64,6 +75,8 @@ export class LinkServer {
 	private http: Server | null = null;
 	private wss: WebSocketServer | null = null;
 	private sock: WebSocket | null = null;
+	/** The linked Chrome, Edge or Brave extension's ID (not secret), from its connection; for the open page. */
+	private chromeExtensionId: string | null = null;
 	private readonly pending = new Map<number, Pending>();
 	private nextId = 1;
 	private code: { secret: string; until: number; wrong: number } | null = null;
@@ -115,7 +128,7 @@ export class LinkServer {
 			// Any web page can try ws://127.0.0.1, so only extension pages get in, and only by this address.
 			verifyClient: ({ origin, req }: { origin: string; req: IncomingMessage }) => isExtensionOrigin(origin) && this.hostOk(req),
 		});
-		this.wss.on('connection', (ws) => this.onConnection(ws));
+		this.wss.on('connection', (ws, req: IncomingMessage) => this.onConnection(ws, req.headers.origin));
 		return this.boundPort;
 	}
 
@@ -125,13 +138,16 @@ export class LinkServer {
 				// One static page, for opening the extension from Obsidian (see LINK_OPEN_PATH);
 				// everything else is 404. It holds nothing secret and loads nothing.
 				if (req.method === 'GET' && this.hostOk(req) && (req.url ?? '').split('?')[0] === LINK_OPEN_PATH) {
+					// Only the one script below may run: allowed by its hash, nothing else.
+					const script = this.chromeExtensionId ? openPageScript(this.chromeExtensionId) : '';
+					const hash = script ? ` 'sha256-${cryptoModule().createHash('sha256').update(script).digest('base64')}'` : '';
 					res.writeHead(200, {
 						'Content-Type': 'text/html; charset=utf-8',
-						'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+						'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'${hash ? `; script-src${hash}` : ''}`,
 						'Cache-Control': 'no-store',
 						'X-Content-Type-Options': 'nosniff',
 					});
-					res.end(OPEN_PAGE_HTML);
+					res.end(openPageHtml(script));
 					return;
 				}
 				res.writeHead(404);
@@ -195,7 +211,7 @@ export class LinkServer {
 		this.pending.clear();
 	}
 
-	private onConnection(ws: WebSocket): void {
+	private onConnection(ws: WebSocket, origin?: string): void {
 		const timer = window.setTimeout(() => ws.close(1008), this.opts.helloTimeoutMs ?? 5000);
 		ws.once('message', (raw) => {
 			window.clearTimeout(timer);
@@ -207,6 +223,7 @@ export class LinkServer {
 			}
 			const old = this.sock;
 			this.sock = ws; // one browser: the newest proven connection wins
+			this.chromeExtensionId = /^chrome-extension:\/\/([a-p]{32})$/.exec(origin ?? '')?.[1] ?? null;
 			if (old && old !== ws) old.close(1000);
 			ws.on('message', (m) => this.onMessage(ws, m));
 			ws.on('close', () => {
