@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.55.1 - 2026-11-27
+
+### Fixed
+- **Claude stopped syncing since 0.54.0** - the new login check asks claude.ai who is signed in, but the plugin's own request guard blocked that address, so every Claude account stopped with "Blocked a request". The guard now lets exactly that one address through.
+
 ## 0.55.0 - 2026-11-27
 
 ### Added

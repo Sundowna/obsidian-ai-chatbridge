@@ -4,7 +4,7 @@ import { guardMissing } from './missing-guard';
 import type AIChatBridge from './main';
 import { withAccount } from './accounts';
 import type { ClaudeAccount } from './settings';
-import { ClaudeApi, RateLimitError, redact, StopError } from './api';
+import { ACCOUNT, ClaudeApi, RateLimitError, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
 import { OddChats, readOrSkip } from './odd-chats';
 import { endCooldown, heldByCooldown, pausedBy } from './cooldown-run';
@@ -337,7 +337,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Select "Log in" for this account in the plugin settings.');
 		const api = new ClaudeApi(auth.orgId, getKey, { provider: 'claude', accountId: account.id }, auth.transport);
 		// Which claude.ai user this login is: the one this account was first synced with, and no other account's.
-		const me = (await api.get('/api/account')).json as { uuid?: unknown; email_address?: unknown } | null;
+		const me = (await api.get(ACCOUNT)).json as { uuid?: unknown; email_address?: unknown } | null;
 		if (me && typeof me.uuid === 'string' && me.uuid) {
 			const others = plugin.settings.claude.filter((a) => a !== account);
 			if (checkLogin('claude.ai', s, { id: me.uuid, ...(typeof me.email_address === 'string' ? { email: me.email_address } : {}) }, others, auth.source === 'browser link')) await plugin.saveSettings();

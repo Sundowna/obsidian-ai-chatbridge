@@ -56,6 +56,8 @@ export const MEMORY_READS = ['list', 'read'] as const;
 export type MemoryRead = (typeof MEMORY_READS)[number];
 /** Your instructions for Claude (profile preferences); belongs to the login, not to one organization. */
 export const ACCOUNT_PROFILE = '/api/account_profile';
+/** Who is signed in (uuid and email), read for the login check. */
+export const ACCOUNT = '/api/account';
 
 export interface RpcAnswer {
 	status: number;
@@ -352,9 +354,9 @@ export class ClaudeApi {
 	private async request(path: string, accept: string, notFoundOk: boolean | 'any' | 'soft'): Promise<RequestUrlResponse | null> {
 		const url = new URL(path, ORIGIN);
 		// Safety guard: never anything but claude.ai/api/organizations/<your org>/...,
-		// the Claude Code session list (claude.ai/v1/code/sessions…) or the account profile, and only GET.
+		// the Claude Code session list (claude.ai/v1/code/sessions…), the account profile or who is signed in, and only GET.
 		const code = url.pathname === CODE_SESSIONS || url.pathname.startsWith(`${CODE_SESSIONS}/`);
-		const profile = url.pathname === ACCOUNT_PROFILE && !url.search;
+		const profile = (url.pathname === ACCOUNT_PROFILE || url.pathname === ACCOUNT) && !url.search;
 		if (url.origin !== ORIGIN || !(code || profile || url.pathname.startsWith(`/api/organizations/${this.orgId}/`))) {
 			throw new StopError('Blocked a request that was not for claude.ai/api/organizations/<your org>/ or claude.ai/v1/code/sessions.');
 		}
