@@ -23,19 +23,26 @@ const SHORT: Record<LinkState, string> = { 'not-paired': 'Browser not paired', '
  * window, or (Browser link) whether the browser is linked. `text` replaces "Not logged in".
  */
 export async function accountReady(plugin: AIChatBridge, provider: Provider, account: AnyAccount): Promise<{ ok: boolean; text: string }> {
-	if (provider === 'gemini' && usesBrowserLink(provider, account as GeminiAccount)) {
+	if (usesBrowserLink(provider, account as GeminiAccount)) {
 		const s = browserLinkState(plugin);
 		return { ok: s === 'linked', text: SHORT[s] };
 	}
 	return { ok: await isLoggedIn(loginRef(provider, account)), text: 'Not logged in' };
 }
 
-/** Login method of a Google account: the login window or the Browser link. Computers only. */
-export function loginMethodSetting(ctx: PanelContext, el: HTMLElement, account: GeminiAccount): void {
-	if (!Platform.isDesktopApp) return;
+const METHOD_TEXT: Partial<Record<Provider, string>> = {
+	gemini: 'Google blocks sign-in inside apps, so for Google accounts the Browser link is the reliable way: the sync uses your own browser, where you are already logged in. It needs the ChatBridge extension in Chrome, Edge or Brave, and the browser open while syncing. Used for Gemini and AI Studio.',
+	claude: 'Made your claude.ai account with "Continue with Google"? Google blocks that sign-in inside apps, so choose the Browser link: the sync uses your own browser, where you are already logged in. It needs the ChatBridge extension in Chrome, Edge or Brave, and the browser open while syncing.',
+	chatgpt: 'Made your ChatGPT account with "Continue with Google"? Google blocks that sign-in inside apps, so choose the Browser link: the sync uses your own browser, where you are already logged in. It needs the ChatBridge extension in Chrome, Edge or Brave, and the browser open while syncing.',
+};
+
+/** Login method of an account: the login window or the Browser link. Computers only; not for Lumo. */
+export function loginMethodSetting(ctx: PanelContext, el: HTMLElement, provider: Provider, account: { web: { loginMethod?: LoginMethod } }): void {
+	const text = METHOD_TEXT[provider];
+	if (!Platform.isDesktopApp || !text) return;
 	new Setting(el)
 		.setName('Login method')
-		.setDesc('Google blocks sign-in inside apps, so for Google accounts the Browser link is the reliable way: the sync uses your own browser, where you are already logged in. It needs the ChatBridge extension in Chrome, Edge or Brave, and the browser open while syncing. Used for Gemini and AI Studio.')
+		.setDesc(text)
 		.addDropdown((d) =>
 			d.addOption('window', 'Login window (inside Obsidian)')
 				.addOption('browser', 'Browser link (your own browser)')
@@ -150,5 +157,5 @@ export class PairBrowserModal extends Modal {
 
 /** Login row of a Google account: the Browser link's when the account uses it. */
 export function usesLinkRow(provider: Provider, account: AnyAccount): boolean {
-	return provider === 'gemini' && usesBrowserLink(provider, account as GeminiAccount);
+	return usesBrowserLink(provider, account as GeminiAccount);
 }

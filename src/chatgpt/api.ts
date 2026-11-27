@@ -9,7 +9,8 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
-import { cookieHeader, cookieValue, loginUserAgent, type LoginRef } from '../login';
+import { cookieHeader, cookieValue, deviceUserAgent, loginUserAgent, type LoginRef } from '../login';
+import { BrowserLinkUnavailable } from '../link/errors';
 import { transportFor, type Transport } from '../transport';
 import { checkGptFileInfo, isChatId, isFileId, isGptFileGone, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
@@ -158,8 +159,13 @@ export class GptApi {
 	static async connect(login: LoginRef, fallback: string | null = null): Promise<GptApi> {
 		let api: GptApi;
 		const transport = transportFor(login);
-		const pasted = !(await transport.isLoggedIn());
-		if (!pasted) {
+		// Browser link: your own browser sends its login; only its device ID is read here.
+		const viaLink = transport.kind === 'browser-link';
+		const pasted = !viaLink && !(await transport.isLoggedIn());
+		if (viaLink) {
+			await transport.isLoggedIn(); // says why when the browser cannot be reached
+			api = new GptApi(login, '', await transport.siteValue('chatgpt-device-id'), deviceUserAgent(), null);
+		} else if (!pasted) {
 			api = new GptApi(login, await cookieHeader(login), await cookieValue(login, 'oai-did'), loginUserAgent(login), null);
 		} else {
 			const cookie = fallback ? fallbackCookie(fallback) : null;
@@ -174,11 +180,12 @@ export class GptApi {
 			// sends back is kept there. Before 0.33 it was dropped, and after some days the
 			// stored login no longer counted (seen 2026-11-16).
 			html = await api.loginPage();
-			api.cookie = await cookieHeader(login);
+			if (!viaLink) api.cookie = await cookieHeader(login);
 		} else {
 			html = (await api.request('/', 'text/html', false, false)).text;
 		}
 		const token = findAccessToken(html);
+		if (!token && viaLink) throw new BrowserLinkUnavailable('not-logged-in', 'ChatGPT');
 		if (!token) {
 			recordError(api.source, { service: 'ChatGPT', method: 'GET', url: `${ORIGIN}/`, status: 200, headers: { 'content-type': 'text/html' }, body: html, message: 'the chatgpt.com page held no login key', secrets: api.secrets });
 			const fix = pasted ? 'the pasted session cookie may have expired – paste a fresh one or log in instead' : 'log in again in the plugin settings';
@@ -186,7 +193,7 @@ export class GptApi {
 		}
 		api.token = token;
 		// Use the workspace cookie from the same snapshot used for requests.
-		const workspace = /(?:^|;\s*)_account=([^;]+)/.exec(api.cookie)?.[1] ?? null;
+		const workspace = viaLink ? await transport.siteValue('chatgpt-workspace') : /(?:^|;\s*)_account=([^;]+)/.exec(api.cookie)?.[1] ?? null;
 		const identity = inventoryIdentity(token, workspace);
 		api.workspaceId = identity?.[1];
 		api.inventoryKey = identity
@@ -383,6 +390,7 @@ export class GptApi {
 		try {
 			res = await this.transport.fetchInBrowser(ORIGIN + '/', { method: 'GET', headers, credentials: 'include', redirect: 'manual' }, 60_000);
 		} catch (e) {
+			if (e instanceof BrowserLinkUnavailable) throw e;
 			const why = `Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`;
 			recordError(this.source, { service: 'ChatGPT', method: 'GET', url: `${ORIGIN}/ (login window)`, status: null, message: why, secrets: this.secrets });
 			throw new StopError(why);
@@ -431,6 +439,8 @@ export class GptApi {
 				res = await this.transport.request({ url: url.toString(), method, headers, loginOnly: LOGIN_HEADERS });
 				break;
 			} catch (e) {
+				// The Browser link went away (browser closed): the sync skips this account.
+				if (e instanceof BrowserLinkUnavailable) throw e;
 				const wait = waits[attempt];
 				if (wait !== undefined) {
 					await this.pause(wait);

@@ -11,6 +11,8 @@ import { pageCall, pageFetch, pageRead, readyCheck } from './page';
 const PING_MS = 20_000;
 const READY_CHECKS = new Set(['gemini-signed-in', 'studio-ready', 'loaded']);
 const PAGE_VALUES = new Set(['google-account-id']);
+/** Site values and the one site each may be read from. */
+const SITE_VALUES: Record<string, string> = { 'claude-org': 'https://claude.ai', 'chatgpt-device-id': 'https://chatgpt.com', 'chatgpt-workspace': 'https://chatgpt.com' };
 /** A fetch tab this extension opened is closed after this long without use. */
 const FETCH_TAB_IDLE_MS = 60_000;
 
@@ -142,6 +144,12 @@ async function handle(msg: LinkRequest & { id: number }): Promise<unknown[]> {
 			return [{ id: msg.id, ok: true, answer }];
 		}
 		case 'read': {
+			if ('site' in msg) {
+				const origin = originOf(msg.site);
+				if (!isLinkPage(msg.site) || !origin || SITE_VALUES[msg.value] !== origin) throw new LinkFail('not-allowed', 'value not allowed for this site');
+				const tabId = await fetchTab(origin);
+				return [{ id: msg.id, ok: true, value: await inPage(tabId, pageRead, [msg.value]) }];
+			}
 			const t = own.get(msg.page);
 			if (!t || t.kind !== 'page') throw new LinkFail('no-tab', 'no such page');
 			if (!PAGE_VALUES.has(msg.value)) throw new LinkFail('not-allowed', 'unknown page value');

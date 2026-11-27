@@ -4,8 +4,15 @@
 // back into the same code the Gemini and AI Studio modules used to run in the page.
 
 import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from 'obsidian';
-import { GEMINI_SIGNED_IN, hasLoginFetch, isLoggedIn, loginFetch, openReadyPage, type LoginRef, type PastedCookies } from '../login';
-import type { PageAnswer, PageCall, PageValue, ReadyCheck, SitePage, SiteRequest, Transport } from './types';
+import { cookieValue, GEMINI_SIGNED_IN, hasLoginFetch, isLoggedIn, loginFetch, openReadyPage, type LoginRef, type PastedCookies } from '../login';
+import type { PageAnswer, PageCall, PageValue, ReadyCheck, SitePage, SiteRequest, SiteValue, Transport } from './types';
+
+/** The cookie behind each named site value. */
+export const SITE_VALUE_COOKIE: Record<SiteValue, string> = {
+	'claude-org': 'lastActiveOrg',
+	'chatgpt-device-id': 'oai-did',
+	'chatgpt-workspace': '_account',
+};
 
 /** AI Studio's public API key, as its page carries it. */
 const STUDIO_KEY_IN_PAGE = String.raw`(document.documentElement.innerHTML.match(/"WIu0Nc":"(AIza[\w-]{35})"/) || [])[1]`;
@@ -82,6 +89,10 @@ export class LoginWindowTransport implements Transport {
 
 	isLoggedIn(): Promise<boolean> {
 		return isLoggedIn(this.login);
+	}
+
+	siteValue(v: SiteValue): Promise<string | null> {
+		return cookieValue(this.login, SITE_VALUE_COOKIE[v]);
 	}
 
 	async openPage(url: string, ready: ReadyCheck, timeoutMs: number, pasted?: PastedCookies): Promise<SitePage | null> {

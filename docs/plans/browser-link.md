@@ -1,7 +1,7 @@
 # Browser link: plan and implementation plan
 
 Handover document. Written 27 Nov 2026 by the session that did the kickoff (reading and research only).
-**Progress: stages 0–4 done (Stage 4 signed-in run passed 27 Nov). Next: Stage 5 (Claude and ChatGPT). See each "Stage N status" below.**
+**Progress: stages 0–4 done; Stage 5 code done (live run with Claude and ChatGPT pending). See each "Stage N status" below.**
 
 The next session should read this file top to bottom, then start at [Stage 0](#stage-0-proof-in-the-real-browser).
 
@@ -266,6 +266,21 @@ Known gaps:
 - With a skip, Gemini and AI Studio each show their own notice (two notices for one closed browser).
 - The status bar shows the skip only as a notice; no permanent link state there yet.
 - The first Google account of a fresh install keeps the login window (only accounts added later default to the Browser link).
+
+### Stage 5 status (27 Nov 2026)
+
+Code done after merging main 0.45.0 (parity). `test:ci` 1332 → 1356 PASS, 0 FAIL; lint 0 errors (15 warnings, the extra one from main); build OK; `test:extension` passes. New checks proven to bite (ChatGPT skip off; header filter off).
+
+| Piece | Where |
+|---|---|
+| Site values | `SiteValue` (`claude-org`, `chatgpt-device-id`, `chatgpt-workspace`): login window reads the cookie (`SITE_VALUE_COOKIE`), Browser link reads it in a tab of the site (`read` op with `site`; the extension allows each value only on its own site) |
+| Claude | `claude-auth.ts`: Browser link = organization from the browser, `BROWSER_LINK_KEY` stands in for the session key (its Cookie header is never sent), `linkProblem` → skip; `api.ts` passes a link loss through the retries |
+| ChatGPT | `chatgpt/api.ts`: start page fetched in the browser, login key from it, device ID and workspace from the browser; no key = not logged in = skip; link loss passes through the retry loop |
+| Skip | `SyncResult.linkSkipped` (Claude), `GptSyncResult.linkSkipped` (ChatGPT), log line "– **skipped:**" |
+| UI | Login method for Claude and ChatGPT; link login row; ChatGPT's "Made your account with Google?" recommends the Browser link |
+| Fix | The switch set by one plugin copy is reset on unload (a stale one broke `test:sync`) |
+
+Merge with main: `accountId()` (parity) now reads a named page value (`google-account-id`) instead of a code string; a `read` op in the protocol and extension.
 
 Not done in Stage 3: Edge and Brave by hand; a signed-in run through the real extension (Stage 4 does it with the plugin wired in); attribution file (nothing was copied from sho7650/obsidian-AI-exporter or browser-tools-mcp, only the manifest idea, so no notice is needed yet).
 

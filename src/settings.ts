@@ -29,6 +29,8 @@ export function cleanFolder(v: string): string | null {
 
 /** One claude.ai login: where its chats go and what has been synced. */
 export interface ClaudeWebSettings {
+	/** Login window (missing) or the Browser link (your own browser, through the extension). */
+	loginMethod?: LoginMethod;
 	orgId: string;
 	/** The organization the login window reported last, to notice a different login. Not secret. */
 	loginOrg?: string;
@@ -88,6 +90,8 @@ export interface CloudIndexEntry extends NoteState {
 
 /** One ChatGPT login: its own folders, index and cooldown. */
 export interface GptSettings {
+	/** Login window (missing) or the Browser link (your own browser, through the extension). */
+	loginMethod?: LoginMethod;
 	folder: string;
 	/** Folder for the raw .json files. Empty = next to the transcripts. */
 	rawFolder?: string;

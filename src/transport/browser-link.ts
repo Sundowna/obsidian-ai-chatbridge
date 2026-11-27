@@ -7,7 +7,14 @@ import type { RequestUrlResponse } from 'obsidian';
 import { BrowserLinkUnavailable } from '../link/errors';
 import type { LinkServer } from '../link/server';
 import type { PastedCookies } from '../login';
-import type { PageAnswer, PageCall, PageValue, ReadyCheck, SitePage, SiteRequest, Transport } from './types';
+import type { PageAnswer, PageCall, PageValue, ReadyCheck, SitePage, SiteRequest, SiteValue, Transport } from './types';
+
+/** The site each named site value is read from. */
+const SITE_OF: Record<SiteValue, string> = {
+	'claude-org': 'https://claude.ai/',
+	'chatgpt-device-id': 'https://chatgpt.com/',
+	'chatgpt-workspace': 'https://chatgpt.com/',
+};
 
 /** The site's name in messages ("Not logged in to Gemini in your browser"). */
 function siteName(url: string): string {
@@ -72,8 +79,9 @@ export class BrowserLinkTransport implements Transport {
 		const s = this.live();
 		const method = (init.method ?? 'GET').toUpperCase();
 		if (method !== 'GET' && method !== 'POST') throw new Error(`The Browser link sends only GET and POST, not ${method}.`);
+		// The browser sends its own cookies and browser name; the login window's are not sent.
 		const headers: Record<string, string> = {};
-		new Headers(init.headers).forEach((v, k) => { headers[k] = v; });
+		new Headers(init.headers).forEach((v, k) => { if (k !== 'cookie' && k !== 'user-agent') headers[k] = v; });
 		const body = typeof init.body === 'string' || init.body instanceof ArrayBuffer ? init.body : undefined;
 		const r = await s.fetch(url, method, headers, body, init.redirect === 'manual' ? 'manual' : 'follow', timeoutMs);
 		// A redirect the caller wanted to see comes back from the page as status 0 (opaque).
@@ -91,6 +99,11 @@ export class BrowserLinkTransport implements Transport {
 		} catch (e) {
 			return Promise.reject(e instanceof Error ? e : new Error(String(e)));
 		}
+	}
+
+	async siteValue(v: SiteValue): Promise<string | null> {
+		const s = this.live();
+		return (await s.siteValue(SITE_OF[v], v)) || null;
 	}
 
 	async openPage(url: string, ready: ReadyCheck, timeoutMs: number, _pasted?: PastedCookies): Promise<SitePage | null> {

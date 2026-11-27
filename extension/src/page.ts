@@ -67,6 +67,13 @@ export function pageRead(name: string): string {
 	switch (name) {
 		case 'google-account-id':
 			return typeof w.S06Grb === 'string' ? w.S06Grb : '';
+		case 'claude-org':
+		case 'chatgpt-device-id':
+		case 'chatgpt-workspace': {
+			const cookie = { 'claude-org': 'lastActiveOrg', 'chatgpt-device-id': 'oai-did', 'chatgpt-workspace': '_account' }[name];
+			const m = new RegExp(`(?:^|; )${cookie}=([^;]*)`).exec(document.cookie);
+			return m ? decodeURIComponent(m[1] ?? '') : '';
+		}
 		default:
 			return '';
 	}

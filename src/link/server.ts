@@ -11,7 +11,7 @@ import {
 	BodyAssembler, MAX_FRAME_BYTES, toBase64,
 	type CallAnswer, type ReadAnswer, type FetchHead, type FetchPart, type FetchResult, type Hello, type LinkFailure, type LinkRequest, type OpenAnswer, type StatusAnswer, type Welcome,
 } from './protocol';
-import type { PageAnswer, PageCall, PageValue, ReadyCheck } from '../transport/types';
+import type { PageAnswer, PageCall, PageValue, ReadyCheck, SiteValue } from '../transport/types';
 
 /** Where the long-lived token is kept (Obsidian secret storage in the plugin). */
 export interface TokenStore {
@@ -310,6 +310,13 @@ export class LinkServer {
 	/** One named value from a page this link opened (not secret); '' when the page has none. */
 	async read(page: string, value: PageValue, timeoutMs = 15_000): Promise<string> {
 		const v = ((await this.send({ op: 'read', page, value }, timeoutMs)) as ReadAnswer).value;
+		return typeof v === 'string' ? v : '';
+	}
+
+	/** One named value from a tab of `site` (a small cookie the page can read; not secret). */
+	async siteValue(site: string, value: SiteValue, timeoutMs = 60_000): Promise<string> {
+		if (!isLinkPage(site)) throw new BrowserLinkError('Blocked: not a site the Browser link may open.');
+		const v = ((await this.send({ op: 'read', site, value }, timeoutMs)) as ReadAnswer).value;
 		return typeof v === 'string' ? v : '';
 	}
 

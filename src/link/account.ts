@@ -4,8 +4,8 @@
 import type { Provider } from '../login';
 import type { LinkServer, TokenStore } from './server';
 
-/** Providers that can use the Browser link so far. Claude and ChatGPT follow in a later step. */
-export const LINK_PROVIDERS: readonly Provider[] = ['gemini'];
+/** Providers that can use the Browser link. Lumo cannot: unlocking its chats needs keys only its login window holds. */
+export const LINK_PROVIDERS: readonly Provider[] = ['gemini', 'claude', 'chatgpt'];
 
 /** Where the extension's token is kept (Obsidian's secret storage on this computer). */
 export const LINK_SECRET_ID = 'ai-chatbridge-browser-link';

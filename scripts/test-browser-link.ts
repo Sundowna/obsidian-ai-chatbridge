@@ -14,7 +14,13 @@ import { BrowserLinkUnavailable } from '../src/link/errors';
 import { fetchFrames, fromBase64 } from '../src/link/protocol';
 import { linkState, loginMethodOf, secretTokenStore, usesBrowserLink, LINK_SECRET_ID } from '../src/link/account';
 import { setBrowserLink, transportFor, type PageCall } from '../src/transport';
-import { pageCallCode, READ_CODE, READY_CODE } from '../src/transport/login-window';
+import { pageCallCode, READ_CODE, READY_CODE, SITE_VALUE_COOKIE } from '../src/transport/login-window';
+import type { SiteValue } from '../src/transport';
+import { BROWSER_LINK_KEY, claudeAuth } from '../src/claude-auth';
+import { ClaudeApi } from '../src/api';
+import { GptApi } from '../src/chatgpt/api';
+import { runSync } from '../src/sync';
+import { runGptSync } from '../src/chatgpt/sync';
 import { pageCall, pageRead, readyCheck } from '../extension/src/page';
 import { GeminiApi } from '../src/gemini/api';
 import { StudioApi } from '../src/studio/api';
@@ -75,12 +81,16 @@ function testSwitch() {
 	const gemini = (loginMethod?: 'window' | 'browser') => ({ web: { loginMethod } });
 	expect('setting: a Google account without a choice uses the login window', loginMethodOf('gemini', gemini()) === 'window');
 	expect('setting: a Google account set to the Browser link uses it', usesBrowserLink('gemini', gemini('browser')));
-	expect('setting: Claude, ChatGPT and Lumo cannot use it yet', !usesBrowserLink('claude', gemini('browser')) && !usesBrowserLink('chatgpt', gemini('browser')) && !usesBrowserLink('lumo', gemini('browser')));
+	expect('setting: Claude and ChatGPT accounts can use it too', usesBrowserLink('claude', gemini('browser')) && usesBrowserLink('chatgpt', gemini('browser')));
+	expect('setting: Lumo never uses it', !usesBrowserLink('lumo', gemini('browser')));
+	expect('setting: Claude and ChatGPT accounts without a choice keep the login window', loginMethodOf('claude', gemini()) === 'window' && loginMethodOf('chatgpt', gemini()) === 'window');
 
 	setBrowserLink((l) => l.provider !== 'claude' && l.id === 'linked', () => null);
 	expect('switch: a linked Google account gets the Browser link', transportFor({ provider: 'gemini', id: 'linked' }).kind === 'browser-link');
 	expect('switch: another Google account keeps its login window', transportFor({ provider: 'gemini', id: 'other' }).kind === 'login-window');
 	expect('switch: Lumo always uses its login window', transportFor({ provider: 'lumo', id: 'linked' }).kind === 'login-window');
+	expect('switch: a linked ChatGPT account gets the Browser link', transportFor({ provider: 'chatgpt', id: 'linked' }).kind === 'browser-link');
+	expect('switch: Claude follows what the plugin says (here: no)', transportFor({ provider: 'claude', id: 'linked' }).kind === 'login-window');
 	setBrowserLink(() => false, () => null);
 	expect('switch: nothing uses the link once the plugin says so', transportFor({ provider: 'gemini', id: 'linked' }).kind === 'login-window');
 
@@ -91,6 +101,10 @@ function testSwitch() {
 	expect('settings: the first Google account of a new install keeps the login window', loginMethodOf('gemini', fresh.gemini[0]!) === 'window');
 	const added = addAccount(fresh, 'gemini', 'Work') as GeminiAccount;
 	expect('settings: a Google account added later uses the Browser link', added.web.loginMethod === 'browser');
+	const claudeAdded = addAccount(fresh, 'claude', 'Work') as { web: { loginMethod?: string } };
+	expect('settings: a Claude account added later keeps the login window (the Browser link is offered)', claudeAdded.web.loginMethod === undefined);
+	const kept = normalizeSettings({ claude: [{ id: 'c1', label: 'Home', web: { loginMethod: 'browser' } }], chatgpt: [{ id: 'o1', label: 'Home', web: { loginMethod: 'browser' } }] }).settings;
+	expect('settings: the Claude and ChatGPT login method survives a reload', kept.claude[0]!.web.loginMethod === 'browser' && kept.chatgpt[0]!.web.loginMethod === 'browser');
 
 	const secrets = new Map<string, string>();
 	const store = secretTokenStore({ getSecret: (id) => secrets.get(id) ?? null, setSecret: (id, v) => void secrets.set(id, v) });
@@ -229,6 +243,14 @@ async function testSamePage() {
 		expect(`same page value (Google account number, ${label}): extension and login window agree`, viaWindow.result === want && viaLink.result === want, `${viaWindow.result} / ${viaLink.result}`);
 	}
 
+	for (const [value, cookie] of Object.entries(SITE_VALUE_COOKIE) as [SiteValue, string][]) {
+		const page = { document: { cookie: `a=1; ${cookie}=v-${value}; b=2` } };
+		const got = await inPage(page, async () => pageRead(value));
+		expect(`same site value (${value}): the extension reads the cookie the login window reads (${cookie})`, got.result === `v-${value}`);
+		const none = await inPage({ document: { cookie: 'a=1' } }, async () => pageRead(value));
+		expect(`same site value (${value}): none there = empty`, none.result === '');
+	}
+
 	for (const [name, page, want] of [
 		['gemini-signed-in', gemini, true],
 		['gemini-signed-in', { location: gLoc, WIZ_global_data: {} }, false],
@@ -277,11 +299,95 @@ async function testSkip() {
 	}
 }
 
+// ---- 5. Claude and ChatGPT through the link -------------------------------------------------
+
+const ORG = '11111111-2222-4333-8444-555555555555';
+const JWT = 'eyJhbGciOiJSUzI1NiJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoid3MtMSJ9fQ.c2lnbmF0dXJlLXZhbHVlLWhlcmU';
+
+async function testClaudeAndGpt() {
+	const store = memStore();
+	const server = new LinkServer({ store });
+	const port = await server.start();
+	const fake = (provider: 'claude' | 'chatgpt', web: Record<string, unknown>) => {
+		const settings = normalizeSettings({ [provider]: [{ id: 'x1', label: 'Home', web: { loginMethod: 'browser', ...web } }] }).settings;
+		settings.delaySeconds = 0;
+		const plugin = { app: { secretStorage: { getSecret: () => null }, vault: { adapter: {} } }, settings, saveSettings: async () => undefined } as unknown as AIChatBridge;
+		return { plugin, account: (provider === 'claude' ? settings.claude[0] : settings.chatgpt[0])! };
+	};
+	setBrowserLink((l) => l.provider === 'claude' || l.provider === 'chatgpt', () => server);
+	const realError = console.error;
+	console.error = () => undefined;
+	testHooks.requestUrl = async () => { throw new Error('requestUrl was called directly, not through the link'); };
+	try {
+		// Not paired: both are skipped, not stopped.
+		const c0 = fake('claude', {});
+		const r0 = await runSync(c0.plugin, c0.account as never);
+		expect('Claude, not paired: skipped, not stopped', !!r0.linkSkipped && !r0.stopped && /not paired/.test(r0.linkSkipped), r0.linkSkipped ?? r0.stopped);
+		const g0 = fake('chatgpt', { folder: 'AI chats/ChatGPT' });
+		const s0 = await runGptSync(g0.plugin, g0.account as never);
+		expect('ChatGPT, not paired: skipped, not stopped', !!s0.linkSkipped && !s0.stopped && /not paired/.test(s0.linkSkipped), s0.linkSkipped ?? s0.stopped);
+
+		let claudeOrg = ORG;
+		let gptHtml = `<script>window.__x={"accessToken":"${JWT}"}</script>`;
+		const b = await browser(port, server.newPairingCode(), (m) => {
+			if (m.op === 'read' && m.site) {
+				const v = m.value === 'claude-org' ? claudeOrg : m.value === 'chatgpt-device-id' ? 'device-123' : m.value === 'chatgpt-workspace' ? 'ws-1' : '';
+				return [{ id: m.id, ok: true, value: v }];
+			}
+			if (m.op === 'fetch') {
+				const url = String(m.url);
+				const body = url === 'https://chatgpt.com/' ? gptHtml : url.includes('/backend-api/conversations') ? '{"items":[],"total":0,"limit":20,"offset":0}' : '[]';
+				return fetchFrames(m.id!, 200, { 'content-type': url === 'https://chatgpt.com/' ? 'text/html' : 'application/json' }, new TextEncoder().encode(body));
+			}
+			return [];
+		});
+		await sleep(50);
+
+		// Claude: organization from the browser, requests without the login window's cookie.
+		const c1 = fake('claude', {});
+		const auth = await claudeAuth(c1.plugin, c1.account as never);
+		expect('Claude: the organization is read from the browser', auth.orgId === ORG && (c1.account.web as { orgId?: string }).orgId === ORG && !auth.linkProblem);
+		expect('Claude: no session key is read; the browser sends its own', auth.source === 'browser link' && auth.getKey() === BROWSER_LINK_KEY);
+		const api = new ClaudeApi(auth.orgId, auth.getKey, { provider: 'claude', accountId: 'x1' }, auth.transport);
+		await api.get(api.listPath(0));
+		const sent = b.seen.filter((m) => m.op === 'fetch').pop()!;
+		const h = sent.headers as Record<string, string>;
+		expect('Claude: the chat list goes through the browser', String(sent.url).startsWith(`https://claude.ai/api/organizations/${ORG}/`), String(sent.url));
+		expect('Claude: no Cookie header leaves the plugin', !Object.keys(h).some((k) => k.toLowerCase() === 'cookie') && !JSON.stringify(h).includes(BROWSER_LINK_KEY));
+		claudeOrg = '';
+		const c2 = fake('claude', {});
+		const r2 = await runSync(c2.plugin, c2.account as never);
+		expect('Claude, not logged in in the browser: skipped, named', !!r2.linkSkipped && /claude\.ai in your browser/.test(r2.linkSkipped) && !r2.stopped, r2.linkSkipped ?? r2.stopped);
+
+		// ChatGPT: login key from the page fetched in the browser, device and workspace from the browser.
+		const gpt = await GptApi.connect({ provider: 'chatgpt', id: 'x1' });
+		const page = b.seen.find((m) => m.op === 'fetch' && m.url === 'https://chatgpt.com/')!;
+		const ph = page.headers as Record<string, string>;
+		expect('ChatGPT: the start page is fetched in the browser, without cookie or browser name', !Object.keys(ph).some((k) => /^(cookie|user-agent)$/i.test(k)) && page.redirect === 'manual', JSON.stringify(Object.keys(ph)));
+		expect('ChatGPT: the device ID is read from the browser', Object.entries(ph).some(([k, v]) => k.toLowerCase() === 'oai-device-id' && v === 'device-123'), JSON.stringify(Object.keys(ph)));
+		expect('ChatGPT: the workspace is read from the browser', gpt.workspaceId === 'ws-1' || b.seen.some((m) => m.op === 'read' && m.value === 'chatgpt-workspace'));
+		await gpt.get(gpt.listPath(0, false));
+		const list = b.seen.filter((m) => m.op === 'fetch').pop()!;
+		const lh = list.headers as Record<string, string>;
+		expect('ChatGPT: requests carry the login key, not the cookie or browser name', lh.Authorization === `Bearer ${JWT}` && !('Cookie' in lh) && !('User-Agent' in lh), JSON.stringify(Object.keys(lh)));
+		gptHtml = '<html>logged out</html>';
+		const lo = await rejection(GptApi.connect({ provider: 'chatgpt', id: 'x1' }));
+		expect('ChatGPT, not logged in in the browser: a skip, named', lo instanceof BrowserLinkUnavailable && /ChatGPT in your browser/.test(lo.message), lo?.message);
+		b.ws.close();
+	} finally {
+		console.error = realError;
+		testHooks.requestUrl = null;
+		setBrowserLink(() => false, () => null);
+		await server.stop();
+	}
+}
+
 async function main() {
 	testSwitch();
 	await testTransport();
 	await testSamePage();
 	await testSkip();
+	await testClaudeAndGpt();
 	console.log(failures ? `${failures} Browser link check(s) FAILED.` : 'All Browser link checks passed.');
 	process.exit(failures ? 1 : 0);
 }

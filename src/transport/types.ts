@@ -37,6 +37,19 @@ export type PageValue =
 	/** Google's number for the signed-in account (`WIZ_global_data.S06Grb`), or ''. */
 	| 'google-account-id';
 
+/**
+ * Named values read from the site with the account's login (not secret): small cookies the
+ * site's own page can read. The login window reads them from its storage, the Browser link
+ * from a tab of the site.
+ */
+export type SiteValue =
+	/** claude.ai's organization of this login (`lastActiveOrg`). */
+	| 'claude-org'
+	/** ChatGPT's device ID (`oai-did`). */
+	| 'chatgpt-device-id'
+	/** ChatGPT's workspace (`_account`). */
+	| 'chatgpt-workspace';
+
 /** One signed request sent by the site's own page. */
 export interface PageCall {
 	url: string;
@@ -70,6 +83,8 @@ export interface Transport {
 	/** A request through the login's own browser storage (cookies it sends back are kept), redirects left to the caller. */
 	fetchInBrowser(url: string, init: RequestInit, timeoutMs?: number): Promise<Response>;
 	isLoggedIn(): Promise<boolean>;
+	/** One named value from the site; null when the site has none (e.g. not logged in). */
+	siteValue(v: SiteValue): Promise<string | null>;
 	/** A page of the site once `ready` holds there; null if it never does (not signed in, or the site changed). */
 	openPage(url: string, ready: ReadyCheck, timeoutMs: number, pasted?: PastedCookies): Promise<SitePage | null>;
 }

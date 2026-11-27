@@ -64,7 +64,8 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 	const s = account.web;
 	const save = () => ctx.plugin.saveSettings();
 	const twin = ctx.plugin.settings.claude.find((a) => a !== account && s.orgId && a.web.orgId === s.orgId);
-	loginRow(ctx, el, 'claude', account, () => `${count(Object.keys(s.index).length, 'chat')} saved.${twin ? ` Same organization as "${twin.label}", so check this is a different person's login.` : ''}`);
+	(usesLinkRow('claude', account) ? linkLoginRow : loginRow)(ctx, el, 'claude', account, () => `${count(Object.keys(s.index).length, 'chat')} saved.${twin ? ` Same organization as "${twin.label}", so check this is a different person's login.` : ''}`);
+	loginMethodSetting(ctx, el, 'claude', account);
 
 	new Setting(el).setName('Folders').setHeading();
 	chatFolderSetting(ctx, el, 'Chat folder', 'Where claude.ai chats are saved.', { kind: 'claude', id: account.id });
@@ -149,7 +150,7 @@ export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAc
 export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: GeminiAccount): void {
 	const g = account.web;
 	(usesLinkRow('gemini', account) ? linkLoginRow : loginRow)(ctx, el, 'gemini', account, () => `${count(Object.keys(g.index).length, 'chat')} saved. The same Google login is used for AI Studio.`);
-	loginMethodSetting(ctx, el, account);
+	loginMethodSetting(ctx, el, 'gemini', account);
 
 	new Setting(el).setName('Folders').setHeading();
 	chatFolderSetting(ctx, el, 'Chat folder', 'Where Gemini chats are saved.', { kind: 'gemini', id: account.id });
@@ -194,14 +195,15 @@ export function studioPanel(ctx: PanelContext, el: HTMLElement, account: GeminiA
 export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: ChatgptAccount): void {
 	const g = account.web;
 	const save = () => ctx.plugin.saveSettings();
-	loginRow(ctx, el, 'chatgpt', account, () => {
+	(usesLinkRow('chatgpt', account) ? linkLoginRow : loginRow)(ctx, el, 'chatgpt', account, () => {
 		const until = g.cooldownUntil ?? 0;
 		return `${count(Object.keys(g.index).length, 'chat')} saved.${until > Date.now() ? ` Rate limited, cooling down until ${new Date(until).toLocaleTimeString()}.` : ''}`;
 	});
+	loginMethodSetting(ctx, el, 'chatgpt', account);
 	const saved = hasPastedSession('chatgpt', account);
 	new Setting(el)
 		.setName('Made your account with Google?')
-		.setDesc(`Google blocks its sign-in inside apps, so "Continue with Google" fails in the login window. Sign in in your own browser instead and bring the login over.${saved ? ' A browser login is saved for this account.' : ''}`)
+		.setDesc(`Google blocks its sign-in inside apps, so "Continue with Google" fails in the login window. Best: choose the Browser link as the login method above. Or sign in in your own browser and bring the login over.${saved ? ' A browser login is saved for this account.' : ''}`)
 		.addButton((b) =>
 			b.setButtonText(saved ? 'Replace browser login…' : 'Use browser login…').onClick(() =>
 				new BrowserLoginModal(ctx.app, ctx.plugin, account, withAccount('ChatGPT', ctx.plugin.settings.chatgpt, account), ctx.refresh).open(),

@@ -7,6 +7,7 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { NetworkFailure, sendWithRetry, triedText } from './net-retry';
+import { BrowserLinkUnavailable } from './link/errors';
 import { isUuid } from './schema';
 import { isOutputPath } from './files';
 import { recordAnswer, recordError, type ErrorSource } from './error-log';
@@ -232,6 +233,8 @@ export class ClaudeApi {
 				loginOnly: LOGIN_HEADERS,
 			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}${RPC_BASE}${method}`, status: null, message: why, secrets: [key] });
 			throw new StopError(why);
@@ -301,6 +304,8 @@ export class ClaudeApi {
 				loginOnly: LOGIN_HEADERS,
 			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`, status: null, message: why, secrets: [key] });
 			throw new StopError(why);
@@ -361,6 +366,8 @@ export class ClaudeApi {
 				loginOnly: LOGIN_HEADERS,
 			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'GET', url: url.toString(), status: null, message: why, secrets: [key] });
 			throw new StopError(why);

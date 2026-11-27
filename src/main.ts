@@ -113,7 +113,9 @@ export default class AIChatBridge extends Plugin {
 
 	/** Starts or stops the Browser link server to match the accounts, and keeps its port. */
 	async updateBrowserLink(): Promise<void> {
-		const wanted = this.settings.gemini.some((a) => usesBrowserLink('gemini', a));
+		const wanted = this.settings.gemini.some((a) => usesBrowserLink('gemini', a))
+			|| this.settings.claude.some((a) => usesBrowserLink('claude', a))
+			|| this.settings.chatgpt.some((a) => usesBrowserLink('chatgpt', a));
 		await this.browserLink.update(wanted);
 		const port = this.browserLink.server?.port;
 		if (port && port !== this.settings.browserLinkPort) {
@@ -142,8 +144,8 @@ export default class AIChatBridge extends Plugin {
 		if (adopted) await this.saveSettings();
 		// Browser link: which accounts use it, and its server (started only if one does).
 		setBrowserLink((login) => {
-			const account = login.provider === 'gemini' ? this.settings.gemini.find((a) => a.id === login.id) : undefined;
-			return !!account && usesBrowserLink('gemini', account);
+			const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
+			return !!account && usesBrowserLink(login.provider, account as GeminiAccount);
 		}, () => this.browserLink.server);
 		void this.updateBrowserLink();
 		registerLayoutIcons(this);
@@ -346,6 +348,7 @@ export default class AIChatBridge extends Plugin {
 		this.statusEl?.setText('');
 		closeLoginWindows();
 		void this.browserLink.stop();
+		setBrowserLink(() => false, () => null); // a reloaded copy sets its own
 		if (this.timer !== null) window.clearInterval(this.timer);
 		if (this.memoryTimer !== null) window.clearInterval(this.memoryTimer);
 	}
@@ -468,7 +471,7 @@ export default class AIChatBridge extends Plugin {
 	/** Can this account's website be synced right now? */
 	async canSyncWeb(provider: Provider, account: AnyAccount): Promise<boolean> {
 		// A Browser link account always runs: a closed browser is reported as a skip.
-		if (provider === 'gemini' && usesBrowserLink(provider, account as GeminiAccount)) return true;
+		if (usesBrowserLink(provider, account as GeminiAccount)) return true;
 		if (await isLoggedIn(loginRef(provider, account))) return true;
 		return hasPastedSession(provider, account);
 	}
