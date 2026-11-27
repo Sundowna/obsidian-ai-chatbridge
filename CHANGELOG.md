@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.49.3 - 2026-11-27
+
+### Fixed
+- **Browser link: Open in browser also works when the extension has no access to 127.0.0.1** - in Chrome, Edge and Brave the opened page now asks the extension directly to show its page, so it no longer depends on the extension's site access. Needs the extension 0.2.1 from this release.
+
 ## 0.49.2 - 2026-11-27
 
 ### Fixed

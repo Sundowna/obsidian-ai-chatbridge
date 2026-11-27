@@ -478,7 +478,16 @@ async function testOpenPage() {
 	try {
 		const ok = await get(port, LINK_OPEN_PATH);
 		expect('open page: served at 127.0.0.1 as a plain HTML page', ok.status === 200 && ok.type.startsWith('text/html'));
-		expect('open page: loads nothing (strict content policy, no scripts)', ok.csp.includes("default-src 'none'") && !/<script/i.test(ok.body));
+		expect('open page: no browser linked yet = no script at all (strict content policy)', ok.csp.includes("default-src 'none'") && !ok.csp.includes('script-src') && !/<script/i.test(ok.body));
+		const b = await browser(port, server.newPairingCode(), () => []);
+		await sleep(50);
+		const linked = await get(port, LINK_OPEN_PATH);
+		const script = /<script>([^<]*)<\/script>/.exec(linked.body)?.[1] ?? '';
+		const { createHash } = await import('node:crypto');
+		const hash = createHash('sha256').update(script).digest('base64');
+		expect('open page: once a Chrome extension is linked, one script asks that extension to open its page', script.includes(JSON.stringify(EXT.slice('chrome-extension://'.length))) && script.includes('open-options') && (linked.body.match(/<script/g) ?? []).length === 1, script);
+		expect('open page: only that script may run (allowed by its hash)', linked.csp.includes(`script-src 'sha256-${hash}'`) && linked.csp.includes("default-src 'none'"), linked.csp);
+		b.ws.close();
 		expect('open page: says to keep the browser open while syncing', /Keep that browser open while Obsidian syncs/.test(ok.body));
 		expect('open page: a query string is fine', (await get(port, `${LINK_OPEN_PATH}?x=1`)).status === 200);
 		expect('open page: any other path is 404', (await get(port, '/')).status === 404 && (await get(port, '/chatbridge-browser-link/x')).status === 404);
