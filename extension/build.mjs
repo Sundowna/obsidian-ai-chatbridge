@@ -40,6 +40,7 @@ const manifest = JSON.parse(readFileSync(join(here, 'manifest.json'), 'utf8'));
 delete manifest.minimum_chrome_version;
 delete manifest.externally_connectable; // Chrome only; Firefox switches the tab by watching it load
 manifest.background = { scripts: ['background.js'] };
-manifest.browser_specific_settings = { gecko: { id: 'ai-chatbridge-browser-link@sundowna', strict_min_version: '128.0' } };
+// data_collection_permissions: Mozilla asks every add-on it signs to say what it collects; this one collects nothing.
+manifest.browser_specific_settings = { gecko: { id: 'ai-chatbridge-browser-link@sundowna', strict_min_version: '128.0', data_collection_permissions: { required: ['none'] } } };
 writeFileSync(join(ff, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`Extension built for Firefox: ${ff}`);

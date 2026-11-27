@@ -32,3 +32,6 @@ extension/spike/spike-results.json
 # Browser link extension build (load extension/dist unpacked)
 extension/dist/
 extension/dist-firefox/
+
+# Firefox add-on signed by Mozilla (npm run sign:firefox)
+extension/signed/

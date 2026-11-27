@@ -9,6 +9,7 @@
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"build:extension": "tsc -p extension/tsconfig.json && node extension/build.mjs",
+		"sign:firefox": "npm run build:extension && npx --yes web-ext@8.3.0 sign --channel=unlisted --source-dir extension/dist-firefox --artifacts-dir extension/signed",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"test": "npm run test:offline && npm run test:ci",

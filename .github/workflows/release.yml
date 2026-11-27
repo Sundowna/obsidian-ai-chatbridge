@@ -26,6 +26,13 @@ jobs:
                   npm ci
                   npm run build
 
+            - name: Build the Browser link extension (Chrome, Edge, Brave and Firefox zips)
+              run: |
+                  npm run build:extension
+                  ext=$(node -p "require('./extension/manifest.json').version")
+                  (cd extension/dist && zip -qr "../../ai-chatbridge-browser-link-chrome-${ext}.zip" .)
+                  (cd extension/dist-firefox && zip -qr "../../ai-chatbridge-browser-link-firefox-${ext}.zip" .)
+
             - name: Check for optional styles
               id: styles
               run: |
@@ -48,7 +55,7 @@ jobs:
                   awk -v v="$tag" 'index($0, "## " v " ") == 1 || $0 == "## " v {f=1; next} /^## /{if (f) exit} f' CHANGELOG.md > notes.md || true
                   [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
 
-                  files="main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}"
+                  files="main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }} $(ls ai-chatbridge-browser-link-*.zip)"
 
                   # A release made on github.com (publishing it creates the tag) already exists:
                   # attach the files to it, and fill in its notes if it has none.

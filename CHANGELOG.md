@@ -3,6 +3,7 @@
 ## 0.56.0 - 2026-11-27
 
 ### Added
+- **Firefox add-on that stays installed** - the Firefox extension can now be signed by Mozilla as a private add-on (`npm run sign:firefox`); a signed `.xpi` installs like any add-on and survives a restart. Releases now carry the Chrome and Firefox extension zips automatically.
 - **Paired browsers named after what they are** - instead of "Browser 1" and "Browser 2", a paired browser is called "Chrome", "Edge", "Firefox" ("Chrome 2" for a second one) as soon as it connects; names you chose stay. A **Rename…** button sits beside each account's Browser choice.
 
 ### Fixed
