@@ -16,10 +16,11 @@ import { isPrivatePath, pickBackend, type SqliteBackend } from '../hermes/reader
 import { appendLog } from '../log';
 import { dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
-import { cleanFolder, type ChatgptAccount, type ClaudeAccount } from '../settings';
+import { cleanFolder, type ChatgptAccount, type ClaudeAccount, type LumoAccount } from '../settings';
 import { createNew, ensureFolder, findFile, writeOver } from '../vaultio';
 import { captureChatgpt, type MemoryGptApi } from './chatgpt-web';
 import { captureClaude, type MemoryClaudeApi } from './claude-web';
+import { captureLumo, type MemoryLumoApi } from './lumo-web';
 import { describeHits, redact } from './redact';
 import { hashOfNote, renderBody, renderNote, sha256 } from './render';
 import { captureClaudeCode, captureCodex } from './sources';
@@ -50,8 +51,11 @@ export const chatgptMemoryAccounts = (plugin: AIChatBridge): ChatgptAccount[] =>
 /** The Claude accounts whose memories on claude.ai are turned on. */
 export const claudeMemoryAccounts = (plugin: AIChatBridge): ClaudeAccount[] => plugin.settings.claude.filter((a) => plugin.settings.memory.claudeWeb[a.id]);
 
+/** The Lumo accounts whose memories in Lumo are turned on. */
+export const lumoMemoryAccounts = (plugin: AIChatBridge): LumoAccount[] => plugin.settings.lumo.filter((a) => plugin.settings.memory.lumoWeb?.[a.id] === true);
+
 export const anyMemoryEnabled = (plugin: AIChatBridge): boolean =>
-	plugin.settings.memory.codexLocal || plugin.settings.memory.claudeCodeLocal || claudeMemoryAccounts(plugin).length > 0 || chatgptMemoryAccounts(plugin).length > 0;
+	plugin.settings.memory.codexLocal || plugin.settings.memory.claudeCodeLocal || claudeMemoryAccounts(plugin).length > 0 || chatgptMemoryAccounts(plugin).length > 0 || lumoMemoryAccounts(plugin).length > 0;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const dateOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -67,8 +71,10 @@ export interface MemoryRunOptions {
 	gpt?: (account: ChatgptAccount) => Promise<MemoryGptApi>;
 	/** The connection to claude.ai for an account; a test hands in a fake. */
 	claude?: (account: ClaudeAccount) => Promise<MemoryClaudeApi>;
-	/** The wait between two memory file reads on claude.ai (ms). */
+	/** The wait between two memory file reads on claude.ai, and between two pages of Lumo's project list (ms). */
 	pauseMs?: number;
+	/** The connection to Lumo for an account; a test hands in a fake. Closed by the caller when given. */
+	lumo?: (account: LumoAccount) => Promise<MemoryLumoApi>;
 }
 
 export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn = () => undefined, o: MemoryRunOptions = {}): Promise<MemorySyncResult> {
@@ -79,7 +85,8 @@ export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn =
 		const local = m.codexLocal || m.claudeCodeLocal;
 		const web = chatgptMemoryAccounts(plugin);
 		const claudeWeb = claudeMemoryAccounts(plugin);
-		const steps = (m.codexLocal ? 1 : 0) + (m.claudeCodeLocal ? 1 : 0) + claudeWeb.length + web.length;
+		const lumoWeb = lumoMemoryAccounts(plugin);
+		const steps = (m.codexLocal ? 1 : 0) + (m.claudeCodeLocal ? 1 : 0) + claudeWeb.length + web.length + lumoWeb.length;
 		let step = 0;
 		const fs = o.fs === undefined ? nodeDesktopFs() : o.fs;
 		if (local && !fs) throw new Error('AI memory on this computer can only be read in Obsidian on desktop.');
@@ -113,6 +120,27 @@ export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn =
 			progress(`AI memory: reading ChatGPT (${acc.label})…`, step++, steps);
 			const api = o.gpt ? await o.gpt(acc) : await GptApi.connect(loginRef('chatgpt', acc), pastedSession(plugin.app, acc.web.secretId));
 			await save(plugin, await captureChatgpt(api, acc.label), base, now, result);
+		}
+		for (const acc of lumoWeb) {
+			progress(`AI memory: reading Lumo (${acc.label})…`, step++, steps);
+			if (o.lumo) {
+				await save(plugin, await captureLumo(await o.lumo(acc), acc.label), base, now, result);
+				continue;
+			}
+			const pauseMs = o.pauseMs ?? Math.max(1, plugin.settings.delaySeconds) * 1000;
+			const wait = () => new Promise<void>((done) => window.setTimeout(done, pauseMs));
+			// Loaded only when a Lumo memory is read: it brings Proton's key library with it.
+			const [{ LumoApi }, { projectInstructions }, { allSpaces }] = await Promise.all([import('../lumo/api'), import('../lumo/chat'), import('../lumo/sync')]);
+			const a = await LumoApi.connect(loginRef('lumo', acc));
+			try {
+				const capture = await captureLumo({
+					userSettings: () => a.userSettings(),
+					projects: async () => projectInstructions(await allSpaces(a, wait, () => undefined), a.masterKeys),
+				}, acc.label);
+				await save(plugin, capture, base, now, result);
+			} finally {
+				a.close();
+			}
 		}
 	} catch (e) {
 		result.stopped = e instanceof Error ? e.message : String(e);

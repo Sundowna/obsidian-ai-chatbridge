@@ -26,6 +26,8 @@ export interface MemorySettings {
 	claudeWeb: Record<string, boolean>;
 	/** ChatGPT accounts (by account ID) whose memories on chatgpt.com are read. */
 	chatgptWeb: Record<string, boolean>;
+	/** Lumo accounts (by account ID) whose memories and personalization in Lumo are read. Missing = none. */
+	lumoWeb?: Record<string, boolean>;
 	/** The privacy filter: passwords, recovery codes, 2FA seeds, ID and card numbers become [REDACTED]. */
 	redact: boolean;
 	/** "<provider>/<account>" -> its last snapshot. */

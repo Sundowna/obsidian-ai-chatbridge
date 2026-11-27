@@ -16,6 +16,7 @@ import { describeHits, redact } from '../src/memory/redact';
 import { fenceFor, hashOfNote, renderBody, sha256 } from '../src/memory/render';
 import { captureClaudeCode, captureCodex, rowText } from '../src/memory/sources';
 import { runMemorySync } from '../src/memory/sync';
+import type { LumoProjectInstructions } from '../src/lumo/chat';
 import { normalizeSettings } from '../src/migrate';
 import { readWrite } from './fake-vault';
 
@@ -377,6 +378,79 @@ async function main() {
 	expect('ChatGPT: no login stops with its message and writes nothing', /Not logged in/.test(w4.stopped ?? '') && !files.has(`${G}/2026-11-23.md`));
 	settings.memory.chatgptWeb[gptAccount.id] = false;
 	settings.memory.codexLocal = true;
+
+
+	// ---- Lumo (made-up, already decrypted settings; the decryption is tested in test:lumo) ----
+	{
+		const day = (d: number) => Date.UTC(2026, 10, d, 9, 0, 0);
+		let lumoSettings: unknown = {
+			theme: 'auto', isMemoryEnabled: true, isMemoryAutoSaveEnabled: true,
+			memories: [
+				{ id: 'a', content: 'Boer naby Windhoek.', createdAt: day(10), source: 'user' },
+				{ id: 'b', content: 'Prefers short answers.\nIn English or German.', createdAt: day(20), source: 'generated' },
+				{ id: 'c', content: '   ', createdAt: day(21), source: 'user' },
+				'not a memory',
+			],
+			personalization: { nickname: 'Walter', jobRole: 'Industrial engineer', personality: 'wise-cat', traits: ['witty', 'humble'], lumoTraits: 'Be direct.', additionalContext: 'PIN: 4711 for the gate.', enableForNewChats: true },
+			customAgents: [
+				{ id: 'x', name: 'Editor', instructions: 'Fix my German.', description: 'Proofreads', source: 'personal', createdAt: 1, updatedAt: 1 },
+				{ id: 'y', name: 'Someone else\'s', instructions: 'Shared one.', source: 'shared', createdAt: 1, updatedAt: 1 },
+				{ id: 'z', name: 'Editor', instructions: 'Second with the same name.', source: 'personal', createdAt: 1, updatedAt: 1 },
+				{ id: 'w', name: 'Empty', instructions: '', source: 'personal', createdAt: 1, updatedAt: 1 },
+			],
+			featureFlags: [],
+		};
+		let lumoProjects: { projects: LumoProjectInstructions[]; unreadable: number } = { projects: [
+			{ name: 'Garden', instructions: 'Answer in German.', private: false },
+			{ name: 'Taxes', instructions: 'Never read me.', private: true },
+		], unreadable: 1 };
+		const lumoAsked: string[] = [];
+		const fakeLumo = async () => ({
+			userSettings: async () => (lumoAsked.push('settings'), lumoSettings),
+			projects: async () => (lumoAsked.push('projects'), lumoProjects),
+		});
+		const lumoAccount = settings.lumo[0]!;
+		settings.memory.codexLocal = false;
+		const lweb = (now: Date) => runMemorySync(plugin, undefined, { fs: null, now, lumo: fakeLumo });
+		const l0 = await lweb(new Date(2026, 10, 24, 9, 0, 0));
+		expect('Lumo: off by default, nothing is asked', l0.newCount === 0 && !lumoAsked.length && settings.memory.lumoWeb?.[lumoAccount.id] === undefined);
+		settings.memory.lumoWeb = { [lumoAccount.id]: true };
+		const L = `30 Sources/AI Memory/Lumo/${lumoAccount.label}`;
+		const l1 = await lweb(new Date(2026, 10, 24, 9, 5, 0));
+		const lsnap = files.get(`${L}/2026-11-24.md`) ?? '';
+		expect('Lumo sync 1: one snapshot and _latest.md, without file access', l1.newCount === 1 && !l1.stopped && files.has(`${L}/_latest.md`) && lsnap.length > 0, l1.stopped ?? '');
+		expect('Lumo sync 1: the settings record once, then the projects', lumoAsked.join() === 'settings,projects', lumoAsked.join());
+		expect('Lumo sync 1: properties say web, from lumo.proton.me', lsnap.includes(`provider: "Lumo"\naccount: ${JSON.stringify(lumoAccount.label)}\nsource: web\n`), lsnap.slice(0, 240));
+		const heads = (lsnap.match(/^## \/.*$/gm) ?? []).join(' | ');
+		expect('Lumo sync 1: memories, personalization, own agents (same name kept apart, empty left out), project instructions; the private project never shown',
+			heads === '## /saved-memories | ## /personalization | ## /custom-agents/Editor | ## /custom-agents/Editor (2) | ## /projects/Garden/instructions', heads);
+		expect('Lumo sync 1: memories newest first, dated, the ones Lumo saved itself marked, empty rows left out',
+			lsnap.includes('[2026-11-20, from chats] Prefers short answers.\nIn English or German.\n\n[2026-11-10] Boer naby Windhoek.') && !lsnap.includes('2026-11-21'));
+		expect('Lumo sync 1: personalization as short lines and named blocks, the default personality and unused switch left out',
+			lsnap.includes('jobRole: Industrial engineer\nnickname: Walter\npersonality: wise-cat\ntraits: witty, humble\n\n--- additionalContext ---\n') && lsnap.includes('--- lumoTraits ---\nBe direct.') && !lsnap.includes('enableForNewChats'));
+		expect('Lumo sync 1: the privacy filter applies', lsnap.includes('PIN: [REDACTED] for the gate.') && !lsnap.includes('4711'));
+		expect('Lumo sync 1: an agent shared by someone else and the private project are not in it', !lsnap.includes('Shared one.') && !lsnap.includes('Never read me.'));
+		expect('Lumo sync 1: places say what was found', lsnap.includes('- `memory`: on, saving from chats on') && lsnap.includes('- `saved memories`: 2 memories, 1 saved by Lumo from chats') && lsnap.includes('- `personalization`: 6 fields with text') && lsnap.includes('- `custom agents`: 2 agents') && lsnap.includes('- `project instructions`: 1 project') && lsnap.includes('- `skipped`: 1 private project') && lsnap.includes('- `not readable`: 1 project'), lsnap.slice(0, 900));
+		const sizeL = files.size;
+		const l2 = await lweb(new Date(2026, 10, 25, 9, 0, 0));
+		expect('Lumo sync 2: nothing changed = nothing written', l2.unchanged === 1 && files.size === sizeL);
+		lumoProjects = { projects: [{ name: 'Garden', instructions: 'Answer in Afrikaans.', private: false }], unreadable: 0 };
+		const l3 = await lweb(new Date(2026, 10, 25, 9, 30, 0));
+		expect('Lumo sync 3: changed project instructions = a new snapshot', l3.changedCount === 1 && (files.get(`${L}/2026-11-25.md`) ?? '').includes('Answer in Afrikaans.'));
+		lumoSettings = null;
+		lumoProjects = { projects: [], unreadable: 0 };
+		const l4 = await lweb(new Date(2026, 10, 26, 9, 0, 0));
+		const empty = files.get(`${L}/2026-11-26.md`) ?? '';
+		expect('Lumo: an account that never saved settings still gets a snapshot that says so', l4.changedCount === 1 && empty.includes('- `memory`: no settings saved yet') && empty.includes('- `saved memories`: none'), empty.slice(0, 600));
+		lumoSettings = { memories: 'not a list' };
+		const l5 = await lweb(new Date(2026, 10, 27, 9, 0, 0));
+		expect('Lumo: settings in another shape stop the run and write nothing', /does not know/.test(l5.stopped ?? '') && !files.has(`${L}/2026-11-27.md`), l5.stopped ?? '');
+		const l6 = await runMemorySync(plugin, undefined, { fs: null, now: new Date(2026, 10, 27, 10, 0, 0), lumo: async () => { throw new Error('Not logged in to Lumo.'); } });
+		expect('Lumo: no login stops with its message', /Not logged in to Lumo/.test(l6.stopped ?? ''));
+		expect('Lumo: the switch is kept across a reload', normalizeSettings(JSON.parse(JSON.stringify(settings))).settings.memory.lumoWeb?.[lumoAccount.id] === true);
+		settings.memory.lumoWeb = {};
+		settings.memory.codexLocal = true;
+	}
 
 	const mobile = await runMemorySync(plugin, undefined, { fs: null, backend, account: 'Tower' });
 	expect('sync: no file access (mobile) stops with a clear message', /desktop/.test(mobile.stopped ?? ''));

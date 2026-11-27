@@ -84,6 +84,21 @@ export function memoryTab(ctx: PanelContext, el: HTMLElement): void {
 			);
 	}
 
+	for (const acc of plugin.settings.lumo) {
+		const state = m.states[`Lumo/${acc.label}`];
+		const last = state ? ` Last snapshot ${when(Date.parse(state.synced))}.` : '';
+		new Setting(el)
+			.setName(plugin.settings.lumo.length > 1 ? `Lumo (${acc.label})` : 'Lumo')
+			.setDesc(`Reads Lumo: your saved memories (yours and the ones Lumo saved from chats), your personalization, your own custom agents and each project's instructions, unlocked like your chats. Nothing there is changed. Projects marked private are left out. Saved under the account "${acc.label}".${last}`)
+			.addToggle((t) =>
+				t.setValue(m.lumoWeb?.[acc.id] === true).onChange(async (v) => {
+					m.lumoWeb = { ...(m.lumoWeb ?? {}), [acc.id]: v };
+					await save();
+					ctx.refresh();
+				}),
+			);
+	}
+
 	new Setting(el).setName('Schedule').setHeading();
 	new Setting(el)
 		.setName('Automatic memory sync (minutes)')

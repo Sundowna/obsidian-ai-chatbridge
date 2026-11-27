@@ -12,6 +12,9 @@ import { retryDeadline } from '../rate-limit';
 import { sessionKeyPassword, openMasterKeys, unlockUserKeys } from './keys';
 import { checkAsset, checkClientKey, checkConversation, checkFullMessage, checkMasterKeys, checkSpaces, checkUser, parseStoredSession } from './schema';
 import type { LumoWireAsset, LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
+import { decryptUserSettings } from './crypto';
+import { unpack } from './msgpack';
+import { ShapeError } from '../schema';
 
 const ORIGIN = 'https://lumo.proton.me';
 const API_URLS = `${ORIGIN}/api/*`;
@@ -23,11 +26,13 @@ const LOCAL_KEY = '/api/auth/v4/sessions/local/key';
 const USER = '/api/core/v4/users';
 const MASTER_KEYS = '/api/lumo/v1/masterkeys';
 const SPACES = '/api/lumo/v1/spaces';
+const SETTINGS = '/api/lumo/v1/settings';
 
 const ALLOWED = [
 	/^\/api\/auth\/v4\/sessions\/local\/key$/,
 	/^\/api\/core\/v4\/users$/,
 	/^\/api\/lumo\/v1\/masterkeys$/,
+	/^\/api\/lumo\/v1\/settings$/,
 	/^\/api\/lumo\/v1\/spaces$/,
 	/^\/api\/lumo\/v1\/conversations\/[\w=-]{1,200}$/,
 	/^\/api\/lumo\/v1\/messages\/[\w=-]{1,200}$/,
@@ -102,6 +107,25 @@ export class LumoApi {
 	async asset(id: string): Promise<LumoWireAsset | null> {
 		const body = await this.get(`/api/lumo/v1/assets/${checkId(id)}`, true);
 		return body === null ? null : checkAsset(body);
+	}
+
+	/**
+	 * Lumo's settings record, decrypted: memories, personalization, custom agents and switches.
+	 * Null when the account has never saved any. Read only (AI memory).
+	 */
+	async userSettings(): Promise<unknown> {
+		const body = await this.get(SETTINGS, true);
+		const record = body !== null && typeof body === 'object' ? (body as { UserSettings?: unknown }).UserSettings : undefined;
+		if (record === undefined || record === null) return null;
+		const encrypted = typeof record === 'object' ? (record as { Encrypted?: unknown }).Encrypted : undefined;
+		if (encrypted === undefined || encrypted === null || encrypted === '') return null;
+		if (typeof encrypted !== 'string') throw new ShapeError('Lumo settings have no readable record');
+		try {
+			return await decryptUserSettings(encrypted, this.masterKeys, unpack);
+		} catch (e) {
+			if (e instanceof ShapeError) throw e;
+			throw new StopError(`Could not unlock this account's Lumo settings (${e instanceof Error ? e.message : 'unknown error'}). Lumo may have changed how it stores them, so nothing was saved.`);
+		}
 	}
 
 	/** The single GET used by everything above. */
