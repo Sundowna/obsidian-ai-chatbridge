@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.49.0 - 2026-11-27
+
+### Added
+- **AI memory: Lumo** - a new switch per Lumo account in the Memory tab, off by default. When on, the memory sync saves what Lumo keeps about you: your saved memories (the ones you wrote and the ones Lumo saved from chats), your personalization (how it addresses you, your work, its traits, extra context), your own custom agents and each project's instructions. Unlocked like your chats; nothing in Lumo is changed. Projects you marked private in Lumo are left out.
+
 ## 0.48.1 - 2026-11-27
 
 ### Added

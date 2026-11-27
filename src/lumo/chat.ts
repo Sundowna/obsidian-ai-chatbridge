@@ -139,3 +139,42 @@ export async function decryptChat(entry: LumoEntry, c: LumoWireConversation): Pr
 		messages,
 	};
 }
+
+/** A project's own instructions for Lumo (AI memory). */
+export interface LumoProjectInstructions {
+	name: string;
+	instructions: string;
+	/** Marked private in Lumo, or named "Private": counted, never read into a note. */
+	private: boolean;
+}
+
+/**
+ * Every project with instructions, read from the space's own record (`projectInstructions`,
+ * Proton's ProjectSpacePriv). Spaces that are not projects, cannot be opened or say nothing
+ * are left out; `unreadable` counts the projects whose record could not be opened.
+ */
+export async function projectInstructions(spaces: readonly LumoWireSpace[], masterKeys: readonly CryptoKey[]): Promise<{ projects: LumoProjectInstructions[]; unreadable: number }> {
+	const projects: LumoProjectInstructions[] = [];
+	let unreadable = 0;
+	for (const space of spaces) {
+		if (space.DeleteTime || !space.Encrypted) continue;
+		const marked = space.SpaceType === SPACE_TYPE_PROJECT;
+		const dek = await spaceDataKey(space.SpaceKey, masterKeys);
+		let priv: unknown;
+		try {
+			if (!dek) throw new Error('no key');
+			priv = await decryptJson(dek, space.Encrypted, spaceAd(space.SpaceTag));
+		} catch {
+			if (marked) unreadable++;
+			continue;
+		}
+		if (!isRow(priv)) continue;
+		const isProject = marked || typeof priv.projectName === 'string' || priv.isProject === true;
+		const text = typeof priv.projectInstructions === 'string' ? priv.projectInstructions : '';
+		if (!isProject || !text.trim()) continue;
+		const name = typeof priv.projectName === 'string' && priv.projectName.trim() ? priv.projectName.trim().replace(/[\r\n/\\]+/g, ' ') : 'Project';
+		projects.push({ name, instructions: text, private: priv.isPrivate === true || name.split(/\s+/).some((w) => w.toLowerCase() === 'private') });
+	}
+	projects.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+	return { projects, unreadable };
+}

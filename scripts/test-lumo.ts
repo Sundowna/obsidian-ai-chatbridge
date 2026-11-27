@@ -5,9 +5,9 @@
 
 import { createMessage, decryptKey, encrypt, generateKey, readPrivateKey } from 'openpgp';
 import { checkConversation, checkMasterKeys, checkSpaces, checkUser, parseStoredSession } from '../src/lumo/schema';
-import { attachmentAd, conversationAd, decryptBlob, importAesGcm, messageAd, SESSION_AD, spaceAd } from '../src/lumo/crypto';
+import { attachmentAd, conversationAd, decryptBlob, decryptUserSettings, importAesGcm, messageAd, SESSION_AD, spaceAd, userSettingsAd } from '../src/lumo/crypto';
 import { openMasterKey, openMasterKeys, sessionKeyPassword, unlockUserKeys } from '../src/lumo/keys';
-import { decryptChat, decryptListing, shallowMessages, type LumoEntry } from '../src/lumo/chat';
+import { decryptChat, decryptListing, projectInstructions, shallowMessages, type LumoEntry } from '../src/lumo/chat';
 import { renderLumoTranscript, shownBranch } from '../src/lumo/transcript';
 import { TFile } from 'obsidian';
 import { saveLumoChats, type LumoFileSource, type LumoSyncResult } from '../src/lumo/sync';
@@ -501,6 +501,50 @@ async function main() {
 	expect('listing finds the project', listing.entries[0]!.item.project?.name === 'Garden');
 	expect('a chat with wrong associated data is counted, not saved', listing.failed === 1);
 	expect('deleted chats are left out', !listing.entries.some((e) => e.item.uuid === 'C3'));
+
+	// --- AI memory: the settings record and project instructions ---------------------
+	{
+		const settingsRaw = random(32);
+		const settingsKey = await subtle.importKey('raw', settingsRaw, 'AES-GCM', true, ['encrypt']);
+		const wrappedSettings = b64(new Uint8Array(await subtle.wrapKey('raw', settingsKey, kw, 'AES-KW')));
+		const settings = { theme: 'auto', isMemoryEnabled: true, memories: [{ id: 'm1', content: 'Farms near Windhoek.', createdAt: 1767225600000, source: 'user' }], personalization: { nickname: 'Walter', jobRole: 'Farmer', personality: 'default', traits: [], lumoTraits: '', additionalContext: '', enableForNewChats: true } };
+		const record = async (ad: string, key = settingsKey, wrappedKey = wrappedSettings) => b64(pack({ wrappedKey, encrypted: await seal(key, json(settings), ad) }));
+		const AD = '{"app":"lumo","type":"user-settings"}';
+		expect('settings: the associated data is Proton\'s, keys sorted', userSettingsAd() === AD);
+		const opened = await decryptUserSettings(await record(AD), masterKeys, unpack) as typeof settings;
+		expect('settings: the record opens with the account\'s master key', opened.memories[0]!.content === 'Farms near Windhoek.' && opened.personalization.nickname === 'Walter');
+		const wrongAd = await decryptUserSettings(await record('{"app":"lumo","type":"space"}'), masterKeys, unpack).then(() => 'opened', () => 'refused');
+		expect('settings: a record bound to something else is refused', wrongAd === 'refused');
+		const otherMaster = await subtle.importKey('raw', random(32), 'AES-KW', false, ['unwrapKey']);
+		const noKey = await decryptUserSettings(await record(AD), [otherMaster], unpack).then(() => '', (e: unknown) => (e instanceof Error ? e.message : String(e)));
+		expect('settings: another account\'s key does not open it, and says so', /none of this account's Lumo keys/.test(noKey), noKey);
+		const second = await decryptUserSettings(await record(AD), [otherMaster, ...masterKeys], unpack) as typeof settings;
+		expect('settings: an older master key in the list is tried too', second.isMemoryEnabled === true);
+		const iv = random(12);
+		const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: utf8(AD) }, settingsKey, json(settings)));
+		const olderForm = b64(pack({ wrappedKey: wrappedSettings, encrypted: { iv: b64(iv), data: b64(ct) } }));
+		const older = await decryptUserSettings(olderForm, masterKeys, unpack).then((v) => (v as typeof settings).theme, () => 'refused');
+		expect('settings: the older { iv, data } form opens too', older === 'auto', older);
+		const shape = await decryptUserSettings(b64(pack({ something: 'else' })), masterKeys, unpack).then(() => '', (e: unknown) => (e instanceof Error ? e.message : String(e)));
+		expect('settings: a record in another shape stops', /unknown shape/.test(shape), shape);
+
+		const projectSpace = async (id: string, priv: unknown, type: number | undefined = 1) => ({
+			ID: id, SpaceTag: `t-${id}`, SpaceKey: wrapped, CreateTime: '2026-03-01T10:00:00Z', ...(type === undefined ? {} : { SpaceType: type }),
+			Encrypted: await seal(dek, json(priv), spaceAd(`t-${id}`)),
+		});
+		const found = await projectInstructions(checkSpaces({ Code: 1000, Spaces: [
+			await projectSpace('p1', { projectName: 'Garden', projectInstructions: 'Answer in German.' }),
+			await projectSpace('p2', { projectName: 'Taxes', projectInstructions: 'Be exact.', isPrivate: true }),
+			await projectSpace('p3', { projectName: 'Empty', projectInstructions: '  ' }),
+			await projectSpace('p4', { projectName: 'Old style', projectInstructions: 'No SpaceType.', isProject: true }, undefined),
+			await projectSpace('p5', { title: 'a chat space' }, 0),
+			{ ID: 'p6', SpaceTag: 't-p6', SpaceKey: wrapped, SpaceType: 1, CreateTime: '2026-03-01T10:00:00Z', Encrypted: await seal(dek, json({ projectName: 'X', projectInstructions: 'y' }), spaceAd('other')) },
+			{ ...(await projectSpace('p7', { projectName: 'Deleted', projectInstructions: 'gone' })), DeleteTime: '2026-03-02T10:00:00Z' },
+		] }), masterKeys);
+		expect('projects: instructions by project name, sorted; empty, chat spaces and deleted ones left out', found.projects.map((p) => `${p.name}=${p.instructions}`).join(' | ') === 'Garden=Answer in German. | Old style=No SpaceType. | Taxes=Be exact.', found.projects.map((p) => p.name).join());
+		expect('projects: a project marked private is marked so', found.projects.find((p) => p.name === 'Taxes')!.private && !found.projects.find((p) => p.name === 'Garden')!.private);
+		expect('projects: one that cannot be opened is counted', found.unreadable === 1);
+	}
 
 	const space = async (id: string, tag: string, type: number | undefined, priv: unknown) => ({
 		ID: id, SpaceTag: tag, SpaceKey: wrapped, CreateTime: '2026-03-01T10:00:00Z', ...(type === undefined ? {} : { SpaceType: type }),
