@@ -356,6 +356,7 @@ export const DEFAULT_MEMORY: MemorySettings = {
 	claudeWeb: {},
 	chatgptWeb: {},
 	lumoWeb: {},
+	geminiWeb: {},
 	codexLocal: false,
 	claudeCodeLocal: false,
 	states: {},

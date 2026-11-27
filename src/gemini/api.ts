@@ -20,7 +20,9 @@ const START = 'https://gemini.google.com/app';
 const OPEN_TIMEOUT_MS = 45_000;
 const LIST_CHATS = 'MaZiqc';
 const READ_CHAT = 'hNvQHb';
-const ALLOWED = new Set([LIST_CHATS, READ_CHAT]);
+/** Gems: [2, [lang], 0] = your own (AI memory), seen 2026-11-27. */
+const LIST_GEMS = 'CNgdBe';
+const ALLOWED = new Set([LIST_CHATS, READ_CHAT, LIST_GEMS]);
 const LIST_PAGE = 50;
 const TURN_PAGE = 20;
 const MAX_PAGES = 300; // a guard against an endless paging loop
@@ -114,6 +116,11 @@ export class GeminiApi {
 		if (res.status !== 200 || !type.startsWith('image/')) return null;
 		const bytes = await res.arrayBuffer();
 		return bytes.byteLength ? { bytes, type } : null;
+	}
+
+	/** Your own Gems (name, description, instructions), as Gemini sends them. Read only. */
+	async myGems(): Promise<unknown> {
+		return this.call(LIST_GEMS, [2, ['en'], 0]);
 	}
 
 	/** Every turn of a chat, newest first, as Google sends them. */

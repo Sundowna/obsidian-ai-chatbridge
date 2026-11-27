@@ -99,6 +99,21 @@ export function memoryTab(ctx: PanelContext, el: HTMLElement): void {
 			);
 	}
 
+	for (const acc of plugin.settings.gemini) {
+		const state = m.states[`Gemini/${acc.label}`];
+		const last = state ? ` Last snapshot ${when(Date.parse(state.synced))}.` : '';
+		new Setting(el)
+			.setName(plugin.settings.gemini.length > 1 ? `Gemini (${acc.label})` : 'Gemini')
+			.setDesc(`Reads gemini.google.com: your own Gems with their description and instructions. "Instructions for Gemini" cannot be read yet. Nothing there is changed. Gems named Private are left out. Saved under the account "${acc.label}".${last}`)
+			.addToggle((t) =>
+				t.setValue(m.geminiWeb?.[acc.id] === true).onChange(async (v) => {
+					m.geminiWeb = { ...(m.geminiWeb ?? {}), [acc.id]: v };
+					await save();
+					ctx.refresh();
+				}),
+			);
+	}
+
 	new Setting(el).setName('Schedule').setHeading();
 	new Setting(el)
 		.setName('Automatic memory sync (minutes)')

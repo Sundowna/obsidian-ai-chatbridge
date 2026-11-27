@@ -187,7 +187,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			gemini: saved.gemini?.length ? saved.gemini.map(hydrateGemini) : firstGemini(hydratedClaude[0]!.web.chatFolder),
 			desktop: { ...DEFAULT_DESKTOP, ...saved.desktop },
 			hermes: hydrateHermes(saved.hermes, hydratedClaude[0]!.web.chatFolder),
-			memory: { ...DEFAULT_MEMORY, ...saved.memory, states: { ...(saved.memory?.states ?? {}) }, chatgptWeb: { ...(saved.memory?.chatgptWeb ?? {}) }, claudeWeb: { ...(saved.memory?.claudeWeb ?? {}) }, lumoWeb: { ...(saved.memory?.lumoWeb ?? {}) } },
+			memory: { ...DEFAULT_MEMORY, ...saved.memory, states: { ...(saved.memory?.states ?? {}) }, chatgptWeb: { ...(saved.memory?.chatgptWeb ?? {}) }, claudeWeb: { ...(saved.memory?.claudeWeb ?? {}) }, lumoWeb: { ...(saved.memory?.lumoWeb ?? {}) }, geminiWeb: { ...(saved.memory?.geminiWeb ?? {}) } },
 			remote: { ...DEFAULT_REMOTE, ...saved.remote },
 			handoff: { ...DEFAULT_HANDOFF, ...saved.handoff, nowSeen: { ...(saved.handoff?.nowSeen ?? {}) } },
 			lastRuns: { ...(saved.lastRuns ?? {}) },
