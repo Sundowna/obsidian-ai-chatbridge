@@ -34,6 +34,8 @@ export interface GoogleSyncResult {
 	/** Notes you had edited whose chat continued. */
 	edits: EditedReport;
 	stopped?: string;
+	/** The Browser link could not reach the browser (closed, not paired, not logged in there): skipped, not an error. */
+	linkSkipped?: string;
 }
 
 const stemOf = (p: string): string => (p.split('/').pop() ?? '').replace(/\.md$/, '');
@@ -185,6 +187,7 @@ export async function writeLog(plugin: AIChatBridge, site: string, account: Gemi
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount(site, plugin.settings.gemini, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) line += `: ${r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ')}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;
 	if (r.stopped) line += ` – **stopped:** ${r.stopped}`;
+	if (r.linkSkipped) line += ` – **skipped:** ${r.linkSkipped}`;
 	try {
 		await appendLog(plugin.app, plugin.settings.logPath, line, now);
 	} catch (e) {

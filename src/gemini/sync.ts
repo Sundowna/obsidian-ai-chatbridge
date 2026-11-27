@@ -17,6 +17,7 @@ import { emptyResult, failureText, geminiFromRaw, SAME_GOOGLE_LOGIN, sameGoogleL
 import { renderGeminiTranscript } from './transcript';
 import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
+import { BrowserLinkUnavailable } from '../link/errors';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
@@ -58,7 +59,9 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
 		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true } });
 	} catch (e) {
-		if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
+		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
+		if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
+		else if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Gemini's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else if (e instanceof GeminiError) result.stopped = `Gemini refused the request (${e.message}).`;
 		else result.stopped = `Something went wrong while reading Gemini (${failureText(e)}).`;

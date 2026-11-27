@@ -28,7 +28,7 @@ interface Found {
 async function claudeRows(plugin: AIChatBridge, account: ClaudeAccount, delayMs: number, status: Status): Promise<Found> {
 	const auth = await claudeAuth(plugin, account);
 	if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Select "Log in" above first.');
-	return { rows: rowsFromChats(await listAllChats(new ClaudeApi(auth.orgId, auth.getKey, { provider: 'claude', accountId: account.id }), delayMs, status, account.web.includeArchived === true)) };
+	return { rows: rowsFromChats(await listAllChats(new ClaudeApi(auth.orgId, auth.getKey, { provider: 'claude', accountId: account.id }, auth.transport), delayMs, status, account.web.includeArchived === true)) };
 }
 
 async function chatgptRows(plugin: AIChatBridge, account: ChatgptAccount, delayMs: number, status: Status): Promise<Found> {

@@ -1,0 +1,8 @@
+{
+	"name": "chatbridge-browser-link-spike",
+	"private": true,
+	"description": "Stage 0 throwaway test of the Browser link. Not shipped.",
+	"type": "module",
+	"scripts": { "start": "node server.mjs" },
+	"dependencies": { "ws": "^8.18.0" }
+}

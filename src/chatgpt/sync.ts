@@ -7,6 +7,7 @@ import type AIChatBridge from '../main';
 import { loginRef, withAccount } from '../accounts';
 import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
+import { BrowserLinkUnavailable } from '../link/errors';
 import { ShapeError } from '../schema';
 import { OddChats, readOrSkip } from '../odd-chats';
 import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames } from '../select';
@@ -74,6 +75,8 @@ export interface GptSyncResult {
 	incrementalLists: number;
 	resumeAt?: number;
 	stopped?: string;
+	/** The Browser link could not reach the browser (closed, not paired, not logged in there): skipped, not an error. */
+	linkSkipped?: string;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
 	/** Codex cloud tasks (chatgpt.com/codex); also counted in the totals above. */
@@ -682,7 +685,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			const saved = result.newCount + result.changedCount + result.restored.length;
 			result.stopped = `${new GptRateLimitError(deadline).message} Automatic retry scheduled. Hit while ${requestStage}${chat}. Saved ${saved} chat${saved === 1 ? '' : 's'} this run.`;
 			await plugin.saveSettings();
-		} else if (e instanceof StopError) result.stopped = e.message;
+		} else if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message; // Browser link out of reach: skipped, not an error
+		else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `ChatGPT response could not be verified (${e.message}). Saved captures are available for the next run.`;
 		else if (e instanceof CodexCloudShapeError) result.stopped = `Unexpected Codex cloud task data (${e.message}). chatgpt.com may have changed its internal API – nothing more was written.`;
 		else {
@@ -752,6 +756,7 @@ async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyn
 		line += `: ${shown}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;
 	}
 	if (r.stopped) line += ` – **stopped:** ${r.stopped}`;
+	if (r.linkSkipped) line += ` – **skipped:** ${r.linkSkipped}`;
 	try {
 		await appendLog(plugin.app, plugin.settings.logPath, line, now);
 	} catch (e) {
