@@ -4,8 +4,8 @@
 
 - **Memories: See what each AI remembers about you:** Claude, ChatGPT, Claude Code and Codex memories, saved as dated snapshots ([AI memory](#ai-memory)) - so you can tweak behaviour.
 - **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** a low-friction, easy way into Karpathy-style LLM Wikis, second brains and project brains.
-- 	[OneNote Style](https://community.obsidian.md/plugins/onenote-style): The ribbon you already know - fully customisable.
-- 	[OneNote Style theme](https://community.obsidian.md/themes/onenote-style): the look you already know.
+	- [OneNote Style](https://community.obsidian.md/plugins/onenote-style): The ribbon you already know - fully customisable.
+	- [OneNote Style theme](https://community.obsidian.md/themes/onenote-style): the look you already know.
 
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is changed or deleted on their side. The plugin reads the same web pages your browser uses, which can change without notice.
