@@ -19,6 +19,7 @@ import { appendLog } from './log';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, setNoteFlag, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
 import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
+import { ListRead, needsFullList } from './quick-list';
 import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, hasPastedText, pastedFiles, safeFileName, visibleFiles, type PasteMode } from './files';
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
@@ -57,6 +58,8 @@ export interface SyncResult {
 	oddChats: string[];
 	/** Notes whose starred mark was brought up to date without fetching the chat. */
 	flagChanges: number;
+	/** Only the recent part of the chat list was read; the rest was known (quick-list.ts). */
+	quickList?: boolean;
 	/** claude.ai does not offer the chat view (ReadConversation) for this account's plan. */
 	viewUnavailable?: boolean;
 	/** Chats whose Claude-made files were looked up by path instead (chat view not offered). */
@@ -83,8 +86,9 @@ const stemOf = (p: string) => (p.split('/').pop() ?? '').replace(/\.(json|md)$/,
 /**
  * The whole chat list, 30 at a time. With `archived` the archived chats are read too
  * (claude.ai lists them apart) and added to the list; a chat in both is kept once.
+ * `settled` is shown every page and may end that list early.
  */
-export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn, archived = false, observations?: ArchiveObservations, strict = !!observations): Promise<ListItem[]> {
+export async function listAllChats(api: ClaudeApi, delayMs: number, progress: ProgressFn, archived = false, observations?: ArchiveObservations, strict = !!observations, settled?: (page: ListItem[], listArchived: boolean) => boolean): Promise<ListItem[]> {
 	const items: ListItem[] = [];
 	for (const listArchived of archived ? [false, true] : [false]) {
 		let offset = 0;
@@ -97,7 +101,9 @@ export async function listAllChats(api: ClaudeApi, delayMs: number, progress: Pr
 			for (const item of p.data) observations?.add(item.uuid, listArchived);
 			items.push(...p.data);
 			progress(`reading ${listArchived ? 'archived chats' : 'chat list'}… ${items.length} chats`);
-			if (!p.has_more || p.data.length === 0) break;
+			// Quick list: a page with nothing new ends this list early (quick-list.ts).
+			const stop = settled?.(p.data, listArchived) === true;
+			if (!p.has_more || p.data.length === 0 || stop) break;
 			offset += p.data.length;
 		}
 	}
@@ -305,13 +311,26 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Select "Log in" for this account in the plugin settings.');
 		const api = new ClaudeApi(auth.orgId, getKey, { provider: 'claude', accountId: account.id });
 
-		// 1. Read the whole chat list, 30 at a time.
+		// 1. Read the chat list, 30 at a time: all of it, or only its recent part when the rest
+		//    is known from the last runs (quick-list.ts).
 		const observations = s.includeArchived === true ? new ArchiveObservations() : undefined;
 		if (observations && s.separateArchived === true) {
 			result.archive = emptyArchiveReport();
 			progress('checking archived status…');
 		}
-		const items = await listAllChats(api, delayMs, progress, s.includeArchived === true, observations, !!result.archive);
+		const scope = s.includeArchived === true ? 'active+archived' : 'active';
+		const now = Date.now();
+		// A deleted note or raw file comes back from the list: then the whole list is read, never a remembered row.
+		const fileGone = Object.values(s.index).some((entry) => !entry.archiveMove && (!exists(entry.md) || !exists(entry.json)));
+		const read = new ListRead(s.listCatalog, scope, now, fileGone || needsFullList(s.listCatalog, scope, now));
+		await listAllChats(api, delayMs, progress, s.includeArchived === true, undefined, !!result.archive, (page, listArchived) => read.page(page, listArchived));
+		const list = read.done();
+		const items = list.rows.map((row) => row.item);
+		// A remembered row counts as seen where it was last seen (null = in both lists).
+		for (const row of list.rows) for (const where of row.archived === null ? [false, true] : [row.archived]) observations?.add(row.item.uuid, where);
+		s.listCatalog = list.catalog;
+		if (list.changed) await plugin.saveSettings();
+		result.quickList = read.cut;
 		result.listed = items.length;
 
 		// 2. Project filter (uses the project info in the list – no extra requests).
@@ -615,7 +634,11 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		}
 	} catch (e) {
 		const key = getKey();
-		if (pausedBy(e, s, result)) await plugin.saveSettings();
+		const paused = pausedBy(e, s, result);
+		// After a run that failed, the next one reads the whole chat list again (quick-list.ts).
+		if (!paused && s.listCatalog) s.listCatalog.stale = true;
+		if (paused || s.listCatalog) await plugin.saveSettings();
+		if (paused) { /* waiting for the pause to end, not an error */ }
 		else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof CloudShapeError) result.stopped = `Unexpected Claude Code session data (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;
 		else if (e instanceof ShapeError) result.stopped = `Unexpected JSON shape (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;

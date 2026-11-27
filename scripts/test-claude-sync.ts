@@ -14,6 +14,7 @@ import { runSync } from '../src/sync';
 import { followRename } from '../src/follow';
 import { netRetry, NetworkFailure, sendWithRetry, triedText } from '../src/net-retry';
 import { OddChats, readOrSkip } from '../src/odd-chats';
+import { FULL_LIST_EVERY, ListRead, needsFullList, type ListCatalog } from '../src/quick-list';
 import { ShapeError } from '../src/schema';
 import { readWrite } from './fake-vault';
 import { noteHash } from '../src/versions';
@@ -118,9 +119,24 @@ let currentMembership: 'active' | 'archived' | 'both' = 'both';
 let bodyRequests = 0;
 let limited = false;
 let requests = 0;
+/** A long chat list for the quick-list tests, in the order claude.ai hands it out; null = the small fixtures below. */
+let big: { uuid: string; name: string; created_at: string; updated_at: string; project: null }[] | null = null;
 ClaudeApi.prototype.get = async function (path: string) {
 	requests++;
 	if (limited) throw new RateLimitError('claude.ai', Date.now() + 1000);
+	if (big) {
+		let json: unknown;
+		if (path.includes('chat_conversations_v2')) {
+			listed.push(path);
+			const offset = Number(/offset=(\d+)/.exec(path)![1]);
+			json = path.includes('archived=true') ? { data: [], has_more: false } : { data: big.slice(offset, offset + 30), has_more: offset + 30 < big.length };
+		} else {
+			bodyRequests++;
+			const row = big.find((r) => path.includes(r.uuid))!;
+			json = { ...row, chat_messages: [{ uuid: 'q0', sender: 'human', text: `Question in ${row.name}`, content: [{ type: 'text', text: `Question in ${row.name}` }], created_at: row.created_at }] };
+		}
+		return { json, bytes: bytes(json) };
+	}
 	const current = { uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, project, ...(star === undefined ? {} : { is_starred: star }) };
 	if (path.includes('chat_conversations_v2')) listed.push(path);
 	else bodyRequests++;
@@ -536,6 +552,97 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 		const silent = await runSync(plugin, account);
 		expect('starred: a chat list that does not say is never compared', silent.flagChanges === 0);
 		testHooks.requestUrl = null;
+	}
+
+	// Quick list: once a full read has shown that claude.ai lists newest change first, a sync
+	// reads only the pages that hold something new; the rest of the list is remembered.
+	{
+		const quick = addAccount(settings, 'claude', 'Quick') as typeof account;
+		Object.assign(quick.web, { orgId: ORG, secretId: 'key', chatFolder: 'AI/Claude/Quick', downloadFiles: false, cloudSessions: false });
+		const id = (n: number) => `aaaaaaaa-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+		const day = (n: number) => new Date(Date.UTC(2026, 0, 1) + n * 86_400_000).toISOString();
+		// 70 chats, newest change first: three pages of 30, 30 and 10.
+		big = Array.from({ length: 70 }, (_, i) => ({ uuid: id(70 - i), name: `Quick ${70 - i}`, created_at: day(70 - i), updated_at: day(70 - i), project: null }));
+		const pages = async (progress?: (text: string) => void) => {
+			listed.length = 0;
+			const r = await runSync(plugin, quick, progress);
+			return { r, pages: listed.length };
+		};
+		const first = await pages();
+		const catalog = () => quick.web.listCatalog as ListCatalog;
+		expect('quick list: the first sync reads the whole list and remembers it', !first.r.stopped && first.pages === 3 && first.r.newCount === 70 && first.r.quickList === false && catalog().ordered && catalog().rows.length === 70, `${first.pages} pages, ${first.r.newCount} new, ${first.r.stopped ?? ''}`);
+		const second = await pages();
+		expect('quick list: nothing new, so one page is read and every chat still counts', !second.r.stopped && second.pages === 1 && second.r.quickList === true && second.r.listed === 70 && second.r.unchanged === 70, `${second.pages} pages, ${second.r.listed} listed`);
+
+		// An old chat (on the third page) continues: claude.ai moves it to the top.
+		const old = big.splice(64, 1)[0]!;
+		big.unshift({ ...old, updated_at: day(80) });
+		const third = await pages();
+		expect('quick list: an old chat that continues is found on the first page; reading stops at the next page', !third.r.stopped && third.pages === 2 && third.r.changedCount === 1 && third.r.unchanged === 69 && third.r.listed === 70 && quick.web.index[old.uuid]!.updated_at === day(80), `${third.pages} pages, ${third.r.changedCount} changed`);
+		big.unshift({ uuid: id(71), name: 'Quick 71', created_at: day(81), updated_at: day(81), project: null });
+		const fourth = await pages();
+		expect('quick list: a new chat is saved, the list is one longer', fourth.pages === 2 && fourth.r.newCount === 1 && fourth.r.listed === 71 && catalog().rows.length === 71 && catalog().rows[0]!.item.uuid === id(71), `${fourth.pages} pages, ${fourth.r.listed} listed`);
+
+		// A deleted note of an old chat comes back: the whole list is read for that.
+		const goneNote = quick.web.index[id(1)]!.md;
+		files.delete(goneNote);
+		const fifth = await pages();
+		expect('quick list: a deleted note means a full read, and the note is restored', fifth.pages === 3 && fifth.r.quickList === false && fifth.r.restored.length === 1 && files.has(goneNote), `${fifth.pages} pages, ${fifth.r.restored.length} restored`);
+
+		// Once a week the whole list is read: a chat deleted on claude.ai leaves the remembered list.
+		big = big.filter((r) => r.uuid !== id(2));
+		const sixth = await pages();
+		expect('quick list: within the week a chat deleted on claude.ai is still remembered', sixth.pages === 1 && sixth.r.listed === 71);
+		catalog().fullAt = Date.now() - FULL_LIST_EVERY - 1000;
+		const weekly = await pages();
+		expect('quick list: after a week the whole list is read again', weekly.pages === 3 && weekly.r.listed === 70 && catalog().rows.length === 70 && Date.now() - catalog().fullAt < 60_000, `${weekly.pages} pages, ${weekly.r.listed} listed`);
+
+		// A run that fails: the next one reads everything.
+		const failed = await pages((text) => { if (text.includes('checking older chats')) throw new StopError('boom'); });
+		expect('quick list: a failed run is remembered', failed.r.stopped === 'boom' && catalog().stale === true);
+		const after = await pages();
+		expect('quick list: after a failed run the whole list is read', after.pages === 3 && !after.r.stopped && catalog().stale === undefined);
+
+		// A 429 is a pause, not a failure: the remembered list stays good.
+		limited = true;
+		const paused = await pages();
+		limited = false;
+		quick.web.cooldownUntil = undefined;
+		quick.web.resumeAfter429 = undefined;
+		expect('quick list: a rate-limit pause does not force a full read', paused.r.resumeAt !== undefined && catalog().stale === undefined && (await pages()).pages === 1);
+
+		// Also reading archived chats is another list: read in full once.
+		quick.web.includeArchived = true;
+		const scoped = await pages();
+		expect('quick list: a changed scope means a full read', scoped.pages === 4 && catalog().scope === 'active+archived', `${scoped.pages} pages`);
+		quick.web.includeArchived = false;
+		await pages();
+
+		// A list that is not newest change first is never cut short.
+		const swap = big[40]!;
+		big[40] = big[41]!;
+		big[41] = swap;
+		catalog().fullAt = 0;
+		const unordered = await pages();
+		const still = await pages();
+		expect('quick list: a list in another order is read in full every time', unordered.pages === 3 && !catalog().ordered && still.pages === 3 && still.r.quickList === false, `${unordered.pages} and ${still.pages} pages`);
+		expect('quick list: the remembered list keeps only what the sync uses', Object.keys(catalog().rows[0]!.item).sort().join() === 'created_at,name,project,updated_at,uuid');
+		big = null;
+
+		// The rules by themselves.
+		const row = (n: number, at: number) => ({ uuid: id(n), name: `c${n}`, created_at: day(1), updated_at: day(at) });
+		const cat: ListCatalog = { scope: 'active', fullAt: 1000, ordered: true, rows: [{ item: row(2, 5), archived: false }, { item: row(1, 4), archived: false }] };
+		expect('quick list rules: when the whole list is needed', needsFullList(undefined, 'active', 2000) && !needsFullList(cat, 'active', 2000) && needsFullList(cat, 'active+archived', 2000) && needsFullList({ ...cat, ordered: false }, 'active', 2000) && needsFullList({ ...cat, stale: true }, 'active', 2000) && needsFullList(cat, 'active', 1000 + FULL_LIST_EVERY) && needsFullList(cat, 'active', 500));
+		const cutRead = new ListRead(cat, 'active', 2000, false);
+		expect('quick list rules: a page of known rows stops the read, an empty one does not', !new ListRead(cat, 'active', 2000, false).page([], false) && cutRead.page([row(2, 5)], false) && cutRead.done().rows.length === 2 && cutRead.done().catalog.fullAt === 1000 && !cutRead.done().changed);
+		const moved = new ListRead(cat, 'active', 2000, false);
+		expect('quick list rules: a row that changed, is new, or sits in the other list does not stop it', !moved.page([row(2, 6)], false) && !new ListRead(cat, 'active', 2000, false).page([row(3, 9)], false) && !new ListRead(cat, 'active', 2000, false).page([row(2, 5)], true) && !new ListRead(cat, 'active', 2000, true).page([row(2, 5)], false));
+		const both = new ListRead(undefined, 'active+archived', 2000, true);
+		both.page([row(2, 5)], false);
+		both.page([row(2, 5)], true);
+		expect('quick list rules: a chat in both lists is kept once and marked so', both.done().rows.length === 1 && both.done().rows[0]!.archived === null && both.done().catalog.ordered);
+		const wrong = new ListRead(cat, 'active', 2000, false);
+		expect('quick list rules: rows out of order end the trust', !wrong.page([row(1, 4), row(2, 5)], false) && !wrong.done().catalog.ordered && wrong.done().changed);
 	}
 
 	// A 429 pauses this one account: the run waits (not an error), nothing is asked while the
