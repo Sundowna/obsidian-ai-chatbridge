@@ -7,6 +7,8 @@ import { sandboxKey } from '../src/chatgpt/files';
 import { checkGptChat, checkGptOlderPage } from '../src/chatgpt/schema';
 import { DEFAULT_SETTINGS, DEFAULT_GPT } from '../src/settings';
 import AIChatBridge, { formatClock } from '../src/main';
+import { normalizeSettings } from '../src/migrate';
+import { forgetLogin } from '../src/login-check';
 import { RateLimitError, StopError } from '../src/api';
 import { LumoApi } from '../src/lumo/api';
 import { DESKTOP_ALL } from '../src/last-run';
@@ -1569,7 +1571,155 @@ async function testResizedPhotoSaved() {
 	console.log('Resized photo passed: a real image of another size is saved; a fake image and other files of the wrong size still wait.');
 }
 
+/** "Any connected browser" passes over a browser another account (any provider) picked; names follow the User-Agent, a chosen name stays. */
+function testPluginBrowserWiring() {
+	const expect = (label: string, ok: boolean, detail?: unknown) => assert(ok, `${label} ${String(detail ?? "")}`);
+	const { settings } = normalizeSettings({
+		claude: [{ id: 'c-work', label: 'Work', web: { loginMethod: 'browser', linkBrowser: 'edge-01' } }, { id: 'c-home', label: 'Home', web: { loginMethod: 'browser' } }],
+		gemini: [{ id: 'g-home', label: 'Google', web: { loginMethod: 'browser' } }],
+	});
+	let linked = ['edge-01', 'chrome-01'];
+	const local = new Map<string, unknown>();
+	const plugin = Object.assign(new AIChatBridge(), {
+		settings,
+		app: { loadLocalStorage: (k: string) => local.get(k) ?? null, saveLocalStorage: (k: string, v: unknown) => void local.set(k, structuredClone(v)) },
+	});
+	Object.defineProperty(plugin, 'browserLink', { value: { server: { linkedBrowsers: () => linked } } });
+	expect('plugin wiring: an account\'s own browser wins', plugin.linkBrowserFor({ provider: 'claude', id: 'c-work' }) === 'edge-01');
+	expect('plugin wiring: "Any connected browser" passes over the browser another account picked', plugin.linkBrowserFor({ provider: 'claude', id: 'c-home' }) === 'chrome-01', plugin.linkBrowserFor({ provider: 'claude', id: 'c-home' }));
+	expect('plugin wiring: a pick by a Claude account also counts for a Gemini account', plugin.linkBrowserFor({ provider: 'gemini', id: 'g-home' }) === 'chrome-01');
+	linked = ['edge-01'];
+	expect('plugin wiring: with only the picked browser connected, "Any" takes whichever is there', plugin.linkBrowserFor({ provider: 'claude', id: 'c-home' }) === undefined);
+
+	const nameByKind = (b: string, k: string | undefined) => (plugin as unknown as { nameByKind(b: string, k: string | undefined): void }).nameByKind(b, k);
+	plugin.setBrowserName('edge-01', 'Browser 1');
+	nameByKind('edge-01', 'Edge');
+	plugin.setBrowserName('chrome-01', 'Chrome');
+	plugin.setBrowserName('chrome-02', 'Browser 3');
+	nameByKind('chrome-02', 'Chrome');
+	plugin.setBrowserName('work-01', 'Work profile');
+	nameByKind('work-01', 'Chrome');
+	nameByKind('new-01', undefined);
+	const names = plugin.browserNames();
+	expect('browser names (plugin): a made-up name becomes the browser\'s kind', names['edge-01'] === 'Edge', names['edge-01']);
+	expect('browser names (plugin): a second browser of a kind gets a number', names['chrome-02'] === 'Chrome 2', names['chrome-02']);
+	expect('browser names (plugin): a name you chose is never replaced', names['work-01'] === 'Work profile', names['work-01']);
+	expect('browser names (plugin): no kind, no name made up', !('new-01' in names));
+	plugin.setBrowserName('edge-01', '   ');
+	expect('browser names (plugin): Rename to blanks keeps the old name', plugin.browserNames()['edge-01'] === 'Edge');
+}
+
+
+/** Login check (FEATURES section 5, "Login check, every Claude, ChatGPT and Gemini account"), driven through runGptSync: added by audit 2026-11-27. */
+async function testLoginCheckSync() {
+	const chatId = '22222222-3333-4444-5555-666666666666';
+	const chat = {
+		conversation_id: chatId, title: 'Mine', create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [
+			{ id: 'u1', author: { role: 'user' }, create_time: 1793955600, content: { content_type: 'text', parts: ['Hello'] } },
+			{ id: 'a1', author: { role: 'assistant' }, create_time: 1793955610, content: { content_type: 'text', parts: ['Hi'] }, recipient: 'all', channel: 'final' },
+		],
+		page_info: { has_previous_page: false },
+	};
+	let who = 'account:login-home';
+	const h = harness();
+	const connect = GptApi.connect;
+	GptApi.connect = async () => ({
+		inventoryKey: who,
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: (id: string) => 'chat:' + id,
+		olderPath: () => 'older',
+		redact: (value: string) => value,
+		get: async (path: string) => {
+			if (path === 'list:0:false:false') return raw({ items: [{ id: chatId, title: 'Mine', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat:' + chatId) return raw(chat);
+			throw new Error('Unexpected request ' + path);
+		},
+	} as unknown as GptApi);
+	try {
+		const web = h.settings.chatgpt[0]!.web;
+		h.settings.maxChatsPerRun = 0;
+		const first = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(first.stopped, undefined, 'the first sync takes the login it finds');
+		assert.equal(web.loginUser, 'account:login-home', 'the first login is remembered');
+		assert.equal(first.newCount, 1);
+
+		// Someone logs the login window in to another ChatGPT account: nothing of it is saved here.
+		who = 'account:login-work';
+		const filesBefore = h.entries.size;
+		const other = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert((other.stopped ?? '').includes('this account belongs to'), `another login stops the sync: ${other.stopped}`);
+		assert.equal(other.newCount, 0, 'nothing of the other login is saved');
+		assert.equal(h.entries.size, filesBefore, 'no file written');
+		assert.equal(web.loginUser, 'account:login-home', 'the remembered login stays');
+
+		// "Accept this login" forgets it; the next sync takes the new one.
+		forgetLogin(web);
+		const accepted = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(accepted.stopped, undefined, 'after Accept this login the sync runs');
+		assert.equal(web.loginUser, 'account:login-work');
+	} finally {
+		GptApi.connect = connect;
+	}
+	console.log('Login check passed: ChatGPT remembers its first login, stops on another one without saving, and takes a new one after Accept this login.');
+}
+
+/** ChatGPT pinned (FEATURES section 7, "ChatGPT pinned"): a pinned chat's note gets `pinned: true`; an unpin removes it on the next sync. Added by audit 2026-11-27 (removing the property passed every suite). */
+async function testPinnedProperty() {
+	const chatId = '33333333-4444-5555-6666-777777777777';
+	const chat = {
+		conversation_id: chatId, title: 'Pinned one', create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [
+			{ id: 'u1', author: { role: 'user' }, create_time: 1793955600, content: { content_type: 'text', parts: ['Keep this'] } },
+			{ id: 'a1', author: { role: 'assistant' }, create_time: 1793955610, content: { content_type: 'text', parts: ['Kept'] }, recipient: 'all', channel: 'final' },
+		],
+		page_info: { has_previous_page: false },
+	};
+	let pinned = true;
+	const row = { id: chatId, title: 'Pinned one', create_time: date, update_time: date, gizmo_id: null };
+	const h = harness();
+	const connect = GptApi.connect;
+	GptApi.connect = async () => ({
+		inventoryKey: 'account:pinned-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pin = false) => 'list:' + [offset, tpp, archived].join(':') + (pin ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: (id: string) => 'chat:' + id,
+		olderPath: () => 'older',
+		redact: (value: string) => value,
+		get: async (path: string) => {
+			if (path === 'list:0:false:false') return raw({ items: [row], offset: 0, total: 1 });
+			if (path === 'list:0:false:false:pinned') return raw({ items: pinned ? [row] : [], offset: 0, total: pinned ? 1 : 0 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat:' + chatId) return raw(chat);
+			throw new Error('Unexpected request ' + path);
+		},
+	} as unknown as GptApi);
+	try {
+		const web = h.settings.chatgpt[0]!.web;
+		h.settings.maxChatsPerRun = 0;
+		const first = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(first.stopped, undefined);
+		const note = () => h.read(web.index[chatId]!.md);
+		assert.match(note(), /^updated: .*\npinned: true$/m, 'a pinned chat\'s note has pinned: true after updated');
+		pinned = false;
+		const second = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(second.stopped, undefined);
+		assert(!note().includes('pinned:'), 'unpinned in ChatGPT: the property is gone after the next sync');
+		pinned = true;
+		await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.match(note(), /^pinned: true$/m, 'pinned again: the property is back');
+	} finally {
+		GptApi.connect = connect;
+	}
+	console.log('Pinned passed: a pinned ChatGPT chat is marked pinned: true, and a pin or unpin shows at the next sync.');
+}
+
 async function main() {
+	testPluginBrowserWiring();
 	await testFileForbiddenSkipsFile();
 	await testNetworkErrorRetried();
 	await testLibraryFileLink();
@@ -1585,6 +1735,8 @@ async function main() {
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();
 	await testOddChatAndReasoning();
+	await testLoginCheckSync();
+	await testPinnedProperty();
 	await testLibraryFileSync();
 	await testRefusedDownloadAndGoneFile();
 	await testResizedPhotoSaved();
