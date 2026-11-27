@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Notice, Platform, TFile, TFolder, testHooks } from 'obsidian';
-import { BlockedLinkError, GptApi, sandboxLink } from '../src/chatgpt/api';
+import { BlockedLinkError, GptApi, NETWORK_RETRY_WAITS_MS, sandboxLink } from '../src/chatgpt/api';
 import { runGptSync } from '../src/chatgpt/sync';
 import { GptRateLimitError, retryDeadline } from '../src/chatgpt/recovery';
 import { sandboxKey } from '../src/chatgpt/files';
@@ -1083,6 +1083,45 @@ async function testFileForbiddenSkipsFile() {
 	console.log('File 403 passed: a JSON 403 on one file skips that file (#48); an HTML 403 or a 403 on a chat still stops.');
 }
 
+/** Issue #48: a GET that fails below HTTP (broken TLS) is tried again; only repeated failures stop. The POST is never repeated. */
+async function testNetworkErrorRetried() {
+	const CHAT = '6b07f8d8-f574-83ea-881e-18216fb4a0c8';
+	const api = Object.create(GptApi.prototype) as GptApi;
+	const waits: number[] = [];
+	Object.assign(api, { cookie: 'c', deviceId: null, ua: 'test', token: 'key', login: { id: 'a' }, pause: async (ms: number) => { waits.push(ms); } });
+	let failures = 0;
+	let calls = 0;
+	testHooks.requestUrl = async () => {
+		calls++;
+		if (calls <= failures) throw new Error('net::ERR_SSL_BAD_RECORD_MAC_ALERT');
+		return { status: 200, headers: { 'content-type': 'application/json' }, text: '{"ok":true}', arrayBuffer: new ArrayBuffer(0), json: null };
+	};
+	try {
+		failures = 1;
+		const got = await api.get(`/backend-api/conversations/${CHAT}`);
+		assert.deepEqual(got.json, { ok: true }, 'one broken connection: the second try gets the answer');
+		assert.equal(calls, 2);
+		assert.deepEqual(waits, [NETWORK_RETRY_WAITS_MS[0]]);
+
+		calls = 0; waits.length = 0; failures = 2;
+		await api.get(`/backend-api/conversations/${CHAT}`);
+		assert.equal(calls, 3, 'two broken connections: the third try gets the answer');
+		assert.deepEqual(waits, NETWORK_RETRY_WAITS_MS);
+
+		calls = 0; waits.length = 0; failures = 99;
+		await assert.rejects(api.get(`/backend-api/conversations/${CHAT}`), (e: unknown) => e instanceof StopError && /ERR_SSL_BAD_RECORD_MAC_ALERT/.test(e.message) && /tried 3 times/.test(e.message), 'every try broken: the sync stops and names the error');
+		assert.equal(calls, 3, 'no more than three tries');
+
+		calls = 0; waits.length = 0; failures = 99;
+		await assert.rejects(api.memorySummaryStream(), (e: unknown) => e instanceof StopError && !/tried/.test(e.message), 'the memory summary POST is not sent twice');
+		assert.equal(calls, 1);
+		assert.deepEqual(waits, []);
+	} finally {
+		testHooks.requestUrl = null;
+	}
+	console.log('Network retry passed: a broken connection on a ChatGPT GET is tried up to 3 times (#48); the POST is sent once.');
+}
+
 /** A Library file link exactly as chatgpt.com handed it out (seen 2026-11-26, IDs made up). */
 const LIB_FILE = 'file_00000000aa1181f4b25c2516dad77baa';
 const LIB_LINK = `https://chatgpt.com/api/library/files/libfile_a1ccd46a034c8191ad570fbdf773da5a/project-content?file_id=${LIB_FILE}`;
@@ -1220,6 +1259,7 @@ async function testLibraryFileSync() {
 
 async function main() {
 	await testFileForbiddenSkipsFile();
+	await testNetworkErrorRetried();
 	await testLibraryFileLink();
 	await testSandboxJsonAnswer();
 	assert.equal(retryDeadline('120', 1000), 121000);
