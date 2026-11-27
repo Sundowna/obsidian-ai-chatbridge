@@ -7,7 +7,7 @@ import type { RequestUrlResponse } from 'obsidian';
 import { BrowserLinkUnavailable } from '../link/errors';
 import type { LinkServer } from '../link/server';
 import type { PastedCookies } from '../login';
-import type { PageAnswer, PageCall, ReadyCheck, SitePage, SiteRequest, Transport } from './types';
+import type { PageAnswer, PageCall, PageValue, ReadyCheck, SitePage, SiteRequest, Transport } from './types';
 
 /** The site's name in messages ("Not logged in to Gemini in your browser"). */
 function siteName(url: string): string {
@@ -104,6 +104,7 @@ export class BrowserLinkTransport implements Transport {
 		}
 		return {
 			call: (c: PageCall): Promise<PageAnswer> => s.call(page, c),
+			read: (v: PageValue): Promise<string> => s.read(page, v),
 			close: () => void s.closePage(page),
 		};
 	}

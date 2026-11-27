@@ -69,3 +69,14 @@ export const untagAccount = (md: string): string => md.replace(/^(---\r?\n)accou
 export function baseName(createdAt: string, name: string): string {
 	return `${localDate(createdAt)} ${safeTitle(name)}`;
 }
+
+/**
+ * The `model` property of a chat note: the models that answered, each once, in the order used.
+ * One model is a plain value, several are a list; none (the service did not say) gives no line.
+ */
+export function modelProperty(models: readonly unknown[]): string[] {
+	const seen = [...new Set(models.filter((m): m is string => typeof m === 'string' && m.trim() !== '').map((m) => m.trim()))];
+	if (!seen.length) return [];
+	if (seen.length === 1) return [`model: ${JSON.stringify(seen[0])}`];
+	return ['model:', ...seen.map((m) => `  - ${JSON.stringify(m)}`)];
+}

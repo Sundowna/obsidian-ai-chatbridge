@@ -185,11 +185,12 @@ async function run(): Promise<void> {
 		['opening another site', { op: 'open', url: 'https://example.com/', ready: 'loaded', timeoutMs: 5000 }],
 		['an unknown ready check', { op: 'open', url: 'https://gemini.google.com/app', ready: 'document.cookie', timeoutMs: 5000 }],
 		['a signed call in a page it did not open', { op: 'call', page: 'p999', call: { url: 'https://gemini.google.com/', method: 'POST', headers: {}, body: '', sign: 'wiz-at' } }],
+		['a page value in a page it did not open', { op: 'read', page: 'p999', value: 'google-account-id' }],
 		['an unknown request', { op: 'eval', code: '1' }],
 	] as const) {
 		const e = await rejection(raw(req, 15_000));
 		// Refused by the extension's own check, not failed later for some other reason.
-		const want = req.op === 'call' ? /could not open the site/ : /not on its list of allowed sites/;
+		const want = req.op === 'call' || req.op === 'read' ? /could not open the site/ : /not on its list of allowed sites/;
 		expect(`extension refuses ${label}`, !!e && want.test(e.message), e?.message);
 	}
 	expect('tabs: nothing was opened for refused requests', (await tabsOn('example.com')) === 0);

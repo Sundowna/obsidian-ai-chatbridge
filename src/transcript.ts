@@ -1,7 +1,8 @@
 // Turns a chat's JSON into a plain Markdown transcript. Pure code, no AI.
 
 import type { Chat, ChatMessage, ContentBlock, FileRef } from './types';
-import { localDateTime } from './naming';
+import { localDateTime, modelProperty } from './naming';
+import { fitsInline, PASTE_PREVIEW_LINES, pastedLines, pastedText, type PastedText, type PasteMode } from './files';
 
 const ROOT_PARENT = '00000000-0000-4000-8000-000000000000';
 
@@ -37,7 +38,12 @@ const TOOL_PLACEHOLDER = /^```\s*\n?\s*This block is not supported on your curre
 
 type Part = { kind: 'text'; md: string } | { kind: 'tool' } | null;
 
-function blockToPart(b: ContentBlock): Part {
+/** Claude's reasoning as a folded callout, like Gemini's and Lumo's notes show theirs. */
+function reasoningCallout(text: string): string {
+	return ['> [!note]- Reasoning', ...text.trim().split('\n').map((l) => `> ${l}`)].join('\n');
+}
+
+function blockToPart(b: ContentBlock, showReasoning = false): Part {
 	switch (b.type) {
 		case 'text': {
 			const t = typeof b.text === 'string' ? b.text.trim() : '';
@@ -46,8 +52,12 @@ function blockToPart(b: ContentBlock): Part {
 		}
 		case 'tool_use':
 			return { kind: 'tool' };
-		case 'thinking':
-		case 'redacted_thinking': // Claude's private reasoning: kept in the raw JSON, left out here.
+		case 'thinking': {
+			// Claude's reasoning: always in the raw JSON; in the note only when the account's switch is on.
+			const t = showReasoning && typeof b.thinking === 'string' ? b.thinking.trim() : '';
+			return t ? { kind: 'text', md: reasoningCallout(t) } : null;
+		}
+		case 'redacted_thinking': // Reasoning claude.ai does not show: kept in the raw JSON, left out here.
 		case 'tool_result': // Machine output: kept in the raw JSON.
 			return null;
 		default:
@@ -73,7 +83,34 @@ function fileLines(list: FileRef[] | undefined, filePaths: Map<string, string>):
 	return out;
 }
 
-function messageBody(m: ChatMessage, filePaths: Map<string, string>): string {
+const quoted = (lines: string[]): string[] => lines.map((l) => (l ? `> ${l}` : '>'));
+
+/**
+ * Text claude.ai keeps in the chat (issue #64), always as a callout with every line quoted, so
+ * headings in the pasted text never become headings of the transcript. Up to 5 lines: all of
+ * it. Longer: with "note", all of it; else a saved file's link with its first 5 lines, or (no
+ * file saved) all of it folded.
+ */
+function pastedLine(p: PastedText, filePaths: Map<string, string>, mode: PasteMode): string {
+	const label = p.fileName || 'Pasted text';
+	const lines = pastedLines(p.text);
+	if (fitsInline(p.text)) return [`> [!quote] ${label}`, ...quoted(lines)].join('\n');
+	const count = `(${lines.length} lines)`;
+	const path = mode === 'file' && p.key ? filePaths.get(p.key) : undefined;
+	if (path) return [`> [!quote] [[${path}|${label}]] ${count}`, ...quoted(lines.slice(0, PASTE_PREVIEW_LINES)), '> …'].join('\n');
+	return [`> [!quote]${mode === 'note' ? '' : '-'} ${label} ${count}`, ...quoted(lines)].join('\n');
+}
+
+function attachmentLines(list: FileRef[] | undefined, filePaths: Map<string, string>, mode: PasteMode): string[] {
+	const out: string[] = [];
+	for (const a of list ?? []) {
+		const pasted = a.file_uuid && filePaths.has(a.file_uuid) ? null : pastedText(a);
+		out.push(...(pasted ? [pastedLine(pasted, filePaths, mode)] : fileLines([a], filePaths)));
+	}
+	return out;
+}
+
+function messageBody(m: ChatMessage, filePaths: Map<string, string>, mode: PasteMode, showReasoning = false): string {
 	const out: string[] = [];
 	let tools = 0; // consecutive tool steps, merged into one line
 	const flushTools = () => {
@@ -82,7 +119,7 @@ function messageBody(m: ChatMessage, filePaths: Map<string, string>): string {
 	};
 	if (Array.isArray(m.content) && m.content.length > 0) {
 		for (const b of m.content) {
-			const p = blockToPart(b);
+			const p = blockToPart(b, showReasoning);
 			if (!p) continue;
 			if (p.kind === 'tool') tools++;
 			else {
@@ -94,7 +131,7 @@ function messageBody(m: ChatMessage, filePaths: Map<string, string>): string {
 	} else if (typeof m.text === 'string' && m.text.trim()) {
 		out.push(m.text.trim());
 	}
-	out.push(...fileLines(m.attachments, filePaths), ...fileLines(m.files, filePaths));
+	out.push(...attachmentLines(m.attachments, filePaths, mode), ...fileLines(m.files, filePaths));
 	return out.join('\n\n') || '*(no text)*';
 }
 
@@ -116,6 +153,10 @@ export interface TranscriptMeta {
 	filePaths?: Map<string, string>;
 	/** Files shown in claude.ai's chat view that are not mentioned in the chat data. */
 	extraFiles?: { name: string; path: string }[];
+	/** Put Claude's reasoning into the note, folded. Off unless the account's switch is on. */
+	showReasoning?: boolean;
+	/** Long pasted text: linked file with a preview, or all of it in the note (issue #64). */
+	pasteMode?: PasteMode;
 }
 
 export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
@@ -127,6 +168,9 @@ export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
 		`updated: ${chat.updated_at}`,
 	];
 	if (meta.projectName) fm.push(`project: ${y(meta.projectName)}`);
+	if (chat.is_starred === true) fm.push('starred: true');
+	// claude.ai names the chat's model at the top of its data (seen 2026-11-27).
+	fm.push(...modelProperty([(chat as unknown as { model?: unknown }).model]));
 	fm.push(`raw: ${y(`[[${meta.jsonFileName}]]`)}`, 'unread: true', '---', '');
 
 	const { messages, hasOtherBranches } = activeBranch(chat);
@@ -139,7 +183,7 @@ export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
 	}
 	for (const m of messages) {
 		const when = m.created_at ? ` · ${localDateTime(m.created_at)}` : '';
-		body.push(`## ${speaker(m.sender)}${when}`, '', messageBody(m, meta.filePaths ?? new Map<string, string>()), '');
+		body.push(`## ${speaker(m.sender)}${when}`, '', messageBody(m, meta.filePaths ?? new Map<string, string>(), meta.pasteMode ?? 'file', meta.showReasoning === true), '');
 	}
 	if (meta.extraFiles?.length) {
 		body.push('## Files', '');

@@ -61,6 +61,17 @@ export async function pageCall(c: { url: string; method: string; headers: Record
 	return { status: 400, text: '', headers: {} };
 }
 
+/** Named page values (not secret): the same values the plugin's login window reads. */
+export function pageRead(name: string): string {
+	const w = (window as unknown as { WIZ_global_data?: Record<string, unknown> }).WIZ_global_data ?? {};
+	switch (name) {
+		case 'google-account-id':
+			return typeof w.S06Grb === 'string' ? w.S06Grb : '';
+		default:
+			return '';
+	}
+}
+
 /** Named ready checks: the same tests the plugin's login window uses. */
 export function readyCheck(name: string): boolean {
 	const w = (window as unknown as { WIZ_global_data?: Record<string, unknown> }).WIZ_global_data ?? {};

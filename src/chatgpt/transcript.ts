@@ -2,7 +2,7 @@
 // One section per turn: your message, then everything ChatGPT did until your next
 // message (tool steps collapsed to one line, generated images embedded).
 
-import { localDateTime } from '../naming';
+import { localDateTime, modelProperty } from '../naming';
 import { fallbackMarkdown, imageParts, pointerId, sandboxKey, sandboxLinks } from './files';
 import type { GptChat, GptMessage, GptPart } from './types';
 import { citeSources, formatCites, type CiteSources } from './cites';
@@ -70,7 +70,22 @@ export function cleanMarkers(text: string, references?: unknown, sources?: CiteS
 }
 
 /** What one message adds to the transcript. */
-function pieces(m: GptMessage, chatId: string, filePaths: Map<string, string>): Piece[] {
+/** ChatGPT's reasoning as a folded callout: each thought's heading and text, as chatgpt.com keeps them. */
+function reasoningCallout(thoughts: unknown): string {
+	const lines: string[] = [];
+	for (const t of Array.isArray(thoughts) ? thoughts : []) {
+		const r = asRecord(t);
+		const summary = typeof r.summary === 'string' ? r.summary.trim() : '';
+		const content = typeof r.content === 'string' ? r.content.trim() : '';
+		if (!summary && !content) continue;
+		if (lines.length) lines.push('');
+		if (summary) lines.push(`**${summary}**`);
+		if (content) lines.push(...content.split('\n'));
+	}
+	return lines.length ? ['> [!note]- Reasoning', ...lines.map((l) => (l ? `> ${l}` : '>'))].join('\n') : '';
+}
+
+function pieces(m: GptMessage, chatId: string, filePaths: Map<string, string>, showReasoning = false): Piece[] {
 	const out: Piece[] = [];
 	const c = m.content;
 	const role = m.author.role;
@@ -143,8 +158,11 @@ function pieces(m: GptMessage, chatId: string, filePaths: Map<string, string>): 
 			if (role === 'tool' && imageParts(m).length === 0) return [{ kind: 'tool' }];
 			return out;
 		}
-		// ChatGPT's private reasoning: kept in the raw JSON, left out here.
-		case 'thoughts':
+		// ChatGPT's reasoning: always in the raw JSON; in the note only when the account's switch is on.
+		case 'thoughts': {
+			const md = showReasoning ? reasoningCallout((c as unknown as { thoughts?: unknown }).thoughts) : '';
+			return md ? [{ kind: 'text', md }] : [];
+		}
 		case 'reasoning_recap':
 		case 'model_editable_context':
 			return [];
@@ -163,6 +181,8 @@ export interface GptTranscriptMeta {
 	projectName?: string;
 	jsonFileName: string;
 	filePaths?: Map<string, string>;
+	/** Put ChatGPT's reasoning into the note, folded. Off unless the account's switch is on. */
+	showReasoning?: boolean;
 }
 
 export function renderGptTranscript(chat: GptChat, meta: GptTranscriptMeta): string {
@@ -174,6 +194,10 @@ export function renderGptTranscript(chat: GptChat, meta: GptTranscriptMeta): str
 		`updated: ${isoFromUnix(chat.update_time)}`,
 	];
 	if (meta.projectName) fm.push(`project: ${y(meta.projectName)}`);
+	// The models that answered, as each answer names it; without any, the chat's own default.
+	const answered = chat.messages.filter((m) => m.author.role === 'assistant').map((m) => m.metadata?.model_slug);
+	const models = modelProperty(answered);
+	fm.push(...(models.length ? models : modelProperty([(chat as unknown as { default_model_slug?: unknown }).default_model_slug])));
 	fm.push(`raw: ${y(`[[${meta.jsonFileName}]]`)}`, 'unread: true', '---', '');
 
 	const filePaths = meta.filePaths ?? new Map<string, string>();
@@ -204,7 +228,7 @@ export function renderGptTranscript(chat: GptChat, meta: GptTranscriptMeta): str
 			when = typeof m.create_time === 'number' ? ` · ${localDateTime(isoFromUnix(m.create_time))}` : '';
 		}
 		answerFinished = who === 'ChatGPT' && m.channel === 'final';
-		for (const p of pieces(m, chat.conversation_id, filePaths)) {
+		for (const p of pieces(m, chat.conversation_id, filePaths, meta.showReasoning === true)) {
 			if (p.kind === 'tool') tools++;
 			else {
 				flushTools();

@@ -5,7 +5,7 @@
 
 import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from 'obsidian';
 import { GEMINI_SIGNED_IN, hasLoginFetch, isLoggedIn, loginFetch, openReadyPage, type LoginRef, type PastedCookies } from '../login';
-import type { PageAnswer, PageCall, ReadyCheck, SitePage, SiteRequest, Transport } from './types';
+import type { PageAnswer, PageCall, PageValue, ReadyCheck, SitePage, SiteRequest, Transport } from './types';
 
 /** AI Studio's public API key, as its page carries it. */
 const STUDIO_KEY_IN_PAGE = String.raw`(document.documentElement.innerHTML.match(/"WIu0Nc":"(AIza[\w-]{35})"/) || [])[1]`;
@@ -14,6 +14,11 @@ const STUDIO_KEY_IN_PAGE = String.raw`(document.documentElement.innerHTML.match(
 export const READY_CODE: Record<ReadyCheck, string> = {
 	'gemini-signed-in': GEMINI_SIGNED_IN,
 	'studio-ready': `location.origin === "https://aistudio.google.com" && /(?:^|; )SAPISID=/.test(document.cookie) && !!${STUDIO_KEY_IN_PAGE}`,
+};
+
+/** The page code for each named page value; it produces a string. */
+export const READ_CODE: Record<PageValue, string> = {
+	'google-account-id': `String((window.WIZ_global_data || {}).S06Grb || '')`,
 };
 
 /**
@@ -85,6 +90,7 @@ export class LoginWindowTransport implements Transport {
 		return {
 			close: () => page.close(),
 			call: async (c) => JSON.parse(await page.run(pageCallCode(c))) as PageAnswer,
+			read: (v) => page.run(READ_CODE[v]),
 		};
 	}
 }

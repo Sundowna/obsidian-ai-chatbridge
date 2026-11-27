@@ -126,13 +126,13 @@ const hydrateLumo = (a: Partial<LumoAccount>): LumoAccount => {
 	return {
 		id: a.id ?? DEFAULT_ACCOUNT_ID,
 		label: a.label ?? DEFAULT_ACCOUNT_LABEL,
-		web: { ...DEFAULT_LUMO, ...a.web, projects, projectCatalog, index: { ...(a.web?.index ?? {}) } },
+		web: { ...DEFAULT_LUMO, ...a.web, projects, projectCatalog, index: { ...(a.web?.index ?? {}) }, fileIndex: { ...(a.web?.fileIndex ?? {}) } },
 	};
 };
 
 /** A vault that never had Lumo gets it next to its other chat folders. */
 function firstLumo(claudeChatFolder: string): LumoAccount[] {
-	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_LUMO, folder: layoutFolders(layoutRoot(claudeChatFolder)).lumoChat } }];
+	return [{ id: DEFAULT_ACCOUNT_ID, label: DEFAULT_ACCOUNT_LABEL, web: { ...DEFAULT_LUMO, projects: [], index: {}, fileIndex: {}, folder: layoutFolders(layoutRoot(claudeChatFolder)).lumoChat } }];
 }
 
 const hydrateGemini = (a: Partial<GeminiAccount>): GeminiAccount => ({

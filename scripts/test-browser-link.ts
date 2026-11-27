@@ -14,13 +14,14 @@ import { BrowserLinkUnavailable } from '../src/link/errors';
 import { fetchFrames, fromBase64 } from '../src/link/protocol';
 import { linkState, loginMethodOf, secretTokenStore, usesBrowserLink, LINK_SECRET_ID } from '../src/link/account';
 import { setBrowserLink, transportFor, type PageCall } from '../src/transport';
-import { pageCallCode, READY_CODE } from '../src/transport/login-window';
-import { pageCall, readyCheck } from '../extension/src/page';
+import { pageCallCode, READ_CODE, READY_CODE } from '../src/transport/login-window';
+import { pageCall, pageRead, readyCheck } from '../extension/src/page';
 import { GeminiApi } from '../src/gemini/api';
 import { StudioApi } from '../src/studio/api';
 import { runGeminiSync } from '../src/gemini/sync';
 import { runStudioSync } from '../src/studio/sync';
 import { addAccount } from '../src/accounts';
+import { netRetry } from '../src/net-retry';
 import { normalizeSettings } from '../src/migrate';
 import type { GeminiAccount } from '../src/settings';
 import type AIChatBridge from '../src/main';
@@ -45,7 +46,7 @@ const memStore = (): TokenStore & { value: string | null } => ({ value: null, ge
 type Msg = Record<string, unknown> & { id?: number; op?: string };
 
 /** A stand-in extension: pairs with `code`, then `answer` plays the browser. */
-async function browser(port: number, code: string, answer: (m: Msg) => unknown[]): Promise<{ ws: WebSocket; seen: Msg[] }> {
+async function browser(port: number, code: string, answer: (m: Msg) => unknown[]): Promise<{ ws: WebSocket; seen: Msg[]; answer: (m: Msg) => unknown[] }> {
 	const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: EXT });
 	const seen: Msg[] = [];
 	await new Promise<void>((resolve, reject) => {
@@ -59,7 +60,7 @@ async function browser(port: number, code: string, answer: (m: Msg) => unknown[]
 		seen.push(m);
 		for (const f of answer(m)) ws.send(JSON.stringify(f));
 	});
-	return { ws, seen };
+	return { ws, seen, answer };
 }
 
 /** A batchexecute reply around one payload, the way Google frames it. */
@@ -112,11 +113,16 @@ async function testTransport() {
 		const np = await rejection(t.isLoggedIn());
 		expect('not paired: says so, as a skip reason', np instanceof BrowserLinkUnavailable && np.reason === 'not-paired', np?.message);
 
-		let mode: 'ok' | 'logged-out' = 'ok';
+		let mode: 'ok' | 'logged-out' | 'close-on-call' = 'ok';
 		const b = await browser(port, server.newPairingCode(), (m) => {
 			if (m.op === 'fetch') return fetchFrames(m.id!, 200, { 'content-type': 'application/json' }, new TextEncoder().encode('{"ok":true}'));
 			if (m.op === 'open') return [mode === 'ok' ? { id: m.id, ok: true, page: 'p1' } : { id: m.id, ok: false, error: { kind: 'not-logged-in', message: 'sign-in page' } }];
+			if (m.op === 'call' && mode === 'close-on-call') {
+				b.ws.close();
+				return [];
+			}
 			if (m.op === 'call') return [{ id: m.id, ok: true, answer: { status: 200, text: geminiReply('MaZiqc', [null, null, [['c_0123abcd', 'A chat', null, null, null, [1735689600, 0]]]]), headers: { 'content-type': 'application/json' } } }];
+			if (m.op === 'read') return [{ id: m.id, ok: true, value: m.value === 'google-account-id' ? '123456789012345678901' : '' }];
 			if (m.op === 'close') return [{ id: m.id, ok: true }];
 			return [];
 		});
@@ -133,6 +139,7 @@ async function testTransport() {
 		const api = await GeminiApi.connect({ provider: 'gemini', id: 'g' });
 		const open = b.seen.find((m) => m.op === 'open')!;
 		expect('Gemini: opens gemini.google.com with the named ready check', open.url === 'https://gemini.google.com/app' && open.ready === 'gemini-signed-in');
+		expect('Gemini: the Google account number is read from the page by name', (await api.accountId()) === '123456789012345678901' && b.seen.some((m) => m.op === 'read' && m.page === 'p1' && m.value === 'google-account-id'));
 		const items = await api.listChats(async () => undefined, () => undefined);
 		const call = b.seen.find((m) => m.op === 'call')!.call as PageCall;
 		expect('Gemini: the list call goes to the browser to be signed there', call.sign === 'wiz-at' && call.url.startsWith('https://gemini.google.com/_/BardChatUi/data/batchexecute'));
@@ -141,6 +148,19 @@ async function testTransport() {
 		await sleep(50);
 		expect('Gemini: closing the API closes the browser tab', b.seen.some((m) => m.op === 'close' && m.page === 'p1'));
 
+		// The browser goes away in the middle of a sync: after the network retries, still a skip.
+		const mid = await GeminiApi.connect({ provider: 'gemini', id: 'g' });
+		mode = 'close-on-call';
+		const realPause = netRetry.pause;
+		netRetry.pause = async () => undefined;
+		const gone = await rejection(mid.listChats(async () => undefined, () => undefined));
+		netRetry.pause = realPause;
+		expect('browser closed mid-sync: a skip (browser closed), not a network error', gone instanceof BrowserLinkUnavailable && gone.reason === 'browser-closed', gone?.message);
+		mid.close();
+		const back = await browser(port, server.newPairingCode(), b.answer);
+		b.ws = back.ws;
+		b.seen = back.seen;
+		await sleep(50);
 		mode = 'logged-out';
 		const lo = await rejection(GeminiApi.connect({ provider: 'gemini', id: 'g' }));
 		expect('not logged in to Gemini in the browser: a skip, named', lo instanceof BrowserLinkUnavailable && lo.reason === 'not-logged-in' && /Gemini in your browser/.test(lo.message), lo?.message);
@@ -201,6 +221,12 @@ async function testSamePage() {
 		expect('same page (AI Studio): same answer back', JSON.stringify(l.result) === JSON.stringify(w.result));
 	} finally {
 		Date.now = realNow;
+	}
+
+	for (const [label, page, want] of [['signed in', { WIZ_global_data: { S06Grb: '123456789012345678901' } }, '123456789012345678901'], ['no number', { WIZ_global_data: {} }, ''], ['no page data', {}, '']] as const) {
+		const viaWindow = await inPage(page as Record<string, unknown>, async () => String((0, eval)(READ_CODE['google-account-id'])));
+		const viaLink = await inPage(page as Record<string, unknown>, async () => pageRead('google-account-id'));
+		expect(`same page value (Google account number, ${label}): extension and login window agree`, viaWindow.result === want && viaLink.result === want, `${viaWindow.result} / ${viaLink.result}`);
 	}
 
 	for (const [name, page, want] of [

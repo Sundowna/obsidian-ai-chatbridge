@@ -76,6 +76,15 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 
 	new Setting(el).setName('Content').setHeading();
 	contentOptions(ctx, el, 'claude', account, s);
+	new Setting(el)
+		.setName('Show reasoning in the note')
+		.setDesc('Adds Claude\'s reasoning to each answer, folded. Off: the note holds only the conversation. The reasoning is in the raw file either way. Applies to chats saved from now on.')
+		.addToggle((t) =>
+			t.setValue(s.showReasoning === true).onChange(async (v) => {
+				s.showReasoning = v;
+				await save();
+			}),
+		);
 	archiveSettings(ctx, el, 'claude', account);
 	new Setting(el)
 		.setName('Claude Code cloud sessions')
@@ -125,6 +134,15 @@ export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAc
 	filingOptions(ctx, el, 'Lumo', g);
 
 	new Setting(el).setName('Content').setHeading();
+	new Setting(el)
+		.setName('Download files and images')
+		.setDesc('Files Lumo made go to Artifacts/, files you uploaded to Attachments/, next to the chat. Chats saved earlier get theirs over the next syncs. Lumo keeps a reduced copy of a picture, so that is what is saved.')
+		.addToggle((t) =>
+			t.setValue(g.downloadFiles).onChange(async (v) => {
+				g.downloadFiles = v;
+				await ctx.plugin.saveSettings();
+			}),
+		);
 	projectFilterOptions(ctx, el, 'lumo', account, g);
 }
 
@@ -206,6 +224,15 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 		.addToggle((t) =>
 			t.setValue(g.includePinned ?? true).onChange(async (v) => {
 				g.includePinned = v;
+				await save();
+			}),
+		);
+	new Setting(el)
+		.setName('Show reasoning in the note')
+		.setDesc('Adds the reasoning ChatGPT shows to each answer, folded. Off: the note holds only the conversation. The reasoning is in the raw file either way. Saved notes follow on the next sync.')
+		.addToggle((t) =>
+			t.setValue(g.showReasoning === true).onChange(async (v) => {
+				g.showReasoning = v;
 				await save();
 			}),
 		);

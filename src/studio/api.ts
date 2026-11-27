@@ -8,6 +8,8 @@ import { StopError } from '../api';
 import type { LoginRef } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
 import { transportFor, type PageAnswer, type SitePage } from '../transport';
+import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
+import { BrowserLinkUnavailable } from '../link/errors';
 import { googleLogin } from '../gemini/api';
 import { ShapeError } from '../schema';
 import type { StudioPrompt } from '../gemini/types';
@@ -68,16 +70,19 @@ export class StudioApi {
 		// The page adds the API key and the login hash itself.
 		let res: PageAnswer;
 		try {
-			res = await this.page.call({
+			res = await sendWithRetry(() => this.page.call({
 				url: SERVICE + method,
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json+protobuf', 'X-Goog-AuthUser': '0' },
 				body: JSON.stringify(body),
 				sign: 'sapisidhash',
-			});
-		} catch {
-			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: null, message: 'Network error while talking to AI Studio.' });
-			throw new StopError('Network error while talking to AI Studio.');
+			}));
+		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
+			const tried = e instanceof NetworkFailure ? triedText(e.tries) : '';
+			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: null, message: `Network error while talking to AI Studio${tried}.` });
+			throw new StopError(`Network error while talking to AI Studio${tried}.`);
 		}
 		if (res.status !== 200 && !(res.status === 404 && method === 'ResolveDriveResource')) {
 			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: res.status, headers: res.headers, body: res.text, message: `AI Studio answered ${res.status}` });

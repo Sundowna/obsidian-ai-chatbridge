@@ -2,7 +2,7 @@
 // 127.0.0.1. Bodies travel as base64; a large answer body comes in parts so no single frame
 // gets huge. Shared by both sides: plain data and pure functions only.
 
-import type { PageCall, PageAnswer, ReadyCheck } from '../transport/types';
+import type { PageCall, PageAnswer, PageValue, ReadyCheck } from '../transport/types';
 
 /** Raw bytes per part of an answer body (base64 makes a frame about a third larger). */
 export const PART_BYTES = 512 * 1024;
@@ -30,9 +30,10 @@ export interface FetchRequest {
 }
 export interface OpenRequest { op: 'open'; url: string; ready: ReadyCheck; timeoutMs: number }
 export interface CallRequest { op: 'call'; page: string; call: PageCall }
+export interface ReadRequest { op: 'read'; page: string; value: PageValue }
 export interface CloseRequest { op: 'close'; page: string }
 export interface StatusRequest { op: 'status'; site: string }
-export type LinkRequest = FetchRequest | OpenRequest | CallRequest | CloseRequest | StatusRequest;
+export type LinkRequest = FetchRequest | OpenRequest | CallRequest | ReadRequest | CloseRequest | StatusRequest;
 
 // ---- Answers from the extension ------------------------------------------------------------
 
@@ -43,6 +44,7 @@ export interface FetchHead { id: number; ok: true; status: number; headers: Reco
 export interface FetchPart { id: number; part: number; body64: string }
 export interface OpenAnswer { id: number; ok: true; page: string }
 export interface CallAnswer { id: number; ok: true; answer: PageAnswer }
+export interface ReadAnswer { id: number; ok: true; value: string }
 export interface StatusAnswer { id: number; ok: true; tabOpen: boolean }
 export interface EmptyAnswer { id: number; ok: true }
 

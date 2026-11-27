@@ -4,7 +4,7 @@ import { ShapeError } from '../schema';
 import type { ListItem } from '../types';
 import { conversationAd, decryptJson, messageAd, spaceAd, spaceDataKey } from './crypto';
 import { isoTime } from './schema';
-import { SPACE_TYPE_DEFAULT, SPACE_TYPE_PROJECT, type LumoChat, type LumoMessage, type LumoWireConversation, type LumoWireMessage, type LumoWireSpace } from './types';
+import { SPACE_TYPE_DEFAULT, SPACE_TYPE_PROJECT, type LumoChat, type LumoMessage, type LumoWireConversation, type LumoWireAsset, type LumoWireMessage, type LumoWireSpace } from './types';
 
 export interface LumoEntry {
 	item: ListItem;
@@ -12,6 +12,10 @@ export interface LumoEntry {
 	conversationTag: string;
 	starred: boolean;
 	dek: CryptoKey;
+	/** The files of the chat's space (shared by all its chats), without content. */
+	assets?: LumoWireAsset[];
+	/** How many chats the space has: with one, every file Lumo made there is that chat's. */
+	spaceChats?: number;
 }
 
 export interface LumoListing {
@@ -67,6 +71,8 @@ export async function decryptListing(spaces: readonly LumoWireSpace[], masterKey
 			continue;
 		}
 		if (project) projects.push(project);
+		// An entry that is not a usable asset row is left out; files never stop the listing.
+		const assets = (Array.isArray(space.Assets) ? space.Assets : []).filter((a): a is LumoWireAsset => isRow(a) && typeof a.ID === 'string' && !!a.ID && typeof a.AssetTag === 'string' && !!a.AssetTag && !a.DeleteTime);
 		for (const c of conversations) {
 			try {
 				const priv = c.Encrypted ? await decryptJson(dek, c.Encrypted, conversationAd(c.ConversationTag, space.SpaceTag)) : {};
@@ -83,6 +89,8 @@ export async function decryptListing(spaces: readonly LumoWireSpace[], masterKey
 					conversationTag: c.ConversationTag,
 					starred: c.IsStarred === true,
 					dek,
+					assets,
+					spaceChats: conversations.length,
 				});
 			} catch (e) {
 				if (e instanceof ShapeError) throw e;

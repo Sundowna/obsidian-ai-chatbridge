@@ -32,6 +32,11 @@ export type PageSigning =
 /** Named tests for "this page is open and signed in". No code strings travel. */
 export type ReadyCheck = 'gemini-signed-in' | 'studio-ready';
 
+/** Named values read from the page (not secret). No code strings travel. */
+export type PageValue =
+	/** Google's number for the signed-in account (`WIZ_global_data.S06Grb`), or ''. */
+	| 'google-account-id';
+
 /** One signed request sent by the site's own page. */
 export interface PageCall {
 	url: string;
@@ -51,6 +56,8 @@ export interface PageAnswer {
 export interface SitePage {
 	/** Sends one signed call from the page. Throws when the page is gone or the call failed below HTTP. */
 	call(c: PageCall): Promise<PageAnswer>;
+	/** Reads one named value from the page; '' when the page does not have it. */
+	read(v: PageValue): Promise<string>;
 	close(): void;
 }
 

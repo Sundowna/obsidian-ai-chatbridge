@@ -7,6 +7,14 @@ import { generatedAsLinks, imagesAsLinks, renderGeminiTranscript, renderStudioTr
 import { promptFileId, readPrompt, readPromptList } from '../src/studio/wire';
 import { normalizeSettings } from '../src/migrate';
 import { ShapeError } from '../src/schema';
+import { TFile } from 'obsidian';
+import { emptyResult, geminiFromRaw, googleAccountId, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, type Saved } from '../src/gemini/save';
+import type { GeminiChat, StudioPrompt } from '../src/gemini/types';
+import { MassMissingError } from '../src/missing-guard';
+import { tagAccount } from '../src/naming';
+import type { IndexEntry, ListItem } from '../src/types';
+import { noteHash } from '../src/versions';
+import { readWrite } from './fake-vault';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -42,7 +50,174 @@ function turn(rid: string, sec: number, prompt: string, answer: string, extra: {
 	return [['c_421ec87547ddea3f', rid], null, [[prompt], 1, null, 1, 'cf41b0e0dd7d53e5', 0], answers, at(sec)];
 }
 
-function main() {
+/** A vault that is a Map of path -> text, with the calls the save loop makes. */
+function fakeVault() {
+	const files = new Map<string, string>();
+	const folders = new Set<string>();
+	const vault = {
+		getAbstractFileByPath: (p: string) => (files.has(p) ? Object.assign(new TFile(p, { size: 0 }), { path: p }) : folders.has(p) ? {} : null),
+		createFolder: async (p: string) => void folders.add(p),
+		create: async (p: string, d: string) => {
+			if (files.has(p)) throw new Error('exists');
+			files.set(p, d);
+		},
+		process: async (f: { path: string }, fn: (d: string) => string) => void files.set(f.path, fn(files.get(f.path) ?? '')),
+		...readWrite(files),
+	};
+	return { files, vault };
+}
+
+/** The save loop Gemini and AI Studio share, on a fake vault. */
+async function saveLoop() {
+	const { settings } = normalizeSettings({});
+	settings.maxChatsPerRun = 2;
+	const { files, vault } = fakeVault();
+	const plugin = { app: { vault, fileManager: { processFrontMatter: async () => undefined } }, settings, saveSettings: async () => undefined } as never;
+	const index: Record<string, IndexEntry> = {};
+	const day = (d: number) => `2026-03-${String(d).padStart(2, '0')}T10:00:00.000Z`;
+	const chatOf = (item: ListItem, answer: string): GeminiChat => ({ id: item.uuid, title: item.name, createdAt: item.created_at, updatedAt: item.updated_at, turns: [{ rid: 'r1', createdAt: item.created_at, prompt: `Question of ${item.name}`, answer }], raw: [] } as unknown as GeminiChat);
+	const items: ListItem[] = [1, 2, 3].map((n) => ({ uuid: `c_${n}`, name: `Chat ${n}`, created_at: day(n), updated_at: day(n) }));
+	let reads: string[] = [];
+	let answer = 'First answer.';
+	const refuse = new Set<string>();
+	const read = async (item: ListItem): Promise<Saved | null> => {
+		reads.push(item.uuid);
+		if (refuse.has(item.uuid)) return null;
+		const chat = chatOf(item, answer);
+		return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (link) => tagAccount(renderGeminiTranscript(chat, link), 'Main') };
+	};
+	const run = async (list = items, idx = index) => {
+		reads = [];
+		const r = emptyResult();
+		await saveChats(plugin, list, idx, 'G/Chat', 'Raw/G', read, () => undefined, r, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main') });
+		return r;
+	};
+	const notes = () => [...files.keys()].filter((p) => p.endsWith('.md'));
+
+	// Max chats per run: the two newest first, the third left for the next run.
+	const r1 = await run();
+	expect('loop: two newest saved, one left for next run', r1.newCount === 2 && r1.leftForLater === 1 && reads.join() === 'c_3,c_2' && notes().length === 2, JSON.stringify({ ...r1, reads }));
+	const three = index.c_3!;
+	expect('loop: note and raw file where the settings say', three.md.startsWith('G/Chat/2026-03-03 Chat 3') && three.json.startsWith('Raw/G/') && files.has(three.md) && files.has(three.json), `${three.md} | ${three.json}`);
+	expect('loop: note has the account, the raw link and the text', files.get(three.md)!.includes('account: "Main"') && files.get(three.md)!.includes(`raw: "[[${three.json}]]"`) && files.get(three.md)!.includes('First answer.'), files.get(three.md)!.slice(0, 200));
+	const r2 = await run();
+	expect('loop: the next run saves the one left over', r2.newCount === 1 && r2.unchanged === 2 && r2.leftForLater === 0 && reads.join() === 'c_1');
+	const r3 = await run();
+	expect('loop: unchanged chats are not read again', r3.unchanged === 3 && !reads.length && !r3.written.length);
+
+	// A chat that goes on: same note, the earlier raw file kept as a version.
+	const rawBefore = files.get(three.json)!;
+	answer = 'Second answer.';
+	const later = items.map((it) => (it.uuid === 'c_3' ? { ...it, updated_at: day(9) } : it));
+	const r4 = await run(later);
+	const kept = index.c_3!.versions?.[0]?.files[0] ?? '';
+	expect('loop: changed chat keeps its one note', r4.changedCount === 1 && index.c_3!.md === three.md && notes().length === 3 && files.get(three.md)!.includes('Second answer.'), notes().join(', '));
+	expect('loop: earlier raw file kept and named in the note', files.get(kept) === rawBefore && files.get(three.md)!.includes('earlier_versions: 1'), kept);
+
+	// A deleted note is written again from its raw file: no request, same name, same text,
+	// and it does not use up the per-run limit.
+	const noteBefore = files.get(three.md)!;
+	files.delete(three.md);
+	settings.maxChatsPerRun = 1;
+	const r5 = await run(later);
+	expect('restore: deleted note rebuilt from the raw file without a request', r5.restored.length === 1 && !reads.length && files.get(three.md) === noteBefore && r5.unchanged === 2 && r5.leftForLater === 0, JSON.stringify({ ...r5, reads }));
+	expect('restore: the rebuilt note counts as unedited', index.c_3!.noteHash === noteHash(noteBefore));
+	const r5b = await run(later);
+	expect('restore: nothing more to do on the next run', r5b.unchanged === 3 && !r5b.restored.length && !reads.length);
+
+	// Raw file gone too, or not readable as this chat: fetched again under the same names.
+	files.delete(three.md);
+	files.delete(three.json);
+	const r6 = await run(later);
+	expect('restore: note and raw file gone -> fetched again under the same names', r6.restored.length === 1 && reads.join() === 'c_3' && files.has(three.md) && files.has(three.json));
+	files.delete(three.md);
+	files.set(three.json, '{"id":"another chat","turns":[]}');
+	const r7 = await run(later);
+	expect('restore: a raw file of another chat is not used, the chat is fetched', r7.restored.length === 1 && reads.join() === 'c_3' && files.get(three.md)!.includes('Second answer.'));
+	files.delete(three.md);
+	files.set(three.json, 'not json');
+	const r8 = await run(later);
+	expect('restore: a damaged raw file is not used, the chat is fetched', r8.restored.length === 1 && reads.join() === 'c_3' && files.get(three.json)!.includes('"turns"'));
+
+	// A chat that cannot be read is named and tried again next run.
+	refuse.add('c_4');
+	const four: ListItem = { uuid: 'c_4', name: 'Chat 4', created_at: day(4), updated_at: day(4) };
+	const r9 = await run([...later, four]);
+	expect('loop: unreadable chat named, nothing saved for it', r9.failed.join() === 'Chat 4' && !index.c_4 && r9.newCount === 0);
+
+	// AI Studio: the same loop, its own note text.
+	const sIndex: Record<string, IndexEntry> = {};
+	const sItem: ListItem = { uuid: 'prompts/abc', name: 'Prompt', created_at: day(5), updated_at: day(5) };
+	const sRead = async (item: ListItem): Promise<Saved | null> => {
+		reads.push(item.uuid);
+		const p: StudioPrompt = { id: item.uuid, title: item.name, updatedAt: item.updated_at, messages: [{ role: 'user', text: 'Studio question' }, { role: 'model', text: 'Studio answer.' }], raw: null };
+		return { createdAt: p.updatedAt, json: JSON.stringify(p, null, '\t'), md: (link) => tagAccount(renderStudioTranscript(p, link), 'Main') };
+	};
+	const sRun = async () => {
+		reads = [];
+		const r = emptyResult();
+		await saveChats(plugin, [sItem], sIndex, 'G/AI Studio', 'Raw/S', sRead, () => undefined, r, { label: 'AI Studio prompts', fromRaw: studioFromRaw('Main') });
+		return r;
+	};
+	const s1 = await sRun();
+	const sPath = sIndex['prompts/abc']!.md;
+	const sNote = files.get(sPath)!;
+	files.delete(sPath);
+	const s2 = await sRun();
+	expect('AI Studio: saved, then a deleted note rebuilt from the raw file without a request', s1.newCount === 1 && s2.restored.length === 1 && !reads.length && files.get(sPath) === sNote && sNote.includes('Studio answer.'), JSON.stringify({ s1, s2, reads }));
+
+	// Pinned at Google later, then unpinned: only that property changes in the note, no request.
+	const pIndex: Record<string, IndexEntry> = {};
+	const pins = new Set<string>();
+	const pItem: ListItem = { uuid: 'c_pin', name: 'Pin me', created_at: day(6), updated_at: day(6) };
+	const pRun = async () => {
+		reads = [];
+		const r = emptyResult();
+		await saveChats(plugin, [pItem], pIndex, 'G/Chat', 'Raw/G', read, () => undefined, r, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main'), flag: { key: 'pinned', of: (it) => pins.has(it.uuid) } });
+		return r;
+	};
+	await pRun();
+	const pMd = pIndex.c_pin!.md;
+	const unpinned = files.get(pMd)!;
+	pins.add('c_pin');
+	const p1 = await pRun();
+	expect('pinned: a later pin is written into the note without a request', p1.flagChanges === 1 && !reads.length && p1.unchanged === 1 && files.get(pMd)!.includes('\npinned: true\nraw:') && files.get(pMd)!.split('---').slice(2).join('---') === unpinned.split('---').slice(2).join('---'), files.get(pMd)!.slice(0, 200));
+	const p2 = await pRun();
+	expect('pinned: nothing more to do while it stays pinned', p2.flagChanges === 0 && !reads.length);
+	pins.clear();
+	const p3 = await pRun();
+	expect('pinned: an unpin takes the property out again', p3.flagChanges === 1 && !reads.length && files.get(pMd) === unpinned, files.get(pMd)!.slice(0, 200));
+
+	// A chat that goes on and was unpinned meanwhile must not keep the old property.
+	pins.add('c_pin');
+	await pRun();
+	const laterPin = { ...pItem, updated_at: day(8) };
+	pins.clear();
+	reads = [];
+	const pr = emptyResult();
+	await saveChats(plugin, [laterPin], pIndex, 'G/Chat', 'Raw/G', read, () => undefined, pr, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main'), flag: { key: 'pinned', of: (it) => pins.has(it.uuid) } });
+	expect('pinned: a chat that changed and was unpinned loses the property', pr.changedCount === 1 && !files.get(pMd)!.split('---')[1]!.includes('pinned'), files.get(pMd)!.split('---')[1]);
+
+	// Safety stop: many saved chats missing stops before anything is read or written.
+	settings.maxChatsPerRun = 0;
+	const many: ListItem[] = Array.from({ length: 12 }, (_, i) => ({ uuid: `m_${i}`, name: `Many ${i}`, created_at: day(i + 1), updated_at: day(i + 1) }));
+	const mIndex: Record<string, IndexEntry> = {};
+	await run(many, mIndex);
+	for (const e of Object.values(mIndex).slice(0, 9)) files.delete(e.md);
+	const few = await run(many, mIndex);
+	expect('guard: nine missing notes are still restored', few.restored.length === 9);
+	for (const e of Object.values(mIndex).slice(0, 10)) files.delete(e.md);
+	const count = files.size;
+	let stop = '';
+	try {
+		await run(many, mIndex);
+	} catch (e) {
+		stop = e instanceof MassMissingError ? e.message : `other: ${String(e)}`;
+	}
+	expect('guard: ten of twelve missing stops the sync, nothing read or written', stop.startsWith('10 of 12 saved Gemini chats are not where the sync history says') && !reads.length && files.size === count, stop);
+}
+
+async function main() {
 	// --- batchexecute framing --------------------------------------------------
 	const list = [null, 'next-token', [['c_238ce75d1feb162e', 'Website review', null, null, null, at(1788451602)], ['c_421ec87547ddea3f', '', null, null, null, at(1788426966)]]];
 	const payload = batchPayload(reply('MaZiqc', list), 'MaZiqc');
@@ -145,8 +320,20 @@ function main() {
 	const kept = normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: {} }], gemini: [{ id: 'default', label: 'Main', web: { folder: 'G', index: { c_1: { updated_at: 'x', json: 'a', md: 'b', synced: 'y' } } } }] }).settings;
 	expect('saved Gemini settings kept, AI Studio filled in', kept.gemini[0]!.web.folder === 'G' && !!kept.gemini[0]!.web.index.c_1 && kept.gemini[0]!.studio.enabled);
 
+	// --- the same Google login under two accounts -------------------------------------
+	{
+		const two = normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: {} }], gemini: [{ id: 'a', label: 'Private', web: { folder: 'G', userId: '123456789012345678901' } }, { id: 'b', label: 'Work', web: { folder: 'G' } }] }).settings.gemini;
+		expect('same login: the Google account number is kept, anything else is not one', googleAccountId('123456789012345678901') === '123456789012345678901' && googleAccountId('me@example.com') === '' && googleAccountId(undefined) === '' && googleAccountId('12') === '');
+		expect('same login: a second account on the same Google login is found', sameGoogleLogin(two, two[1]!, '123456789012345678901') === two[0]);
+		expect('same login: the account itself, another login and an unknown login match nobody', !sameGoogleLogin(two, two[0]!, '123456789012345678901') && !sameGoogleLogin(two, two[1]!, '999999999999999999999') && !sameGoogleLogin(two, two[1]!, '') && !sameGoogleLogin(two, two[1]!, undefined));
+		expect('same login: the stop message names the other account', SAME_GOOGLE_LOGIN('Private') === 'This login is the same Google account as "Private". Log in with a different account, or remove this one.');
+	}
+
+	// --- the save loop of Gemini and AI Studio, on a fake vault ---------------------------
+	await saveLoop();
+
 	console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 	if (failures) process.exit(1);
 }
 
-main();
+void main();

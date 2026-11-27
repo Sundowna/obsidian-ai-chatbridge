@@ -8,7 +8,7 @@ import { BrowserLinkTransport } from './browser-link';
 import { LoginWindowTransport } from './login-window';
 import type { Transport } from './types';
 
-export type { PageAnswer, PageCall, PageSigning, ReadyCheck, SitePage, SiteRequest, Transport, TransportKind } from './types';
+export type { PageAnswer, PageCall, PageSigning, PageValue, ReadyCheck, SitePage, SiteRequest, Transport, TransportKind } from './types';
 
 let usesLink: (login: LoginRef) => boolean = () => false;
 let linkServer: () => LinkServer | null = () => null;

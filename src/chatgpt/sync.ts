@@ -8,6 +8,7 @@ import { loginRef, withAccount } from '../accounts';
 import type { ChatgptAccount } from '../settings';
 import { StopError } from '../api';
 import { ShapeError } from '../schema';
+import { OddChats, readOrSkip } from '../odd-chats';
 import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected, projectFolderNames } from '../select';
 import { baseName, dailyNoteName, safeTitle, tagAccount, untagAccount } from '../naming';
 import { createNew, ensureFolder, findFile, freeFileName, freeStem } from '../vaultio';
@@ -59,6 +60,8 @@ export interface GptSyncResult {
 	backfilledChats: number;
 	/** Chats too long to load in one piece – skipped, not half-saved. */
 	tooLong: string[];
+	/** Chats whose data had an unexpected shape: skipped, tried again next run. */
+	oddChats: string[];
 	/** The project list said there are more projects than it sent. */
 	projectsCut: boolean;
 	pendingAssets: number;
@@ -116,7 +119,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	const g = account.web;
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
-	const result: GptSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, tooLong: [], projectsCut: false, pendingAssets: 0, refreshedViews: 0, edits: noEdits(), listingRequests: 0, projectRequests: 0, fullLists: 0, incrementalLists: 0 };
+	const result: GptSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, tooLong: [], oddChats: [], projectsCut: false, pendingAssets: 0, refreshedViews: 0, edits: noEdits(), listingRequests: 0, projectRequests: 0, fullLists: 0, incrementalLists: 0 };
+	const odd = new OddChats();
 	if (nothingSelected(g)) {
 		// A waiting retry would otherwise come back here every second.
 		if (g.resumeAfter429) {
@@ -162,7 +166,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	};
 	/** `paths`: where the transcript and the main raw .json are (or will be). */
 	const transcript = (chat: GptChat, item: ListItem, paths: { json: string; md: string }) =>
-		tagAccount(renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(paths.md.split('/').slice(0, -1).join('/'), paths.json), filePaths: savedPaths(chat) }), account.label);
+		tagAccount(renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(paths.md.split('/').slice(0, -1).join('/'), paths.json), filePaths: savedPaths(chat), showReasoning: g.showReasoning === true }), account.label);
 	// The account line is left out, so notes saved before it existed do not count as changed.
 	const viewHash = (value: string): Promise<string> => fingerprint(untagAccount(value).replace(/^(---\r?\n[\s\S]*?\r?\n)unread: false(?=\r?\n)/, '$1unread: true'));
 
@@ -175,6 +179,17 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			}
 		}
 		return null;
+	};
+
+	/**
+	 * A real PNG, JPEG, GIF or WebP. chatgpt.com serves some older photos only as a resized copy
+	 * (seen 2026-11-27: 3172335 bytes stated, 823189 served), so for an image that is still an
+	 * image the stated size does not count; any other file of the wrong size is skipped.
+	 */
+	const isImageBytes = (bytes: ArrayBuffer): boolean => {
+		const b = new Uint8Array(bytes.slice(0, 12));
+		const at = (i: number, ...v: number[]) => v.every((x, j) => b[i + j] === x);
+		return at(0, 0x89, 0x50, 0x4e, 0x47) || at(0, 0xff, 0xd8, 0xff) || at(0, 0x47, 0x49, 0x46, 0x38) || (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50));
 	};
 
 	const fetchFile = async (a: GptApi, chatId: string, task: GptFileTask): Promise<{ bytes: ArrayBuffer | null; expected?: number }> => {
@@ -204,7 +219,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			try {
 				const { bytes, expected } = await fetchFile(a, chat.conversation_id, task);
 				if (!bytes) failure = 'download unavailable';
-				else if (expected !== undefined && bytes.byteLength !== expected) failure = 'size mismatch';
+				else if (expected !== undefined && bytes.byteLength !== expected && !(task.isImage && isImageBytes(bytes))) failure = 'size mismatch';
 				else {
 					const existing = await sameContent(bytes, folder, stem);
 					if (existing) {
@@ -350,7 +365,12 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			await sleep(delayMs);
 			requestStage = 'fetching the conversation';
 			const r = await a.get(a.chatPath(item.uuid));
-			const first = checkGptChat(r.json, item.uuid);
+			// One chat in an odd shape is skipped and tried again next run; the third one stops the sync.
+			const first = await readOrSkip(odd, item.name, () => checkGptChat(r.json, item.uuid));
+			if (!first) {
+				result.oddChats.push(item.name);
+				return null;
+			}
 			const pages = [];
 			const bytes = [r.bytes];
 			const cursors = new Set<string>();
@@ -529,6 +549,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				build, JSON.stringify(item), entry.json, entry.md, latest, entry.older ?? [], entry.versions ?? [], entry.pageHashes ?? [], entry.viewHash ?? '',
 				await fileStamps(app, [entry.json, ...(entry.older ?? [])]),
 				g.downloadFiles, files.map((id) => [g.fileIndex[id] ?? '', !missingId(id)]),
+				// What the note shows: a changed switch redraws the saved notes.
+				g.showReasoning === true,
 				Intl.DateTimeFormat().resolvedOptions().timeZone,
 			]);
 		};
@@ -713,6 +735,7 @@ async function writeLog(plugin: AIChatBridge, account: ChatgptAccount, r: GptSyn
 	if (r.refreshedViews) parts.push(`${r.refreshedViews} refreshed transcripts`);
 	parts.push(...editsLog(r.edits));
 	if (r.filesSkipped.length) parts.push(`${r.filesSkipped.length} asset attempts failed: ${r.filesSkipped.slice(0, 10).join(', ')}`);
+	if (r.oddChats.length) parts.push(`could not read (will retry): ${r.oddChats.join(', ')}`);
 	if (r.tooLong.length) parts.push(`too long to load in one piece, skipped: ${r.tooLong.join(', ')}`);
 	if (r.projectsCut) parts.push('more projects exist than chatgpt.com listed – chats in unlisted projects use the project ID as folder name');
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);

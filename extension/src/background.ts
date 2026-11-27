@@ -6,10 +6,11 @@
 
 import { fetchFrames, fromBase64, type LinkRequest } from '../../src/link/protocol';
 import { isLinkPage, isLinkTarget } from '../../src/link/sites';
-import { pageCall, pageFetch, readyCheck } from './page';
+import { pageCall, pageFetch, pageRead, readyCheck } from './page';
 
 const PING_MS = 20_000;
 const READY_CHECKS = new Set(['gemini-signed-in', 'studio-ready', 'loaded']);
+const PAGE_VALUES = new Set(['google-account-id']);
 /** A fetch tab this extension opened is closed after this long without use. */
 const FETCH_TAB_IDLE_MS = 60_000;
 
@@ -139,6 +140,15 @@ async function handle(msg: LinkRequest & { id: number }): Promise<unknown[]> {
 			t.lastUse = Date.now();
 			const answer = await inPage(t.tabId, pageCall, [msg.call]);
 			return [{ id: msg.id, ok: true, answer }];
+		}
+		case 'read': {
+			const t = own.get(msg.page);
+			if (!t || t.kind !== 'page') throw new LinkFail('no-tab', 'no such page');
+			if (!PAGE_VALUES.has(msg.value)) throw new LinkFail('not-allowed', 'unknown page value');
+			const tab = await chrome.tabs.get(t.tabId).catch(() => null);
+			if (!tab || originOf(tab.url) !== t.origin) throw new LinkFail('not-logged-in', 'the tab left the site');
+			t.lastUse = Date.now();
+			return [{ id: msg.id, ok: true, value: await inPage(t.tabId, pageRead, [msg.value]) }];
 		}
 		case 'close':
 			await closeOwn(msg.page);

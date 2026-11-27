@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.45.0 - 2026-11-27
+
+### Added
+- **ChatGPT: optional reasoning in the note** - a new switch per account, **Show reasoning in the note**, off by default. When on, the reasoning ChatGPT shows sits folded above each answer; saved notes follow on the next sync.
+
+### Fixed
+- **ChatGPT: one odd chat no longer stops the sync** - a chat that arrives in an unexpected shape is skipped, named in the log and tried again next time, as for the other providers. A third one in the same run still stops the sync.
+
+## 0.44.0 - 2026-11-27
+
+### Added
+- **Claude: starred chats are marked in the note** - a `starred` property, as Lumo notes have. Where claude.ai's chat list says so, a later star or unstar is followed without fetching the chat again.
+- **Claude: optional reasoning in the note** - a new switch per account, **Show reasoning in the note**, off by default. When on, Claude's reasoning sits folded above each answer, for chats saved from then on. It is in the raw file either way.
+
+### Fixed
+- **Gemini and Lumo: an unpinned or unstarred chat no longer keeps its old mark** - when a chat changed and lost its pin or star at the same time, the note kept the old property. It is now removed.
+
+## 0.43.0 - 2026-11-27
+
+### Added
+- **The model is named in every chat note** - Claude, ChatGPT and Lumo notes get a `model` property, as Gemini and AI Studio notes already had. A chat that used several models lists each once. Existing ChatGPT notes get it on the next sync; Claude and Lumo notes get it when the chat next changes.
+- **Pinned and starred stay up to date** - when you pin or unpin a Gemini chat, or star or unstar a Lumo chat, the note's property follows on the next sync, without fetching the chat again.
+
+### Fixed
+- **A brief network hiccup no longer stops Claude, Gemini, AI Studio and Lumo syncs** - a request that gets no answer is tried again after a few seconds, up to three times, as ChatGPT has done since 0.41.3.
+- **One odd chat no longer stops the sync** - for Claude, AI Studio and Lumo, a chat that arrives in an unexpected shape is skipped, named in the log and tried again next time, as Gemini already did. A third one in the same run still stops the sync.
+- **Gemini and AI Studio: the same Google login used twice is noticed** - two accounts in the plugin signed in with one Google login would have saved every chat twice. The sync now stops and says so.
+
+## 0.42.0 - 2026-11-27
+
+### Added
+- **Lumo: files are saved too** - your uploads (pictures, documents) go to `Attachments/` and what Lumo made (artifacts, pictures) to `Artifacts/`, next to the chat, as for Claude and ChatGPT. The note shows pictures and links the other files instead of saying "not saved". Files are unlocked on your computer with the same key as the chat, one read-only request per file. Chats you saved earlier get their files over the next syncs. Turn it off under Lumo → Content → **Download files and images**. Lumo keeps a reduced copy of a picture, so that is what you get.
+
+### Fixed
+- **Gemini, AI Studio, Lumo and Hermes: safety stop when many chats are missing** - if many saved chats are not where the plugin expects them (for example after moving folders outside Obsidian), the sync now stops with a hint to use "Refresh index" instead of fetching them all again. Claude and ChatGPT already did this.
+- **Gemini, AI Studio and Lumo: a deleted note comes back without a download** - when you delete a chat note but its raw file is still in the vault, the note is written again from that file. It no longer asks the provider and no longer uses up the "max chats per run" limit.
+
+## 0.41.8 - 2026-11-27
+
+### Fixed
+- **ChatGPT: older photos are saved again** - chatgpt.com now serves some older photos only as a smaller, resized copy. These waited for ever as "size mismatch"; the resized copy is now saved. Other files of the wrong size are still skipped
+
+## 0.41.7 - 2026-11-27
+
+### Added
+- **Claude: setting "Long pasted text"** - choose how pastes longer than 5 lines are saved: **File, with a 5-line preview** (the default) or **All of it in the note**. Changing it updates your saved notes on the next sync (issue #64)
+
+### Changed
+- **Claude: pasted text in the note is shorter** - only pastes of up to 5 lines go into the note in full (was about two pages). A longer paste is saved as a file, and the note shows its first 5 lines with a link to it
+
+### Fixed
+- **Claude: chats synced before 0.41.6 get their pasted text too** - on the next sync, each saved chat is checked once from its saved file (nothing is asked of claude.ai). Notes with pasted text are redrawn; your edits are handled as set under "When an edited note gets an update"
+
+## 0.41.6 - 2026-11-27
+
+### Fixed
+- **Claude: pasted text is no longer missing** - when you paste a long text into claude.ai it shows a "Pasted" card, and these cards were left out of synced chats. Short pastes (up to about two pages) now appear in the note as a quote. Longer ones are saved as "Pasted text.md" in the chat's Attachments folder and linked from the note, or folded into the note when Download files is off. Text files you added to a chat are handled the same way. Chats synced before get their pasted text the next time they change (issue #64)
+
 ## 0.41.5 - 2026-11-27
 
 ### Fixed

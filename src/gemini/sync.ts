@@ -7,18 +7,17 @@ import { tagAccount } from '../naming';
 import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
+import { OddChats } from '../odd-chats';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
 import { pastedSession } from '../cookies';
+import { MassMissingError } from '../missing-guard';
 import { GeminiApi } from './api';
-import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from './save';
+import { emptyResult, failureText, geminiFromRaw, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, writeLog, type GoogleSyncResult } from './save';
 import { renderGeminiTranscript } from './transcript';
 import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
 import { BrowserLinkUnavailable } from '../link/errors';
-
-/** Chats in one run that may fail verification and be skipped before the sync stops. */
-const MAX_ODD_CHATS = 2;
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
@@ -34,9 +33,17 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 		progress('opening Gemini…');
 		const a = await GeminiApi.connect(loginRef('gemini', account), pastedSession(plugin.app, g.secretId));
 		api = a;
+		// The same Google account under two of the plugin's accounts would save every chat twice.
+		const who = await a.accountId();
+		const twin = sameGoogleLogin(plugin.settings.gemini, account, who);
+		if (twin) throw new StopError(SAME_GOOGLE_LOGIN(twin.label));
+		if (who && g.userId !== who) {
+			g.userId = who;
+			await plugin.saveSettings();
+		}
 		const items = await a.listChats(wait, (page) => progress(`reading Gemini chat list… page ${page}`));
 		const byId = new Map<string, GeminiListItem>(items.map((it) => [it.uuid, it]));
-		let oddChats = 0;
+		const odd = new OddChats();
 		await saveChats(plugin, items, g.index, folder, masterRaw(plugin.settings) !== undefined ? mirrorRaw(folder, masterRaw(plugin.settings)) : rawBase(g.rawFolder) ?? folder, async (item) => {
 			let chat;
 			try {
@@ -46,18 +53,15 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 				if (e instanceof GeminiError) return null;
 				// One chat Google sends in an odd shape is skipped (and tried again next run); several
 				// in one run look like a format change, so the sync stops rather than guess.
-				if (e instanceof ShapeError && ++oddChats <= MAX_ODD_CHATS) {
-					console.warn('AI ChatBridge: Gemini chat skipped', item.uuid, e.message);
-					return null;
-				}
+				if (odd.skip(e, item.name)) return null;
 				throw e;
 			}
 			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
-		}, progress, result);
+		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true } });
 	} catch (e) {
 		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
 		if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
-		else if (e instanceof StopError) result.stopped = e.message;
+		else if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Gemini's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else if (e instanceof GeminiError) result.stopped = `Gemini refused the request (${e.message}).`;
 		else result.stopped = `Something went wrong while reading Gemini (${failureText(e)}).`;

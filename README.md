@@ -4,8 +4,8 @@
 
 - **Memories: See what each AI remembers about you:** Claude, ChatGPT, Claude Code and Codex memories, saved as dated snapshots ([AI memory](#ai-memory)) - so you can tweak behaviour.
 - **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** a low-friction, easy way into Karpathy-style LLM Wikis, second brains and project brains.
-- 	[OneNote Style](https://community.obsidian.md/plugins/onenote-style): The ribbon you already know - fully customisable.
-- 	[OneNote Style theme](https://community.obsidian.md/themes/onenote-style): the look you already know.
+	- [OneNote Style](https://community.obsidian.md/plugins/onenote-style): The ribbon you already know - fully customisable.
+	- [OneNote Style theme](https://community.obsidian.md/themes/onenote-style): the look you already know.
 
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is changed or deleted on their side. The plugin reads the same web pages your browser uses, which can change without notice.
@@ -20,7 +20,7 @@
 
 **Default sorting structure:**
 
-<img width="371" height="646" alt="image" src="https://github.com/user-attachments/assets/63471285-d0fd-48bf-862e-e26470c3eaf4" />
+<img width="454" height="844" alt="2026-11-27 10_38_14-Greenshot" src="https://github.com/user-attachments/assets/b3e18a7b-8a14-4cc5-9c6b-e0f3ed1681d1" />
 
 
 Older changes are in the [changelog](CHANGELOG.md).
@@ -75,7 +75,7 @@ Older changes are in the [changelog](CHANGELOG.md).
 | **Codex cloud** (chatgpt.com/codex) | Tasks that ran in OpenAI's cloud, started on chatgpt.com/codex or from ChatGPT; off until you turn it on | Every prompt and answer, steps counted, file changes as a diff |
 | **Gemini** | Chats | Pictures as links |
 | **Google AI Studio** | Chats and prompts | - |
-| **Proton Lumo** | Chats and projects, decrypted on your computer | Coming |
+| **Proton Lumo** | Chats and projects, decrypted on your computer | Artifacts, pictures and uploads |
 | **Claude Code** (desktop app and CLI) | Sessions on this computer, in the same groups as the Code sidebar | Stay on your computer |
 | **Codex** (ChatGPT desktop app and CLI) | Threads on this computer, per project | Stay on your computer |
 | **Hermes Agent** | Chats on this computer, per Hermes profile, with every tool step | Stay on your computer |
@@ -200,7 +200,8 @@ Up to 0.31 a chat that continued got a second note, `<name> (updated <date>)`, a
 - **Project folders** - one subfolder per project, or everything in one folder
 - **Only sync selected projects** - fetch your project list and tick the ones you want (chats without a project are in the list too)
 - **Choose a folder per project** - under **Only sync selected projects**, give any ticked project its own folder. Empty means the default, shown greyed in the field. Folders that don't exist yet are created on the next sync. Changing a folder only affects chats synced from then on - move older ones in Obsidian and the plugin keeps track
-- **Download files and images** - on or off per Claude and ChatGPT account
+- **Download files and images** - on or off per Claude, ChatGPT and Lumo account
+- **Long pasted text** (Claude) - text you pasted into claude.ai shows as a "Pasted" card. Pastes of up to 5 lines always go into the note as a quote. For longer ones, choose **File, with a 5-line preview** (the default: saved in the chat's `Attachments` folder, and the note shows its first 5 lines with a link) or **All of it in the note**. Notes saved before follow the choice on the next sync
 - **Include archived chats** - claude.ai and ChatGPT keep archived chats in lists of their own. Turn this on to include them for the account. It is off by default. Sessions archived in the desktop apps follow the [Desktop app sessions](#desktop-app-sessions) settings.
 - **Separate archived chats** - off by default for each web account. This option appears when **Include archived chats** is on. On desktop, choose **Separate now** to file saved chats using the latest known status, including the status in their raw JSON, or **Next sync** to wait. If any saved status still needs checking, the account syncs. During a ChatGPT cooldown, local filing runs immediately and the existing retry handles the remaining checks. Turning separation off returns chats to their original folders and removes empty archive folders. Turning inclusion off pauses separation and remembers its setting. Normal syncs move newly archived or unarchived chats when the provider lists report the change. ChatGPT checks recent list pages on each sync and does a full reconciliation weekly. Use **Reconcile ChatGPT chats** to check the full lists sooner.
 
@@ -535,7 +536,7 @@ This plugin needs network access for the web providers. Please read this before 
 - **Account identifiers:** the name you give an account, and its claude.ai organization ID or ChatGPT workspace ID, are stored in `data.json` - these are not secrets
 - **Pasted login fallback (claude.ai, ChatGPT, Gemini and AI Studio):** if the login window doesn't work, you can paste a login cookie from your browser under the account's advanced settings (see the [FAQ](#faq)). It's kept in Obsidian's secret storage on this computer - never in the vault, `data.json`, notes or logs - and the login window wins if both are set. Google's cookies only go into a separate hidden window kept in memory, which is emptied after each sync. Lumo has no fallback: unlocking its encrypted chats needs keys only its login window holds
 - **Gemini and AI Studio:** Google has no API for either, so the plugin opens them in a hidden window with your Google login and reads the same data their own pages load. Requests are signed inside that page the way the page signs its own - no Google token is saved or logged. Google blocks logins from windows inside apps, so the Google login window says it's Firefox
-- **Proton Lumo:** Lumo stores chats end-to-end encrypted. To sync them, the plugin opens Lumo in a hidden window with your login and unlocks your keys for that one sync - the keys stay in memory and are never saved or logged. The chats are then saved **readable** in your vault, so anything that can read your vault can read them
+- **Proton Lumo:** Lumo stores chats end-to-end encrypted. To sync them, the plugin opens Lumo in a hidden window with your login and unlocks your keys for that one sync - the keys stay in memory and are never saved or logged. The chats, and the files in them (your uploads and what Lumo made), are then saved **readable** in your vault, so anything that can read your vault can read them
 - **ChatGPT's visual answers:** turned into plain HTML and pictures in your notes - nothing from a chat is ever run, and drawings can't load anything from other websites
 - **What is written:** transcripts, raw JSON, downloaded files and a sync log - only in the vault folders you choose. The sync index (in each computer's own file in the plugin folder, see [Several computers](#several-computers)) holds chat IDs and paths, no chat content and no secrets
 - **Files outside the vault (desktop apps and Hermes only):** the plugin *reads* local files only for what you turn on - for Claude Code and Codex: `~/.claude/projects`, the Claude desktop app's session list and Local Storage (for titles and sidebar groups), `~/.codex/.codex-global-state.json`, `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.codex/session_index.jsonl` and any extra folders you add; for Hermes: the `state.db` of each profile that is on. It never changes them and sends nothing over the network. Hermes snapshots are written to your system's temporary folder and deleted right after reading; if Obsidian has no built-in SQLite, a Python on your computer is started to make them. Hermes tool results can contain file contents, so they are shortened in the notes and steps mentioning a `Private` folder are left out

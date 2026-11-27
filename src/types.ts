@@ -20,6 +20,8 @@ export interface ListItem {
 	project_uuid?: string;
 	/** "CLAUDE_AI" for every chat seen so far (2026-11-05). */
 	platform?: string;
+	/** claude.ai: starred. Only compared when the list really carries it. */
+	is_starred?: boolean | null;
 }
 
 export interface ListPage {
@@ -41,6 +43,9 @@ export interface FileRef {
 	file_kind?: string;
 	size_bytes?: number;
 	success?: boolean;
+	/** messages[].attachments[]: text claude.ai keeps in the chat itself (a "Pasted" card, a text file); issue #64 */
+	id?: string;
+	extracted_content?: string;
 	[key: string]: unknown;
 }
 
@@ -64,6 +69,8 @@ export interface Chat {
 	updated_at: string;
 	project_uuid?: string;
 	is_archived?: boolean;
+	/** Starred on claude.ai (in the chat's own data, seen 2026-11-27). */
+	is_starred?: boolean | null;
 	current_leaf_message_uuid?: string;
 	chat_messages: ChatMessage[];
 }
@@ -90,6 +97,8 @@ export interface IndexEntry extends NoteState {
 	json: string;
 	md: string;
 	synced: string;
+	/** Pinned (Gemini) or starred (Lumo) at the provider, as the note last said. Missing = not compared yet. */
+	flagged?: boolean;
 	/** updated_at for which the chat-view files (ReadConversation) were last checked. */
 	outputsChecked?: string;
 	/** ChatGPT long chats: the older parts, each saved unchanged ("… (older 1).json" = just before the main file). */
@@ -107,4 +116,6 @@ export interface IndexEntry extends NoteState {
 	archiveMove?: ArchiveMove;
 	/** A move changed the links. Remember the new rendering without replacing the note. */
 	archiveViewMoved?: boolean;
+	/** Claude: the note was drawn by a plugin that shows pasted text (issue #64); older notes are redrawn once. */
+	pastes?: 1;
 }
