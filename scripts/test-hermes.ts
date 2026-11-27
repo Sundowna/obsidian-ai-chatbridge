@@ -268,6 +268,13 @@ async function main() {
 	expect('removeProfile: off the list', removeProfile(settings.hermes.profiles, nope) && settings.hermes.profiles.length === 1 && settings.hermes.profiles[0] === profile);
 	expect('removeProfile: vault files untouched', [...files.entries()].map(([p, d]) => `${p}:${d.length}`).join('|') === before);
 	expect('removeProfile: twice -> false', !removeProfile(settings.hermes.profiles, nope));
+	// Safety stop: many saved chats missing stops the sync before anything is written.
+	const ghosts = Object.assign(newProfile('ghosts', profileDir), { enabled: true });
+	for (let i = 0; i < 12; i++) ghosts.index[`g${i}`] = { rev: 'r', updated: '2026-01-01', md: `Moved away/ghost ${i}.md`, synced: '2026-01-01T00:00:00.000Z' };
+	settings.hermes.profiles = [profile, ghosts];
+	const guardNotes = [...files.keys()].filter((p) => !p.includes('log')).join('|');
+	const rg = await runHermesSync(plugin, undefined, undefined, node, NOW);
+	expect('guard: twelve saved chats missing stops the sync, nothing written', !!rg.stopped && rg.stopped.startsWith('12 of 12 saved Hermes chats of "ghosts" are not where the sync history says') && rg.listed === 0 && [...files.keys()].filter((p) => !p.includes('log')).join('|') === guardNotes, rg.stopped);
 	settings.hermes.profiles = [Object.assign(newProfile('p', 'D:/x/Private/hermes'), { enabled: true })];
 	const r7 = await runHermesSync(plugin, undefined, undefined, node, NOW);
 	expect('Private profile refused', !!r7.stopped && /Private/.test(r7.stopped));

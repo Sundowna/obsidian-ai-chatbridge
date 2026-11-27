@@ -6,11 +6,13 @@ import { tagAccount } from '../naming';
 import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
+import { OddChats, readOrSkip } from '../odd-chats';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
-import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from '../gemini/save';
+import { emptyResult, failureText, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, writeLog, type GoogleSyncResult } from '../gemini/save';
 import { renderStudioTranscript } from '../gemini/transcript';
 import { pastedSession } from '../cookies';
+import { MassMissingError } from '../missing-guard';
 import { StudioApi } from './api';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -27,15 +29,20 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 		progress('opening AI Studio…');
 		const a = await StudioApi.connect(loginRef('gemini', account), pastedSession(plugin.app, account.web.secretId));
 		api = a;
+		// AI Studio shares the Gemini login: the Google account the Gemini sync found decides.
+		const twin = sameGoogleLogin(plugin.settings.gemini, account, account.web.userId);
+		if (twin) throw new StopError(SAME_GOOGLE_LOGIN(twin.label));
+		const odd = new OddChats();
 		const items = await a.listPrompts(wait, (page) => progress(`reading AI Studio library… page ${page}`));
 		await saveChats(plugin, items, st.index, folder, masterRaw(plugin.settings) !== undefined ? mirrorRaw(folder, masterRaw(plugin.settings)) : rawBase(st.rawFolder) ?? folder, async (item) => {
-			const p = await a.prompt(item.uuid, wait);
+			// One prompt in an odd shape is skipped and tried again next run; the third one stops the sync.
+			const p = await readOrSkip(odd, item.name, () => a.prompt(item.uuid, wait));
 			if (!p) return null;
 			const created = p.messages.find((m) => m.createdAt)?.createdAt ?? p.updatedAt;
 			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name), account.label) };
-		}, progress, result);
+		}, progress, result, { label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label) });
 	} catch (e) {
-		if (e instanceof StopError) result.stopped = e.message;
+		if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `AI Studio's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else result.stopped = `Something went wrong while reading AI Studio (${failureText(e)}).`;
 	} finally {

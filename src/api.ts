@@ -6,9 +6,16 @@
 // (list, read) – never to anything that changes data.
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { NetworkFailure, sendWithRetry, triedText } from './net-retry';
 import { isUuid } from './schema';
 import { isOutputPath } from './files';
 import { recordAnswer, recordError, type ErrorSource } from './error-log';
+
+/** What to say when a request got no answer, with how often it was tried. */
+function networkWhy(e: unknown, key: string): string {
+	const cause = e instanceof NetworkFailure ? e.cause : e;
+	return `Network error: ${redact(cause instanceof Error ? cause.message : String(cause), key)}${e instanceof NetworkFailure ? triedText(e.tries) : ''}`;
+}
 
 export class StopError extends Error {}
 
@@ -205,7 +212,7 @@ export class ClaudeApi {
 		const payload = isJson ? body : body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
 		let res;
 		try {
-			res = await requestUrl({
+			res = await sendWithRetry(() => requestUrl({
 				url: `${ORIGIN}${RPC_BASE}${method}`,
 				method: 'POST',
 				contentType: isJson ? 'application/json' : 'application/proto',
@@ -217,9 +224,9 @@ export class ClaudeApi {
 					'anthropic-client-platform': 'web_claude_ai',
 				},
 				throw: false,
-			});
+			}));
 		} catch (e) {
-			const why = `Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`;
+			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}${RPC_BASE}${method}`, status: null, message: why, secrets: [key] });
 			throw new StopError(why);
 		}
@@ -279,16 +286,16 @@ export class ClaudeApi {
 		if (!key) throw new StopError('Not logged in to claude.ai. Use \'Log in to claude.ai\' in the plugin settings.');
 		let res;
 		try {
-			res = await requestUrl({
+			res = await sendWithRetry(() => requestUrl({
 				url: `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`,
 				method: 'POST',
 				contentType: 'application/json',
 				body: JSON.stringify(body),
 				headers: { Cookie: `sessionKey=${key}; lastActiveOrg=${this.orgId}`, Accept: 'application/json', 'anthropic-client-platform': 'web_claude_ai' },
 				throw: false,
-			});
+			}));
 		} catch (e) {
-			const why = `Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`;
+			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`, status: null, message: why, secrets: [key] });
 			throw new StopError(why);
 		}
@@ -341,14 +348,14 @@ export class ClaudeApi {
 
 		let res;
 		try {
-			res = await requestUrl({
+			res = await sendWithRetry(() => requestUrl({
 				url: url.toString(),
 				method: 'GET',
 				headers,
 				throw: false,
-			});
+			}));
 		} catch (e) {
-			const why = `Network error: ${redact(e instanceof Error ? e.message : String(e), key)}`;
+			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'GET', url: url.toString(), status: null, message: why, secrets: [key] });
 			throw new StopError(why);
 		}

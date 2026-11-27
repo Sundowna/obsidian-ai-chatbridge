@@ -45,6 +45,20 @@ export interface LumoWireConversation {
 	Messages?: LumoWireMessage[];
 }
 
+/** A file of a space: an upload, or something Lumo made. The list names them without content. */
+export interface LumoWireAsset {
+	ID: string;
+	AssetTag: string;
+	/** 0 = upload, 1 = picture Lumo made, 3 = document (artifact) Lumo made (Proton's client: AssetType). */
+	AssetType?: number | null;
+	CreateTime?: string;
+	DeleteTime?: string | null;
+	Encrypted?: string | null;
+}
+
+export const ASSET_GENERATED_IMAGE = 1;
+export const ASSET_GENERATED_DOC = 3;
+
 export interface LumoWireSpace {
 	ID: string;
 	/** Absent on older records. */
@@ -56,6 +70,7 @@ export interface LumoWireSpace {
 	SpaceKey: string;
 	SpaceTag: string;
 	Conversations?: LumoWireConversation[];
+	Assets?: LumoWireAsset[] | null;
 }
 
 export const SPACE_TYPE_DEFAULT = 0;

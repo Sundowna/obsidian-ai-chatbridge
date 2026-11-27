@@ -272,6 +272,33 @@ export async function writeNote(app: App, mdPath: string, md: string, o: NoteWri
 	return { hash: noteHash(md), outcome: 'updated', copy };
 }
 
+/** The note text with the yes/no property `key` set (`key: true`, placed before `model` or `raw`) or removed. */
+export function withFlag(md: string, key: string, on: boolean): string {
+	const parts = splitNote(md);
+	if (!parts) return md;
+	const all = entries(parts.fm);
+	const rest = all.filter(([k]) => k !== key);
+	if (on) {
+		const at = rest.findIndex(([k]) => k === 'model' || k === 'raw');
+		rest.splice(at < 0 ? rest.length : at, 0, [key, [`${key}: true`]]);
+	}
+	return joinNote({ fm: rest.flatMap(([, lines]) => lines), body: parts.body });
+}
+
+/**
+ * Sets or removes a yes/no property (pinned, starred) in a saved note, without touching its text.
+ * True when the note was changed; false when it already said so or is not there.
+ */
+export async function setNoteFlag(app: App, mdPath: string, key: string, on: boolean): Promise<boolean> {
+	const file = fileAt(app, mdPath);
+	if (!file) return false;
+	const current = (await app.vault.read(file)).replace(/\r\n/g, '\n');
+	const next = withFlag(current, key, on);
+	if (next === current) return false;
+	await app.vault.modify(file, next);
+	return true;
+}
+
 /** Writes a raw file: creates it (and its folder), or replaces the content of the one there. */
 export async function writeRaw(app: App, path: string, data: string | ArrayBuffer): Promise<void> {
 	await ensureFolder(app, dirOf(path));

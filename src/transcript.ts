@@ -1,7 +1,7 @@
 // Turns a chat's JSON into a plain Markdown transcript. Pure code, no AI.
 
 import type { Chat, ChatMessage, ContentBlock, FileRef } from './types';
-import { localDateTime } from './naming';
+import { localDateTime, modelProperty } from './naming';
 import { fitsInline, PASTE_PREVIEW_LINES, pastedLines, pastedText, type PastedText, type PasteMode } from './files';
 
 const ROOT_PARENT = '00000000-0000-4000-8000-000000000000';
@@ -38,7 +38,12 @@ const TOOL_PLACEHOLDER = /^```\s*\n?\s*This block is not supported on your curre
 
 type Part = { kind: 'text'; md: string } | { kind: 'tool' } | null;
 
-function blockToPart(b: ContentBlock): Part {
+/** Claude's reasoning as a folded callout, like Gemini's and Lumo's notes show theirs. */
+function reasoningCallout(text: string): string {
+	return ['> [!note]- Reasoning', ...text.trim().split('\n').map((l) => `> ${l}`)].join('\n');
+}
+
+function blockToPart(b: ContentBlock, showReasoning = false): Part {
 	switch (b.type) {
 		case 'text': {
 			const t = typeof b.text === 'string' ? b.text.trim() : '';
@@ -47,8 +52,12 @@ function blockToPart(b: ContentBlock): Part {
 		}
 		case 'tool_use':
 			return { kind: 'tool' };
-		case 'thinking':
-		case 'redacted_thinking': // Claude's private reasoning: kept in the raw JSON, left out here.
+		case 'thinking': {
+			// Claude's reasoning: always in the raw JSON; in the note only when the account's switch is on.
+			const t = showReasoning && typeof b.thinking === 'string' ? b.thinking.trim() : '';
+			return t ? { kind: 'text', md: reasoningCallout(t) } : null;
+		}
+		case 'redacted_thinking': // Reasoning claude.ai does not show: kept in the raw JSON, left out here.
 		case 'tool_result': // Machine output: kept in the raw JSON.
 			return null;
 		default:
@@ -101,7 +110,7 @@ function attachmentLines(list: FileRef[] | undefined, filePaths: Map<string, str
 	return out;
 }
 
-function messageBody(m: ChatMessage, filePaths: Map<string, string>, mode: PasteMode): string {
+function messageBody(m: ChatMessage, filePaths: Map<string, string>, mode: PasteMode, showReasoning = false): string {
 	const out: string[] = [];
 	let tools = 0; // consecutive tool steps, merged into one line
 	const flushTools = () => {
@@ -110,7 +119,7 @@ function messageBody(m: ChatMessage, filePaths: Map<string, string>, mode: Paste
 	};
 	if (Array.isArray(m.content) && m.content.length > 0) {
 		for (const b of m.content) {
-			const p = blockToPart(b);
+			const p = blockToPart(b, showReasoning);
 			if (!p) continue;
 			if (p.kind === 'tool') tools++;
 			else {
@@ -144,6 +153,8 @@ export interface TranscriptMeta {
 	filePaths?: Map<string, string>;
 	/** Files shown in claude.ai's chat view that are not mentioned in the chat data. */
 	extraFiles?: { name: string; path: string }[];
+	/** Put Claude's reasoning into the note, folded. Off unless the account's switch is on. */
+	showReasoning?: boolean;
 	/** Long pasted text: linked file with a preview, or all of it in the note (issue #64). */
 	pasteMode?: PasteMode;
 }
@@ -157,6 +168,9 @@ export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
 		`updated: ${chat.updated_at}`,
 	];
 	if (meta.projectName) fm.push(`project: ${y(meta.projectName)}`);
+	if (chat.is_starred === true) fm.push('starred: true');
+	// claude.ai names the chat's model at the top of its data (seen 2026-11-27).
+	fm.push(...modelProperty([(chat as unknown as { model?: unknown }).model]));
 	fm.push(`raw: ${y(`[[${meta.jsonFileName}]]`)}`, 'unread: true', '---', '');
 
 	const { messages, hasOtherBranches } = activeBranch(chat);
@@ -169,7 +183,7 @@ export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
 	}
 	for (const m of messages) {
 		const when = m.created_at ? ` · ${localDateTime(m.created_at)}` : '';
-		body.push(`## ${speaker(m.sender)}${when}`, '', messageBody(m, meta.filePaths ?? new Map<string, string>(), meta.pasteMode ?? 'file'), '');
+		body.push(`## ${speaker(m.sender)}${when}`, '', messageBody(m, meta.filePaths ?? new Map<string, string>(), meta.pasteMode ?? 'file', meta.showReasoning === true), '');
 	}
 	if (meta.extraFiles?.length) {
 		body.push('## Files', '');

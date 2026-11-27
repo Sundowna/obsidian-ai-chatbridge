@@ -17,7 +17,7 @@ export const COMPUTER_FILE_VERSION = 1;
 export const WEB_LOCAL = {
 	claude: ['index', 'fileIndex', 'cloudIndex', 'projectCatalog', 'archiveCleanup'],
 	chatgpt: ['index', 'fileIndex', 'codexCloudIndex', 'cooldownUntil', 'resumeAfter429', 'assetRetries', 'pendingCaptures', 'inventories', 'chatProgress', 'projectCatalog', 'archiveCleanup'],
-	lumo: ['index', 'projectCatalog'],
+	lumo: ['index', 'fileIndex', 'projectCatalog'],
 	gemini: ['index'],
 } as const;
 export const STUDIO_LOCAL = ['index'] as const;

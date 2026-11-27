@@ -98,7 +98,7 @@ export function mergeOthers(s: Settings, others: ComputerFile[], here: string, e
 						if (!isObj(web[field])) web[field] = {};
 						n += mergeIndex(web[field] as Obj, own.web[field], exists);
 					}
-					if (provider === 'claude' || provider === 'chatgpt') {
+					if (provider === 'claude' || provider === 'chatgpt' || provider === 'lumo') {
 						if (!isObj(web.fileIndex)) web.fileIndex = {};
 						mergeFiles(web.fileIndex as Record<string, string>, own.web.fileIndex);
 					}

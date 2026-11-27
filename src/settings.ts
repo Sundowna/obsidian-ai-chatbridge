@@ -55,6 +55,8 @@ export interface ClaudeWebSettings {
 	recentFolderName: string;
 	/** Also download the files listed in a chat (Artifacts/ and Attachments/ next to the chat). */
 	downloadFiles: boolean;
+	/** Put Claude's reasoning into the note, folded. Missing = off; it is always in the raw file. */
+	showReasoning?: boolean;
 	/** Pasted text longer than 5 lines (issue #64): "file" = saved file, linked with a 5-line preview; "note" = all of it in the note. Missing = "file". */
 	pastedText?: PasteMode;
 	/** Also read claude.ai's archived chats (a list of their own). Missing = off. */
@@ -110,6 +112,8 @@ export interface GptSettings {
 	separateArchived?: boolean;
 	/** Archive folders awaiting empty-folder cleanup on this computer. */
 	archiveCleanup?: string[];
+	/** Put ChatGPT's reasoning into the note, folded. Missing = off; it is always in the raw file. */
+	showReasoning?: boolean;
 	/** Pinned chats sit in lists of their own (issue #32). Missing = on. */
 	includePinned?: boolean;
 	cooldownUntil?: number;
@@ -147,7 +151,11 @@ export interface LumoSettings {
 	projectFolders?: Record<string, string>;
 	/** Picker row ID -> folder for that project's raw .json files. Missing = the default (see raw-folders.ts). */
 	projectRawFolders?: Record<string, string>;
+	/** Also save the chats' files: your uploads to Attachments/, what Lumo made to Artifacts/. */
+	downloadFiles: boolean;
 	index: Record<string, IndexEntry>;
+	/** File key (see lumo/assets.ts) -> vault path, so each file is fetched once. */
+	fileIndex: Record<string, string>;
 	/** The Proton account behind this login (not secret), to notice the same login twice. */
 	userId?: string;
 }
@@ -279,9 +287,11 @@ export const DEFAULT_LUMO: LumoSettings = {
 	folder: FIRST.lumoChat,
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
+	downloadFiles: true,
 	onlyProjects: false,
 	projects: [],
 	index: {},
+	fileIndex: {},
 };
 
 export const DEFAULT_GEMINI: GeminiSettings = {

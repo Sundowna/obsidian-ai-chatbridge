@@ -6,6 +6,7 @@
 import { TFile } from 'obsidian';
 import type AIChatBridge from '../main';
 import { appendLog } from '../log';
+import { guardMissing } from '../missing-guard';
 import { baseName, dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
 import { cleanFolder } from '../settings';
@@ -97,6 +98,11 @@ export async function runHermesSync(
 		const reader = backend === undefined ? await pickBackend(h.pythonPath, profiles.map((p) => p.path)) : backend;
 		if (!reader) throw new Error('No way to read SQLite here: Obsidian has no built-in SQLite and no working Python was found. Set one under Hermes → Advanced → Python.');
 		result.backend = reader.name;
+		// Before anything is written: many saved chats missing means a wrong sync history, not deletions.
+		for (const p of profiles) {
+			const saved = Object.values(p.index);
+			guardMissing(`Hermes chats of "${p.label}"`, saved.length, saved.filter((e) => !exists(e.md)).length);
+		}
 
 		for (const profile of profiles) {
 			progress(`Hermes ${profile.label}: reading sessions…`);

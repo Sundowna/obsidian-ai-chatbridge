@@ -1,7 +1,7 @@
 // Checks Lumo's answers before anything uses them. Anything unexpected stops the sync.
 
 import { ShapeError } from '../schema';
-import type { LumoMasterKeyRow, LumoStoredSession, LumoUserKey, LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
+import type { LumoMasterKeyRow, LumoStoredSession, LumoUserKey, LumoWireAsset, LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
 
 type Row = Record<string, unknown>;
 
@@ -64,6 +64,14 @@ export function checkConversation(v: unknown): LumoWireConversation {
 
 export function checkFullMessage(v: unknown): LumoWireMessage {
 	return checkMessage(checkEnvelope(v, 'message').Message);
+}
+
+/** One file of a space, with its encrypted content. */
+export function checkAsset(v: unknown): LumoWireAsset {
+	const r = row(checkEnvelope(v, 'file').Asset, 'Asset');
+	if (!text(r.ID) || !text(r.AssetTag)) throw new ShapeError('file lacks its ID or tag');
+	if (r.Encrypted !== undefined && r.Encrypted !== null && typeof r.Encrypted !== 'string') throw new ShapeError('file content is not text');
+	return r as unknown as LumoWireAsset;
 }
 
 export function checkMasterKeys(v: unknown): LumoMasterKeyRow[] {

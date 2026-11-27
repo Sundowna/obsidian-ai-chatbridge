@@ -69,7 +69,7 @@ export function addAccount(s: Settings, provider: Provider, label: string): AnyA
 	}
 	if (provider === 'lumo') {
 		const first = s.lumo[0]!;
-		const account: LumoAccount = { id: newId(), label: name, web: { ...DEFAULT_LUMO, projects: [], index: {}, folder: first.web.folder, rawFolder: first.web.rawFolder } };
+		const account: LumoAccount = { id: newId(), label: name, web: { ...DEFAULT_LUMO, projects: [], index: {}, fileIndex: {}, folder: first.web.folder, rawFolder: first.web.rawFolder } };
 		s.lumo.push(account);
 		return account;
 	}
