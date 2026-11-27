@@ -16,6 +16,11 @@ import { BrowserLinkUnavailable } from '../link/errors';
 import { batchPayload, checkChatId, readChatPage, readListPage } from './wire';
 import type { GeminiListItem } from './types';
 
+/**
+ * Gemini for the Nth Google account signed in to the browser (Google's account switcher):
+ * /u/N/ before the path, for the page and its calls (seen 2026-11-27). Missing = the default one.
+ */
+export const geminiBase = (googleUser?: number): string => (googleUser === undefined ? 'https://gemini.google.com' : `https://gemini.google.com/u/${googleUser}`);
 const START = 'https://gemini.google.com/app';
 const OPEN_TIMEOUT_MS = 45_000;
 const LIST_CHATS = 'MaZiqc';
@@ -43,19 +48,19 @@ export async function googleLogin(login: LoginRef, fallback: string | null): Pro
 const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class GeminiApi {
-	private constructor(private readonly page: SitePage, private readonly source: ErrorSource, private readonly transport?: Transport) {}
+	private constructor(private readonly page: SitePage, private readonly source: ErrorSource, private readonly transport?: Transport, private readonly googleUser?: number) {}
 
 	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
-	static async connect(login: LoginRef, fallback: string | null = null): Promise<GeminiApi> {
+	static async connect(login: LoginRef, fallback: string | null = null, googleUser?: number): Promise<GeminiApi> {
 		const pasted = await googleLogin(login, fallback);
-		const page = await transportFor(login).openPage(START, 'gemini-signed-in', OPEN_TIMEOUT_MS, pasted);
+		const page = await transportFor(login).openPage(`${geminiBase(googleUser)}/app`, 'gemini-signed-in', OPEN_TIMEOUT_MS, pasted);
 		if (!page) {
 			recordError({ provider: 'gemini', accountId: login.id }, { service: 'Gemini', method: 'OPEN', url: START, status: null, message: 'the Gemini page did not open signed in' });
 			throw new StopError(pasted
 				? 'Gemini did not open signed in with the pasted cookies. They may have expired: paste fresh ones, or log in instead.'
 				: 'Gemini did not open signed in. Log in to Google again in the plugin settings.');
 		}
-		return new GeminiApi(page, { provider: 'gemini', accountId: login.id }, transportFor(login));
+		return new GeminiApi(page, { provider: 'gemini', accountId: login.id }, transportFor(login), googleUser);
 	}
 
 	close(): void {
@@ -149,12 +154,13 @@ export class GeminiApi {
 	private async call(rpcId: string, args: unknown[]): Promise<unknown> {
 		if (!ALLOWED.has(rpcId)) throw new StopError('Blocked a Gemini call the plugin does not use.');
 		// The page adds its own request token (`at`) and build values (`bl`, `f.sid`).
-		const q = new URLSearchParams({ rpcids: rpcId, 'source-path': '/app', hl: 'en', _reqid: String(100000 + Math.floor(Math.random() * 900000)), rt: 'c' });
+		const prefix = this.googleUser === undefined ? '' : `/u/${this.googleUser}`;
+		const q = new URLSearchParams({ rpcids: rpcId, 'source-path': `${prefix}/app`, hl: 'en', _reqid: String(100000 + Math.floor(Math.random() * 900000)), rt: 'c' });
 		const body = new URLSearchParams({ 'f.req': JSON.stringify([[[rpcId, JSON.stringify(args), null, 'generic']]]) }).toString();
 		let res: PageAnswer;
 		try {
 			res = await sendWithRetry(() => this.page.call({
-				url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?${q.toString()}`,
+				url: `${geminiBase(this.googleUser)}/_/BardChatUi/data/batchexecute?${q.toString()}`,
 				method: 'POST',
 				headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'X-Same-Domain': '1' },
 				body,

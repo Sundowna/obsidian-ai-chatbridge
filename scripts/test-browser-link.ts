@@ -12,7 +12,8 @@ import { testHooks } from 'obsidian';
 import { LinkServer, type TokenStore } from '../src/link/server';
 import { BrowserLinkUnavailable } from '../src/link/errors';
 import { fetchFrames, fromBase64 } from '../src/link/protocol';
-import { linkState, loginMethodOf, secretTokenStore, usesBrowserLink, LINK_SECRET_ID } from '../src/link/account';
+import { linkState, loginMethodOf, readTokens, secretTokenStore, usesBrowserLink, writeTokens, LINK_SECRET_ID } from '../src/link/account';
+import { BrowserLinkTransport } from '../src/transport/browser-link';
 import { setBrowserLink, transportFor, type PageCall } from '../src/transport';
 import { pageCallCode, READ_CODE, READY_CODE, SITE_VALUE_COOKIE } from '../src/transport/login-window';
 import type { SiteValue } from '../src/transport';
@@ -24,7 +25,9 @@ import { runGptSync } from '../src/chatgpt/sync';
 import { asFirefoxHeaders, isGoogleSignIn, openLogin } from '../src/login';
 import { isLinkOpenPage, LINK_OPEN_PATH } from '../src/link/sites';
 import { pageCall, pageRead, readyCheck } from '../extension/src/page';
-import { GeminiApi } from '../src/gemini/api';
+import { GeminiApi, geminiBase } from '../src/gemini/api';
+import { checkLogin, forgetLogin } from '../src/login-check';
+import { StopError } from '../src/api';
 import { StudioApi } from '../src/studio/api';
 import { runGeminiSync } from '../src/gemini/sync';
 import { runStudioSync } from '../src/studio/sync';
@@ -499,6 +502,99 @@ async function testOpenPage() {
 	}
 }
 
+// ---- Several browsers (personal and work in two browsers or profiles) ----------------------
+
+/** A stand-in extension with its own browser ID: pairs (or says hello with a token) and answers. */
+async function namedBrowser(port: number, first: Record<string, unknown>, answer: (m: Msg) => unknown[]): Promise<{ ws: WebSocket; reply: Record<string, unknown> }> {
+	const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: EXT });
+	const reply = await new Promise<Record<string, unknown>>((resolve, reject) => {
+		ws.on('open', () => ws.send(JSON.stringify(first)));
+		ws.once('message', (raw) => resolve(JSON.parse(String(raw)) as Record<string, unknown>));
+		ws.on('error', reject);
+		ws.on('close', () => resolve({ closed: true }));
+	});
+	ws.on('message', (raw) => {
+		const m = JSON.parse(String(raw)) as Msg;
+		if (m.id === undefined) return;
+		for (const f of answer(m)) ws.send(JSON.stringify(f));
+	});
+	return { ws, reply };
+}
+
+async function testSeveralBrowsers() {
+	const store = memStore();
+	const named: string[] = [];
+	const server = new LinkServer({ store, onPaired: (b) => named.push(b) });
+	const port = await server.start();
+	const val = (who: string) => (m: Msg) => (m.op === 'read' ? [{ id: m.id, ok: true, value: who }] : []);
+	try {
+		const home = await namedBrowser(port, { op: 'pair', code: server.newPairingCode(), browser: 'personal-1' }, val('home-org'));
+		const work = await namedBrowser(port, { op: 'pair', code: server.newPairingCode(), browser: 'work-0001' }, val('work-org'));
+		await sleep(50);
+		expect('several browsers: each pairs with its own ID and both stay connected', home.reply.op === 'paired' && work.reply.op === 'paired' && server.linkedBrowsers().sort().join() === 'personal-1,work-0001' && named.join() === 'personal-1,work-0001', server.linkedBrowsers().join());
+		expect('several browsers: each has its own saved token', Object.keys(readTokens(store.value)).sort().join() === 'personal-1,work-0001' && readTokens(store.value)['personal-1'] !== readTokens(store.value)['work-0001']);
+		const toHome = await server.siteValue('https://claude.ai/', 'claude-org', 5000, 'personal-1');
+		const toWork = await server.siteValue('https://claude.ai/', 'claude-org', 5000, 'work-0001');
+		expect('several browsers: each request goes to the browser the account names', toHome === 'home-org' && toWork === 'work-org', `${toHome} ${toWork}`);
+		home.ws.close();
+		await sleep(80);
+		const stillWork = await server.siteValue('https://claude.ai/', 'claude-org', 5000, 'work-0001');
+		const homeGone = await rejection(server.siteValue('https://claude.ai/', 'claude-org', 5000, 'personal-1'));
+		expect('several browsers: one closing does not touch the other; its own account is skipped as closed', stillWork === 'work-org' && homeGone instanceof BrowserLinkUnavailable && homeGone.reason === 'browser-closed', homeGone?.message);
+		const tokenOf = (id: string) => readTokens(store.value)[id]!;
+		const back = await namedBrowser(port, { op: 'hello', token: tokenOf('personal-1'), browser: 'personal-1' }, val('home-org'));
+		const wrong = await namedBrowser(port, { op: 'hello', token: tokenOf('work-0001'), browser: 'personal-1' }, val('x'));
+		expect('several browsers: a browser comes back with its own token; another browser\'s token is refused', back.reply.op === 'welcome' && wrong.reply.closed === true);
+		server.unpair('work-0001');
+		await sleep(50);
+		expect('several browsers: unpairing one forgets only that one', Object.keys(readTokens(store.value)).join() === 'personal-1' && server.linkedBrowsers().join() === 'personal-1');
+		const t = new BrowserLinkTransport(() => server, 'work-0001');
+		const notPaired = await rejection(t.siteValue('claude-org'));
+		expect('several browsers: an account whose browser was unpaired is skipped as not paired', notPaired instanceof BrowserLinkUnavailable && notPaired.reason === 'not-paired');
+		back.ws.close();
+	} finally {
+		await server.stop();
+	}
+
+	// An older extension (one token, no ID) keeps working, and an updated one keeps its pairing.
+	const old = memStore();
+	old.value = 'legacy-token-value';
+	const s2 = new LinkServer({ store: old });
+	const p2 = await s2.start();
+	try {
+		const legacy = await namedBrowser(p2, { op: 'hello', token: 'legacy-token-value' }, val('legacy'));
+		expect('older extension: says hello without an ID and is let in with the one saved token', legacy.reply.op === 'welcome' && s2.linkedBrowsers().join() === 'default');
+		legacy.ws.close();
+		await sleep(50);
+		const updated = await namedBrowser(p2, { op: 'hello', token: 'legacy-token-value', browser: 'upgraded-01' }, val('u'));
+		expect('updated extension: keeps the old pairing under its new ID', updated.reply.op === 'welcome' && Object.keys(readTokens(old.value)).join() === 'upgraded-01');
+		updated.ws.close();
+	} finally {
+		await s2.stop();
+	}
+	expect('tokens: a plain older token reads as the default browser; odd saved text reads as none', readTokens('abc').default === 'abc' && Object.keys(readTokens('{"x":1')).length === 0 && writeTokens({}) === null);
+}
+
+// ---- Which login an account reads (login-check.ts), and the Google account number ----------
+
+function testLoginCheck() {
+	const bound: { loginUser?: string; loginEmail?: string } = {};
+	expect('login check: the first login is remembered', checkLogin('claude.ai', bound, { id: 'u-home', email: 'me@home.example' }, [], true) && bound.loginUser === 'u-home' && bound.loginEmail === 'me@home.example');
+	expect('login check: the same login again changes nothing', checkLogin('claude.ai', bound, { id: 'u-home', email: 'me@home.example' }, [], true) === false);
+	let skipped: unknown = null;
+	try { checkLogin('claude.ai', bound, { id: 'u-work', email: 'me@work.example' }, [], true); } catch (e) { skipped = e; }
+	expect('login check: another login in the browser is skipped, naming who is logged in and who is expected', skipped instanceof BrowserLinkUnavailable && skipped.reason === 'other-login' && skipped.message.includes('me@work.example') && skipped.message.includes('me@home.example') && bound.loginUser === 'u-home', skipped instanceof Error ? skipped.message : '');
+	let stopped: unknown = null;
+	try { checkLogin('claude.ai', bound, { id: 'u-work' }, [], false); } catch (e) { stopped = e; }
+	expect('login check: another login in the login window stops the sync', stopped instanceof StopError && !(stopped instanceof BrowserLinkUnavailable));
+	let twin: unknown = null;
+	try { checkLogin('claude.ai', {}, { id: 'u-home' }, [{ label: 'Personal', web: bound }], true); } catch (e) { twin = e; }
+	expect('login check: a login another account already holds stops, naming that account', twin instanceof StopError && (twin as Error).message.includes('"Personal"'));
+	forgetLogin(bound);
+	expect('login check: "Accept this login" forgets it, and the next sync takes the new one', !bound.loginUser && checkLogin('claude.ai', bound, { id: 'u-work' }, [], true) && bound.loginUser === 'u-work');
+	expect('Google account number: Gemini uses /u/N/ for the Nth account, nothing for the default one', geminiBase(undefined) === 'https://gemini.google.com' && geminiBase(2) === 'https://gemini.google.com/u/2');
+}
+
 async function main() {
 	testSwitch();
 	await testTransport();
@@ -507,6 +603,8 @@ async function main() {
 	await testClaudeAndGpt();
 	await testGoogleMode();
 	await testOpenPage();
+	await testSeveralBrowsers();
+	testLoginCheck();
 	console.log(failures ? `${failures} Browser link check(s) FAILED.` : 'All Browser link checks passed.');
 	process.exit(failures ? 1 : 0);
 }

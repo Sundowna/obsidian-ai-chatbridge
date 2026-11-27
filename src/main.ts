@@ -103,9 +103,31 @@ export default class AIChatBridge extends Plugin {
 	readonly computers = new ComputerStore(() => this.app.vault.adapter, () => this.manifest?.dir);
 	/** The Browser link server: runs only while an account uses the link, and only on a computer. */
 	readonly browserLink = new LinkManager(
-		() => ({ store: this.linkTokens(), port: this.settings.browserLinkPort }),
+		() => ({ store: this.linkTokens(), port: this.settings.browserLinkPort, onPaired: (browser: string) => this.namePairedBrowser(browser) }),
 		() => Platform.isDesktopApp,
 	);
+
+	/** Paired browsers' names, kept on this computer only (browser IDs differ per computer). */
+	browserNames(): Record<string, string> {
+		const v: unknown = this.app.loadLocalStorage('ai-chatbridge-browser-names');
+		return typeof v === 'object' && v !== null && !Array.isArray(v) ? { ...(v as Record<string, string>) } : {};
+	}
+
+	setBrowserName(browser: string, name: string): void {
+		const names = this.browserNames();
+		names[browser] = name.trim().slice(0, 60) || names[browser] || 'Browser';
+		this.app.saveLocalStorage('ai-chatbridge-browser-names', names);
+	}
+
+	/** The name the pairing window asked for, used once by the next browser that pairs. */
+	pendingBrowserName: string | null = null;
+
+	private namePairedBrowser(browser: string): void {
+		const names = this.browserNames();
+		if (this.pendingBrowserName) this.setBrowserName(browser, this.pendingBrowserName);
+		else if (!names[browser]) this.setBrowserName(browser, `Browser ${Object.keys(names).length + 1}`);
+		this.pendingBrowserName = null;
+	}
 
 	/** The extension's token, in Obsidian's secret storage on this computer. */
 	linkTokens(): TokenStore {
@@ -147,7 +169,10 @@ export default class AIChatBridge extends Plugin {
 		setBrowserLink((login) => {
 			const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
 			return !!account && usesBrowserLink(login.provider, account as GeminiAccount);
-		}, () => this.browserLink.server);
+		}, () => this.browserLink.server, (login) => {
+			const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
+			return (account as GeminiAccount | undefined)?.web.linkBrowser || undefined;
+		});
 		void this.updateBrowserLink();
 		registerLayoutIcons(this);
 		this.statusEl = this.addStatusBarItem();

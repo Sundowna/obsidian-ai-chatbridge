@@ -6,6 +6,7 @@
 
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { BrowserLinkError, BrowserLinkUnavailable } from './errors';
+import { isBrowserId, LEGACY_BROWSER, readTokens, writeTokens } from './account';
 import { isExtensionOrigin, isLinkImage, isLinkPage, isLinkTarget, LINK_OPEN_PATH } from './sites';
 import {
 	BodyAssembler, MAX_FRAME_BYTES, toBase64,
@@ -26,6 +27,8 @@ export interface LinkServerOptions {
 	helloTimeoutMs?: number;
 	codeLifetimeMs?: number;
 	now?: () => number;
+	/** A browser was paired (its ID): the plugin names it. */
+	onPaired?: (browser: string) => void;
 }
 
 /** The page behind the "Open in browser" button; the extension turns it into its own page. */
@@ -59,6 +62,8 @@ const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_WRONG_CODES = 5;
 
 interface Pending {
+	/** The browser asked, so its answers and its closing only touch its own requests. */
+	browser: string;
 	resolve: (v: unknown) => void;
 	reject: (e: Error) => void;
 	timer: number;
@@ -74,7 +79,8 @@ function sameSecret(a: string, b: string): boolean {
 export class LinkServer {
 	private http: Server | null = null;
 	private wss: WebSocketServer | null = null;
-	private sock: WebSocket | null = null;
+	/** One connection per paired browser (by the extension's own ID). */
+	private readonly socks = new Map<string, WebSocket>();
 	/** The linked Chrome, Edge or Brave extension's ID (not secret), from its connection; for the open page. */
 	private chromeExtensionId: string | null = null;
 	private readonly pending = new Map<number, Pending>();
@@ -100,11 +106,26 @@ export class LinkServer {
 
 	/** A browser is connected and has proved itself. */
 	get linked(): boolean {
-		return this.sock?.readyState === WebSocket.OPEN;
+		return this.linkedBrowsers().length > 0;
 	}
 
 	get paired(): boolean {
-		return !!this.opts.store.get();
+		return this.pairedBrowsers().length > 0;
+	}
+
+	/** The paired browsers' IDs. */
+	pairedBrowsers(): string[] {
+		return Object.keys(readTokens(this.opts.store.get()));
+	}
+
+	/** The browsers connected now. */
+	linkedBrowsers(): string[] {
+		return [...this.socks].filter(([, ws]) => ws.readyState === WebSocket.OPEN).map(([id]) => id);
+	}
+
+	/** Whether this browser (or, without one, any browser) is connected now. */
+	isLinked(browser?: string): boolean {
+		return browser ? this.linkedBrowsers().includes(browser) : this.linked;
 	}
 
 	/** Starts listening on 127.0.0.1; returns the port. */
@@ -167,7 +188,7 @@ export class LinkServer {
 	}
 
 	async stop(): Promise<void> {
-		this.dropLink();
+		for (const id of [...this.socks.keys()]) this.dropLink(id);
 		const wss = this.wss;
 		const http = this.http;
 		this.wss = null;
@@ -189,26 +210,29 @@ export class LinkServer {
 		return `${this.boundPort}-${secret.slice(0, 4)}-${secret.slice(4, 8)}-${secret.slice(8)}`;
 	}
 
-	/** Forgets the paired browser. */
-	unpair(): void {
-		this.opts.store.set(null);
+	/** Forgets one paired browser, or (without an ID) every one. */
+	unpair(browser?: string): void {
+		const tokens = readTokens(this.opts.store.get());
+		for (const id of browser ? [browser] : Object.keys(tokens)) delete tokens[id];
+		this.opts.store.set(writeTokens(tokens));
 		this.code = null;
-		this.dropLink();
+		for (const id of browser ? [browser] : [...this.socks.keys()]) this.dropLink(id);
 	}
 
-	private dropLink(): void {
-		const s = this.sock;
-		this.sock = null;
+	private dropLink(browser: string): void {
+		const s = this.socks.get(browser);
+		this.socks.delete(browser);
 		if (s && s.readyState <= WebSocket.OPEN) s.close(1000);
-		this.failAll(new BrowserLinkUnavailable('browser-closed'));
+		this.failAll(new BrowserLinkUnavailable('browser-closed'), browser);
 	}
 
-	private failAll(e: Error): void {
-		for (const p of this.pending.values()) {
+	private failAll(e: Error, browser?: string): void {
+		for (const [id, p] of this.pending) {
+			if (browser !== undefined && p.browser !== browser) continue;
 			window.clearTimeout(p.timer);
 			p.reject(e);
+			this.pending.delete(id);
 		}
-		this.pending.clear();
 	}
 
 	private onConnection(ws: WebSocket, origin?: string): void {
@@ -216,30 +240,46 @@ export class LinkServer {
 		ws.once('message', (raw) => {
 			window.clearTimeout(timer);
 			const hello = this.parse(raw) as Partial<Hello> | null;
-			const welcome = hello ? this.check(hello) : null;
-			if (!welcome) {
+			const ok = hello ? this.check(hello) : null;
+			if (!ok) {
 				ws.close(1008);
 				return;
 			}
-			const old = this.sock;
-			this.sock = ws; // one browser: the newest proven connection wins
-			this.chromeExtensionId = /^chrome-extension:\/\/([a-p]{32})$/.exec(origin ?? '')?.[1] ?? null;
+			const { welcome, browser } = ok;
+			// One connection per browser: a newer one of the same browser replaces it; other browsers stay.
+			const old = this.socks.get(browser);
+			this.socks.set(browser, ws);
+			const chromeId = /^chrome-extension:\/\/([a-p]{32})$/.exec(origin ?? '')?.[1];
+			if (chromeId) this.chromeExtensionId = chromeId;
 			if (old && old !== ws) old.close(1000);
 			ws.on('message', (m) => this.onMessage(ws, m));
 			ws.on('close', () => {
-				if (this.sock !== ws) return;
-				this.sock = null;
-				this.failAll(new BrowserLinkUnavailable('browser-closed'));
+				if (this.socks.get(browser) !== ws) return;
+				this.socks.delete(browser);
+				this.failAll(new BrowserLinkUnavailable('browser-closed'), browser);
 			});
 			ws.send(JSON.stringify(welcome));
 		});
 	}
 
-	/** Checks a first frame; the answer to send, or null to refuse. */
-	private check(hello: Partial<Hello>): Welcome | null {
+	/** Checks a first frame; the answer to send and the browser it is, or null to refuse. */
+	private check(hello: Partial<Hello>): { welcome: Welcome; browser: string } | null {
+		const browser = isBrowserId(hello.browser) ? hello.browser : LEGACY_BROWSER;
 		if (hello.op === 'hello') {
-			const token = this.opts.store.get();
-			return token && typeof hello.token === 'string' && sameSecret(hello.token, token) ? { op: 'welcome' } : null;
+			if (typeof hello.token !== 'string') return null;
+			const tokens = readTokens(this.opts.store.get());
+			const token = tokens[browser];
+			if (token) return sameSecret(hello.token, token) ? { welcome: { op: 'welcome' }, browser } : null;
+			// An extension updated to send its own ID, paired before with the one older token: it keeps that pairing.
+			const legacy = tokens[LEGACY_BROWSER];
+			if (browser !== LEGACY_BROWSER && legacy && sameSecret(hello.token, legacy)) {
+				delete tokens[LEGACY_BROWSER];
+				tokens[browser] = legacy;
+				this.opts.store.set(writeTokens(tokens));
+				this.opts.onPaired?.(browser);
+				return { welcome: { op: 'welcome' }, browser };
+			}
+			return null;
 		}
 		if (hello.op === 'pair' && typeof hello.code === 'string') {
 			const c = this.code;
@@ -251,8 +291,11 @@ export class LinkServer {
 			}
 			this.code = null; // single use
 			const token = cryptoModule().randomBytes(32).toString('base64url');
-			this.opts.store.set(token);
-			return { op: 'paired', token };
+			const tokens = readTokens(this.opts.store.get());
+			tokens[browser] = token;
+			this.opts.store.set(writeTokens(tokens));
+			this.opts.onPaired?.(browser);
+			return { welcome: { op: 'paired', token }, browser };
 		}
 		return null;
 	}
@@ -305,67 +348,82 @@ export class LinkServer {
 		}
 	}
 
-	/** Sends one request to the browser and waits for its answer. */
-	private send(req: LinkRequest, timeoutMs: number): Promise<unknown> {
-		const ws = this.sock;
-		if (!ws || ws.readyState !== WebSocket.OPEN) {
-			return Promise.reject(new BrowserLinkUnavailable(this.paired ? 'browser-closed' : 'not-paired'));
+	/**
+	 * The connection for `browser`; without one, the only browser connected (or, with several, the
+	 * first: an account that names no browser takes whichever is there, as before).
+	 */
+	private target(browser?: string): [string, WebSocket] | null {
+		if (browser) {
+			const ws = this.socks.get(browser);
+			return ws && ws.readyState === WebSocket.OPEN ? [browser, ws] : null;
 		}
+		const open = [...this.socks].filter(([, ws]) => ws.readyState === WebSocket.OPEN);
+		return open[0] ?? null;
+	}
+
+	/** Sends one request to the browser and waits for its answer. */
+	private send(req: LinkRequest, timeoutMs: number, browser?: string): Promise<unknown> {
+		const t = this.target(browser);
+		if (!t) {
+			const paired = browser ? this.pairedBrowsers().includes(browser) : this.paired;
+			return Promise.reject(new BrowserLinkUnavailable(paired ? 'browser-closed' : 'not-paired'));
+		}
+		const [which, ws] = t;
 		const id = this.nextId++;
 		return new Promise((resolve, reject) => {
 			const timer = window.setTimeout(() => {
 				this.pending.delete(id);
 				reject(new BrowserLinkError(`The browser did not answer within ${Math.round(timeoutMs / 1000)} s.`));
 			}, timeoutMs);
-			this.pending.set(id, { resolve, reject, timer });
+			this.pending.set(id, { browser: which, resolve, reject, timer });
 			ws.send(JSON.stringify({ id, ...req }));
 		});
 	}
 
 	/** A request from a tab of the site, with the browser's own cookies. */
-	async fetch(url: string, method: 'GET' | 'POST', headers: Record<string, string>, body?: string | ArrayBuffer, redirect?: 'follow' | 'manual', timeoutMs = 120_000): Promise<FetchResult> {
+	async fetch(url: string, method: 'GET' | 'POST', headers: Record<string, string>, body?: string | ArrayBuffer, redirect?: 'follow' | 'manual', timeoutMs = 120_000, browser?: string): Promise<FetchResult> {
 		const picture = isLinkImage(url) && method === 'GET' && body === undefined;
 		if (!isLinkTarget(url) && !picture) throw new BrowserLinkError('Blocked: not a site the Browser link may reach.');
 		if (method !== 'GET' && method !== 'POST') throw new BrowserLinkError('Blocked: only GET and POST go through the Browser link.');
 		const bytes = body === undefined ? undefined : typeof body === 'string' ? new TextEncoder().encode(body) : new Uint8Array(body);
 		const req: LinkRequest = { op: 'fetch', url, method, headers, ...(bytes ? { body64: toBase64(bytes) } : {}), ...(redirect ? { redirect } : {}) };
-		return (await this.send(req, timeoutMs)) as FetchResult;
+		return (await this.send(req, timeoutMs, browser)) as FetchResult;
 	}
 
 	/** Opens a background tab of the site (its own, never one of yours) and waits until `ready` holds. */
-	async open(url: string, ready: ReadyCheck, timeoutMs: number): Promise<string> {
+	async open(url: string, ready: ReadyCheck, timeoutMs: number, browser?: string): Promise<string> {
 		if (!isLinkPage(url)) throw new BrowserLinkError('Blocked: not a site the Browser link may open.');
-		const a = (await this.send({ op: 'open', url, ready, timeoutMs }, timeoutMs + 15_000)) as OpenAnswer;
+		const a = (await this.send({ op: 'open', url, ready, timeoutMs }, timeoutMs + 15_000, browser)) as OpenAnswer;
 		return a.page;
 	}
 
 	/** One signed call from a tab opened with `open`. */
-	async call(page: string, c: PageCall, timeoutMs = 120_000): Promise<PageAnswer> {
+	async call(page: string, c: PageCall, timeoutMs = 120_000, browser?: string): Promise<PageAnswer> {
 		if (!isLinkTarget(c.url)) throw new BrowserLinkError('Blocked: not a site the Browser link may reach.');
-		return ((await this.send({ op: 'call', page, call: c }, timeoutMs)) as CallAnswer).answer;
+		return ((await this.send({ op: 'call', page, call: c }, timeoutMs, browser)) as CallAnswer).answer;
 	}
 
 	/** One named value from a page this link opened (not secret); '' when the page has none. */
-	async read(page: string, value: PageValue, timeoutMs = 15_000): Promise<string> {
-		const v = ((await this.send({ op: 'read', page, value }, timeoutMs)) as ReadAnswer).value;
+	async read(page: string, value: PageValue, timeoutMs = 15_000, browser?: string): Promise<string> {
+		const v = ((await this.send({ op: 'read', page, value }, timeoutMs, browser)) as ReadAnswer).value;
 		return typeof v === 'string' ? v : '';
 	}
 
 	/** One named value from a tab of `site` (a small cookie the page can read; not secret). */
-	async siteValue(site: string, value: SiteValue, timeoutMs = 60_000): Promise<string> {
+	async siteValue(site: string, value: SiteValue, timeoutMs = 60_000, browser?: string): Promise<string> {
 		if (!isLinkPage(site)) throw new BrowserLinkError('Blocked: not a site the Browser link may open.');
-		const v = ((await this.send({ op: 'read', site, value }, timeoutMs)) as ReadAnswer).value;
+		const v = ((await this.send({ op: 'read', site, value }, timeoutMs, browser)) as ReadAnswer).value;
 		return typeof v === 'string' ? v : '';
 	}
 
-	async closePage(page: string): Promise<void> {
-		if (!this.linked) return;
-		await this.send({ op: 'close', page }, 15_000).catch(() => undefined);
+	async closePage(page: string, browser?: string): Promise<void> {
+		if (!this.isLinked(browser)) return;
+		await this.send({ op: 'close', page }, 15_000, browser).catch(() => undefined);
 	}
 
-	async status(site: string): Promise<boolean> {
+	async status(site: string, browser?: string): Promise<boolean> {
 		if (!isLinkPage(site)) throw new BrowserLinkError('Blocked: not a site the Browser link may open.');
-		return ((await this.send({ op: 'status', site }, 15_000)) as StatusAnswer).tabOpen;
+		return ((await this.send({ op: 'status', site }, 15_000, browser)) as StatusAnswer).tabOpen;
 	}
 }
 

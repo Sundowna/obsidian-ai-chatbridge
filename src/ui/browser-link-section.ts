@@ -1,16 +1,17 @@
-// Browser link in the settings: the login method choice, the login row of an account that uses
-// the link, and the pairing window. The link itself (one browser for all accounts) lives in
-// link/; this file only shows it.
+// Browser link in the settings: the login method choice, the browser an account uses, the login
+// row of an account that uses the link, and the pairing window. Several browsers (or browser
+// profiles) can be paired, each with its own name; the link itself lives in link/.
 
 import { Modal, Notice, Platform, Setting, type App } from 'obsidian';
 import { loginRef, type AnyAccount } from '../accounts';
-import { LINK_STATE_TEXT, linkState, usesBrowserLink, type LinkState, type LoginMethod } from '../link/account';
+import { LINK_STATE_TEXT, linkState, readTokens, usesBrowserLink, type LinkState, type LoginMethod } from '../link/account';
 import { isLoggedIn, type Provider } from '../login';
 import type AIChatBridge from '../main';
 import type { GeminiAccount } from '../settings';
 import { lastRunLine, runKey } from '../last-run';
 import { LINK_OPEN_PATH } from '../link/sites';
 import { bindSyncButton, type PanelContext } from './fields';
+import { forgetLogin } from '../login-check';
 
 /** Opens the extension's page in your default browser (through a small page on 127.0.0.1). */
 export async function openInBrowser(plugin: AIChatBridge): Promise<boolean> {
@@ -30,9 +31,24 @@ export async function openInBrowser(plugin: AIChatBridge): Promise<boolean> {
 	return true;
 }
 
-/** The link as it stands now. */
-export function browserLinkState(plugin: AIChatBridge): LinkState {
-	return linkState(plugin.browserLink.server, !!plugin.linkTokens().get());
+/** The paired browsers on this computer, by ID, with their names. */
+export function pairedBrowsers(plugin: AIChatBridge): { id: string; name: string }[] {
+	const names = plugin.browserNames();
+	return Object.keys(readTokens(plugin.linkTokens().get())).map((id, i) => ({ id, name: names[id] || (id === 'default' ? 'Browser (paired before names)' : `Browser ${i + 1}`) }));
+}
+
+/** The browser an account uses, if it names one that is still paired. */
+function accountBrowser(plugin: AIChatBridge, account?: { web: { linkBrowser?: string } }): string | undefined {
+	const b = account?.web.linkBrowser;
+	return b && pairedBrowsers(plugin).some((p) => p.id === b) ? b : undefined;
+}
+
+/** The link as it stands now, for one account's browser or (without one) for any browser. */
+export function browserLinkState(plugin: AIChatBridge, account?: { web: { linkBrowser?: string } }): LinkState {
+	const b = accountBrowser(plugin, account);
+	if (b) return plugin.browserLink.server?.isLinked(b) ? 'linked' : 'browser-closed';
+	if (account?.web.linkBrowser) return 'not-paired'; // its browser was unpaired
+	return linkState(plugin.browserLink.server, pairedBrowsers(plugin).length > 0);
 }
 
 const SHORT: Record<LinkState, string> = { 'not-paired': 'Browser not paired', 'browser-closed': 'Browser closed', linked: '' };
@@ -43,7 +59,7 @@ const SHORT: Record<LinkState, string> = { 'not-paired': 'Browser not paired', '
  */
 export async function accountReady(plugin: AIChatBridge, provider: Provider, account: AnyAccount): Promise<{ ok: boolean; text: string }> {
 	if (usesBrowserLink(provider, account as GeminiAccount)) {
-		const s = browserLinkState(plugin);
+		const s = browserLinkState(plugin, account as GeminiAccount);
 		return { ok: s === 'linked', text: SHORT[s] };
 	}
 	return { ok: await isLoggedIn(loginRef(provider, account)), text: 'Not logged in' };
@@ -56,7 +72,7 @@ const METHOD_TEXT: Partial<Record<Provider, string>> = {
 };
 
 /** Login method of an account: the login window or the Browser link. Computers only; not for Lumo. */
-export function loginMethodSetting(ctx: PanelContext, el: HTMLElement, provider: Provider, account: { web: { loginMethod?: LoginMethod } }): void {
+export function loginMethodSetting(ctx: PanelContext, el: HTMLElement, provider: Provider, account: { web: { loginMethod?: LoginMethod; linkBrowser?: string } }): void {
 	const text = METHOD_TEXT[provider];
 	if (!Platform.isDesktopApp || !text) return;
 	new Setting(el)
@@ -73,13 +89,49 @@ export function loginMethodSetting(ctx: PanelContext, el: HTMLElement, provider:
 					ctx.refresh();
 				}),
 		);
+	// The login this account was first synced with: a sync with another one is skipped.
+	const web = account.web as { loginUser?: string; loginEmail?: string; userId?: string };
+	const bound = provider === 'gemini' ? web.userId : web.loginUser;
+	if (bound) {
+		new Setting(el)
+			.setName('Login check')
+			.setDesc(`This account belongs to ${web.loginEmail ?? 'the login it was first synced with'}. A sync that finds another login (in the browser or the login window) is skipped and says who is logged in. Switched on purpose? Accept the current login; the next sync takes it.`)
+			.addButton((b) => b.setButtonText('Accept this login').onClick(async () => {
+				if (provider === 'gemini') delete web.userId;
+				forgetLogin(web);
+				await ctx.plugin.saveSettings();
+				new Notice('The next sync takes the login it finds for this account.');
+				ctx.refresh();
+			}));
+	}
+	if (account.web.loginMethod !== 'browser') return;
+	// Personal and work in one browser cannot both be logged in at once (claude.ai, ChatGPT): give
+	// each its own browser or browser profile, pair each, and choose it here.
+	const browsers = pairedBrowsers(ctx.plugin);
+	const server = ctx.plugin.browserLink.server;
+	new Setting(el)
+		.setName('Browser')
+		.setDesc('Which paired browser this account uses. For a personal and a work account on the same site, use two browsers or two browser profiles (each with the extension, each paired), and choose one here for each account. "Any" takes whichever is connected.')
+		.addDropdown((d) => {
+			d.addOption('', 'Any connected browser');
+			for (const b of browsers) d.addOption(b.id, `${b.name}${server?.isLinked(b.id) ? ' (connected)' : ''}`);
+			if (account.web.linkBrowser && !browsers.some((b) => b.id === account.web.linkBrowser)) d.addOption(account.web.linkBrowser, 'A browser that is no longer paired');
+			d.setValue(account.web.linkBrowser ?? '').onChange(async (v) => {
+				if (v) account.web.linkBrowser = v;
+				else delete account.web.linkBrowser;
+				await ctx.plugin.saveSettings();
+				ctx.refresh();
+			});
+		});
 }
 
 /** The login row of an account that uses the Browser link: the link's state and what to do next. */
 export function linkLoginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string, surface: 'web' | 'studio' = 'web'): void {
 	const { plugin } = ctx;
-	const state = browserLinkState(plugin);
-	const extra = note();
+	const state = browserLinkState(plugin, account as GeminiAccount);
+	const own = accountBrowser(plugin, account as GeminiAccount);
+	const ownName = own ? pairedBrowsers(plugin).find((b) => b.id === own)?.name : undefined;
+	const extra = `${ownName ? `Browser: ${ownName}.` : ''}${note() ? ` ${note()}` : ''}`.trim();
 	const row = new Setting(el).setName('Login').setDesc(`${LINK_STATE_TEXT[state]}${extra ? ` ${extra}` : ''}`);
 	row.settingEl.addClass('ccs-primary-row');
 	row.settingEl.dataset.linkState = state;
@@ -88,9 +140,14 @@ export function linkLoginRow(ctx: PanelContext, el: HTMLElement, provider: Provi
 		row.addButton((b) =>
 			b.setButtonText('Unpair').onClick(() => {
 				const server = plugin.browserLink.server;
-				if (server) server.unpair();
-				else plugin.linkTokens().set(null);
-				new Notice('Browser link: unpaired. Syncs through your browser stop until you pair again.');
+				// Only this account's browser; without one chosen, every paired browser.
+				if (server) server.unpair(own);
+				else if (own) {
+					const tokens = readTokens(plugin.linkTokens().get());
+					delete tokens[own];
+					plugin.linkTokens().set(Object.keys(tokens).length ? JSON.stringify(tokens) : null);
+				} else plugin.linkTokens().set(null);
+				new Notice(own ? `Browser link: ${ownName ?? 'this browser'} unpaired.` : 'Browser link: unpaired. Syncs through your browser stop until you pair again.');
 				ctx.refresh();
 			}),
 		);
@@ -102,7 +159,7 @@ export function linkLoginRow(ctx: PanelContext, el: HTMLElement, provider: Provi
 	);
 	if (state !== 'linked') {
 		row.addButton((b) => {
-			b.setButtonText(state === 'not-paired' ? 'Pair browser…' : 'Pair again…').onClick(() => new PairBrowserModal(ctx.app, plugin, ctx.refresh).open());
+			b.setButtonText(state === 'not-paired' ? 'Pair browser…' : 'Pair again…').onClick(() => new PairBrowserModal(ctx.app, plugin, ctx.refresh, account as GeminiAccount).open());
 			if (state === 'not-paired') b.setCta();
 		});
 	}
@@ -119,7 +176,8 @@ export function linkLoginRow(ctx: PanelContext, el: HTMLElement, provider: Provi
 export class PairBrowserModal extends Modal {
 	private timer: number | null = null;
 
-	constructor(app: App, private readonly plugin: AIChatBridge, private readonly done: () => void) {
+	/** `account`: the account the window was opened from; the browser paired now becomes its browser. */
+	constructor(app: App, private readonly plugin: AIChatBridge, private readonly done: () => void, private readonly account?: { web: { linkBrowser?: string } }) {
 		super(app);
 	}
 
@@ -137,6 +195,14 @@ export class PairBrowserModal extends Modal {
 			contentEl.createEl('p', { text: 'The Browser link could not start on this computer. Choose "Browser link" as the login method of a Google account first, then try again.' });
 			return;
 		}
+		const before = new Set(server.pairedBrowsers());
+		const linkedBefore = new Set(server.linkedBrowsers());
+		const suggested = this.account?.web.linkBrowser ? this.plugin.browserNames()[this.account.web.linkBrowser] : undefined;
+		this.plugin.pendingBrowserName = suggested ?? `Browser ${before.size + 1}`;
+		new Setting(contentEl)
+			.setName('Name of this browser')
+			.setDesc('So you can tell your browsers apart, e.g. "Chrome personal" or "Edge work".')
+			.addText((t) => t.setValue(this.plugin.pendingBrowserName ?? '').onChange((v) => { this.plugin.pendingBrowserName = v.trim() || null; }));
 		const code = server.newPairingCode();
 		const steps = contentEl.createEl('ol');
 		steps.createEl('li', { text: 'Install the ChatBridge extension in your browser (see "Browser link" in the plugin\'s README).' });
@@ -159,7 +225,15 @@ export class PairBrowserModal extends Modal {
 		const status = contentEl.createEl('p', { cls: 'ccs-pair-status', text: 'Waiting for your browser…' });
 		const started = Date.now();
 		this.timer = window.setInterval(() => {
-			if (server.linked) {
+			const added = server.pairedBrowsers().find((b) => !before.has(b) && server.isLinked(b));
+			// Paired again from the same browser: its ID stays, it just comes back.
+			const mine = this.account?.web.linkBrowser;
+			const again = mine && !linkedBefore.has(mine) && server.isLinked(mine) ? mine : undefined;
+			if (added || again || (!this.account?.web.linkBrowser && server.linkedBrowsers().some((b) => !linkedBefore.has(b)))) {
+				if (added && this.account) {
+					this.account.web.linkBrowser = added;
+					void this.plugin.saveSettings();
+				}
 				status.setText('Linked. You can close this window.');
 				status.addClass('is-ok');
 				this.stopTimer();

@@ -49,13 +49,15 @@ function answer(status: number, headers: Record<string, string>, body: Uint8Arra
 export class BrowserLinkTransport implements Transport {
 	readonly kind = 'browser-link' as const;
 
-	constructor(private readonly server: () => LinkServer | null) {}
+	/** `browser`: the paired browser this account uses (its extension's ID); missing = whichever is connected. */
+	constructor(private readonly server: () => LinkServer | null, private readonly browser?: string) {}
 
 	/** The link, or why it cannot be used right now. */
 	private live(): LinkServer {
 		const s = this.server();
-		if (!s || !s.paired) throw new BrowserLinkUnavailable('not-paired');
-		if (!s.linked) throw new BrowserLinkUnavailable('browser-closed');
+		const b = this.browser;
+		if (!s || !(b ? s.pairedBrowsers().includes(b) : s.paired)) throw new BrowserLinkUnavailable('not-paired');
+		if (!s.isLinked(b)) throw new BrowserLinkUnavailable('browser-closed');
 		return s;
 	}
 
@@ -67,7 +69,7 @@ export class BrowserLinkTransport implements Transport {
 		const headers: Record<string, string> = {};
 		for (const [k, v] of Object.entries(req.headers)) if (!drop.has(k.toLowerCase())) headers[k] = v;
 		if (req.contentType && !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) headers['Content-Type'] = req.contentType;
-		const r = await s.fetch(req.url, req.method, headers, req.body);
+		const r = await s.fetch(req.url, req.method, headers, req.body, undefined, undefined, this.browser);
 		return answer(r.status, r.headers, r.body);
 	}
 
@@ -83,7 +85,7 @@ export class BrowserLinkTransport implements Transport {
 		const headers: Record<string, string> = {};
 		new Headers(init.headers).forEach((v, k) => { if (k !== 'cookie' && k !== 'user-agent') headers[k] = v; });
 		const body = typeof init.body === 'string' || init.body instanceof ArrayBuffer ? init.body : undefined;
-		const r = await s.fetch(url, method, headers, body, init.redirect === 'manual' ? 'manual' : 'follow', timeoutMs);
+		const r = await s.fetch(url, method, headers, body, init.redirect === 'manual' ? 'manual' : 'follow', timeoutMs, this.browser);
 		// A redirect the caller wanted to see comes back from the page as status 0 (opaque).
 		const status = r.status >= 200 && r.status <= 599 ? r.status : 302;
 		const empty = status === 204 || status === 205 || status === 304 || r.body.length === 0;
@@ -103,22 +105,22 @@ export class BrowserLinkTransport implements Transport {
 
 	async siteValue(v: SiteValue): Promise<string | null> {
 		const s = this.live();
-		return (await s.siteValue(SITE_OF[v], v)) || null;
+		return (await s.siteValue(SITE_OF[v], v, undefined, this.browser)) || null;
 	}
 
 	async openPage(url: string, ready: ReadyCheck, timeoutMs: number, _pasted?: PastedCookies): Promise<SitePage | null> {
 		const s = this.live();
 		let page: string;
 		try {
-			page = await s.open(url, ready, timeoutMs);
+			page = await s.open(url, ready, timeoutMs, this.browser);
 		} catch (e) {
 			if (e instanceof BrowserLinkUnavailable && e.reason === 'not-logged-in') throw new BrowserLinkUnavailable('not-logged-in', siteName(url));
 			throw e;
 		}
 		return {
-			call: (c: PageCall): Promise<PageAnswer> => s.call(page, c),
-			read: (v: PageValue): Promise<string> => s.read(page, v),
-			close: () => void s.closePage(page),
+			call: (c: PageCall): Promise<PageAnswer> => s.call(page, c, undefined, this.browser),
+			read: (v: PageValue): Promise<string> => s.read(page, v, undefined, this.browser),
+			close: () => void s.closePage(page, this.browser),
 		};
 	}
 }

@@ -135,7 +135,7 @@ export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn =
 				await save(plugin, await captureGemini(await o.gemini(acc), acc.label), base, now, result);
 				continue;
 			}
-			const g = await GeminiApi.connect(loginRef('gemini', acc), pastedSession(plugin.app, acc.web.secretId));
+			const g = await GeminiApi.connect(loginRef('gemini', acc), pastedSession(plugin.app, acc.web.secretId), acc.web.loginMethod === 'browser' ? acc.web.googleUser : undefined);
 			try {
 				await save(plugin, await captureGemini(g, acc.label), base, now, result);
 			} finally {

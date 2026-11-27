@@ -121,9 +121,17 @@ let limited = false;
 let requests = 0;
 /** A long chat list for the quick-list tests, in the order claude.ai hands it out; null = the small fixtures below. */
 let big: { uuid: string; name: string; created_at: string; updated_at: string; project: null }[] | null = null;
+/** Which claude.ai user each account's login is (by account ID); missing = its own user. */
+const userOf: Record<string, string> = {};
 ClaudeApi.prototype.get = async function (path: string) {
 	requests++;
 	if (limited) throw new RateLimitError('claude.ai', Date.now() + 1000);
+	if (path === '/api/account') {
+		const id = (this as unknown as { source?: { accountId: string } }).source?.accountId ?? '?';
+		const uuid = userOf[id] ?? `user-${id}`;
+		const json = { uuid, email_address: `${uuid}@example.invalid` };
+		return { json, bytes: bytes(json) };
+	}
 	if (big) {
 		let json: unknown;
 		if (path.includes('chat_conversations_v2')) {
@@ -245,10 +253,15 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 			projectRawFolders: { [PROJECT.uuid]: 'Raw/Second/Custom' },
 		});
 		currentMembership = 'archived';
-		// The same login as Main (its chats already saved there) stops before anything is written.
+		// The same login as Main stops before anything is written: by its user (the login check),
+		// and, where the site does not say, by Main's chats in its list.
 		const filesBefore = files.size;
+		userOf[second.id] = `user-${account.id}`;
 		const same = await runSync(plugin, second);
-		expect('same login: chats another account already saved stop the sync, nothing written', (same.stopped ?? '').startsWith('These are the chats of "Main"') && same.newCount === 0 && files.size === filesBefore && !Object.keys(second.web.index).length, same.stopped ?? '');
+		expect('same login: the same claude.ai user as another account stops the sync, nothing written', (same.stopped ?? '').startsWith('This login (user-') && (same.stopped ?? '').includes('is already used by the account "Main"') && same.newCount === 0 && files.size === filesBefore && !Object.keys(second.web.index).length, same.stopped ?? '');
+		delete userOf[second.id];
+		const byChats = await runSync(plugin, second);
+		expect('same login: chats another account already saved stop the sync, nothing written', (byChats.stopped ?? '').startsWith('These are the chats of "Main"') && byChats.newCount === 0 && files.size === filesBefore && !Object.keys(second.web.index).length, byChats.stopped ?? '');
 		// The fake claude.ai serves Main's chats to every account, so for the folder checks below
 		// Main's sync history is set aside: the second account then stands for another person.
 		// The rule itself: whoever saved a chat first keeps syncing; the later copy stops.
