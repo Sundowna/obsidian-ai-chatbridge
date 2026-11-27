@@ -12,7 +12,7 @@ import { testHooks } from 'obsidian';
 import { LinkServer, type TokenStore } from '../src/link/server';
 import { BrowserLinkUnavailable } from '../src/link/errors';
 import { fetchFrames, fromBase64 } from '../src/link/protocol';
-import { linkState, loginMethodOf, pairButtonText, pickBrowser, readTokens, unpairForgetsAll, secretTokenStore, usesBrowserLink, writeTokens, LINK_SECRET_ID } from '../src/link/account';
+import { browserKind, isMadeUpBrowserName, kindName, linkState, loginMethodOf, pairButtonText, pickBrowser, readTokens, unpairForgetsAll, secretTokenStore, usesBrowserLink, writeTokens, LINK_SECRET_ID } from '../src/link/account';
 import { BrowserLinkTransport } from '../src/transport/browser-link';
 import { setBrowserLink, transportFor, type PageCall } from '../src/transport';
 import { pageCallCode, READ_CODE, READY_CODE, SITE_VALUE_COOKIE } from '../src/transport/login-window';
@@ -509,8 +509,8 @@ async function testOpenPage() {
 // ---- Several browsers (personal and work in two browsers or profiles) ----------------------
 
 /** A stand-in extension with its own browser ID: pairs (or says hello with a token) and answers. */
-async function namedBrowser(port: number, first: Record<string, unknown>, answer: (m: Msg) => unknown[]): Promise<{ ws: WebSocket; reply: Record<string, unknown> }> {
-	const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: EXT });
+async function namedBrowser(port: number, first: Record<string, unknown>, answer: (m: Msg) => unknown[], userAgent?: string): Promise<{ ws: WebSocket; reply: Record<string, unknown> }> {
+	const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: EXT, ...(userAgent ? { headers: { 'User-Agent': userAgent } } : {}) });
 	const reply = await new Promise<Record<string, unknown>>((resolve, reject) => {
 		ws.on('open', () => ws.send(JSON.stringify(first)));
 		ws.once('message', (raw) => resolve(JSON.parse(String(raw)) as Record<string, unknown>));
@@ -528,14 +528,16 @@ async function namedBrowser(port: number, first: Record<string, unknown>, answer
 async function testSeveralBrowsers() {
 	const store = memStore();
 	const named: string[] = [];
-	const server = new LinkServer({ store, onPaired: (b) => named.push(b) });
+	const kinds: string[] = [];
+	const server = new LinkServer({ store, onPaired: (b) => named.push(b), onLinked: (b, k) => kinds.push(`${b}=${k ?? '?'}`) });
 	const port = await server.start();
 	const val = (who: string) => (m: Msg) => (m.op === 'read' ? [{ id: m.id, ok: true, value: who }] : []);
 	try {
-		const home = await namedBrowser(port, { op: 'pair', code: server.newPairingCode(), browser: 'personal-1' }, val('home-org'));
-		const work = await namedBrowser(port, { op: 'pair', code: server.newPairingCode(), browser: 'work-0001' }, val('work-org'));
+		const home = await namedBrowser(port, { op: 'pair', code: server.newPairingCode(), browser: 'personal-1' }, val('home-org'), 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
+		const work = await namedBrowser(port, { op: 'pair', code: server.newPairingCode(), browser: 'work-0001' }, val('work-org'), 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0');
 		await sleep(50);
 		expect('several browsers: each pairs with its own ID and both stay connected', home.reply.op === 'paired' && work.reply.op === 'paired' && server.linkedBrowsers().sort().join() === 'personal-1,work-0001' && named.join() === 'personal-1,work-0001', server.linkedBrowsers().join());
+		expect('several browsers: each connection says which browser it is (from its User-Agent)', kinds.join() === 'personal-1=Chrome,work-0001=Edge', kinds.join());
 		expect('several browsers: each has its own saved token', Object.keys(readTokens(store.value)).sort().join() === 'personal-1,work-0001' && readTokens(store.value)['personal-1'] !== readTokens(store.value)['work-0001']);
 		const toHome = await server.siteValue('https://claude.ai/', 'claude-org', 5000, 'personal-1');
 		const toWork = await server.siteValue('https://claude.ai/', 'claude-org', 5000, 'work-0001');
@@ -591,6 +593,9 @@ async function testSeveralBrowsers() {
 // ---- Which login an account reads (login-check.ts), and the Google account number ----------
 
 function testPickBrowser() {
+	expect('browser names: the kind is read from the User-Agent', browserKind('… Chrome/140.0 Safari/537.36') === 'Chrome' && browserKind('… Chrome/140.0 Safari/537.36 Edg/140.0') === 'Edge' && browserKind('Mozilla/5.0 (Windows NT 10.0; rv:140.0) Gecko/20100101 Firefox/140.0') === 'Firefox' && browserKind('… Chrome/140 OPR/120') === 'Opera' && browserKind(undefined) === undefined);
+	expect('browser names: only made-up names are replaced, never one you chose', isMadeUpBrowserName('Browser 2') && isMadeUpBrowserName(undefined) && isMadeUpBrowserName('Browser (paired before names)') && !isMadeUpBrowserName('Work') && !isMadeUpBrowserName('Chrome'));
+	expect('browser names: a second browser of the same kind gets a number', kindName('Chrome', ['Edge']) === 'Chrome' && kindName('Chrome', ['Chrome', 'Chrome 2']) === 'Chrome 3');
 	expect('any browser: an account\'s own browser wins', pickBrowser('edge', ['edge'], ['chrome', 'edge']) === 'edge');
 	expect('any browser: a browser another account picked is passed over', pickBrowser(undefined, ['edge'], ['edge', 'chrome']) === 'chrome');
 	expect('any browser: when every connected browser is picked, any one will do', pickBrowser(undefined, ['edge'], ['edge']) === undefined);

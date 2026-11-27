@@ -45,7 +45,7 @@ import { hasArchiveToRestore, restoreSavedChats, separateSavedChats, type Archiv
 import { archiveSummary } from './archive-move';
 import { LinkManager } from './link/manager';
 import type { TokenStore } from './link/server';
-import { LINK_PROVIDERS, pickBrowser, secretTokenStore, usesBrowserLink } from './link/account';
+import { isMadeUpBrowserName, kindName, LINK_PROVIDERS, pickBrowser, secretTokenStore, usesBrowserLink } from './link/account';
 import { setBrowserLink } from './transport';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
@@ -103,7 +103,7 @@ export default class AIChatBridge extends Plugin {
 	readonly computers = new ComputerStore(() => this.app.vault.adapter, () => this.manifest?.dir);
 	/** The Browser link server: runs only while an account uses the link, and only on a computer. */
 	readonly browserLink = new LinkManager(
-		() => ({ store: this.linkTokens(), port: this.settings.browserLinkPort, onPaired: (browser: string) => this.namePairedBrowser(browser) }),
+		() => ({ store: this.linkTokens(), port: this.settings.browserLinkPort, onPaired: (browser: string) => this.namePairedBrowser(browser), onLinked: (browser: string, kind: string | undefined) => this.nameByKind(browser, kind) }),
 		() => Platform.isDesktopApp,
 	);
 
@@ -127,6 +127,14 @@ export default class AIChatBridge extends Plugin {
 		if (this.pendingBrowserName) this.setBrowserName(browser, this.pendingBrowserName);
 		else if (!names[browser]) this.setBrowserName(browser, `Browser ${Object.keys(names).length + 1}`);
 		this.pendingBrowserName = null;
+	}
+
+	/** A browser still under a made-up name ("Browser 2") is named after what it is: "Chrome", "Edge 2"… */
+	private nameByKind(browser: string, kind: string | undefined): void {
+		const names = this.browserNames();
+		if (!kind || !isMadeUpBrowserName(names[browser])) return;
+		const taken = Object.entries(names).filter(([id]) => id !== browser).map(([, n]) => n);
+		this.setBrowserName(browser, kindName(kind, taken));
 	}
 
 	/** The extension's token, in Obsidian's secret storage on this computer. */

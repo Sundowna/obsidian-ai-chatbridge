@@ -270,6 +270,22 @@
 	border-top: none;
 }
 
+/* A login row with several buttons: the buttons wrap below the text instead of squeezing it
+   into a column one word wide. */
+.ccs-settings .ccs-primary-row {
+	flex-wrap: wrap;
+	row-gap: var(--size-4-2);
+}
+
+.ccs-settings .ccs-primary-row .setting-item-info {
+	min-width: 16em;
+}
+
+.ccs-settings .ccs-primary-row .setting-item-control {
+	flex-wrap: wrap;
+	justify-content: flex-end;
+}
+
 /* Folder paths are long, and their end is the part that differs. */
 .ccs-settings .setting-item-control input[type='text'] {
 	width: 280px;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.56.0 - 2026-11-27
+
+### Added
+- **Paired browsers named after what they are** - instead of "Browser 1" and "Browser 2", a paired browser is called "Chrome", "Edge", "Firefox" ("Chrome 2" for a second one) as soon as it connects; names you chose stay. A **Rename…** button sits beside each account's Browser choice.
+
+### Fixed
+- **Login row squeezed** - with several buttons, the login text shrank to a column one word wide. The buttons now wrap below it.
+
 ## 0.55.2 - 2026-11-27
 
 ### Fixed

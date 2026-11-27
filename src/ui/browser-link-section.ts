@@ -9,7 +9,7 @@ import { isLoggedIn, type Provider } from '../login';
 import type AIChatBridge from '../main';
 import type { GeminiAccount } from '../settings';
 import { lastRunLine, runKey } from '../last-run';
-import { ConfirmModal } from './modals';
+import { ConfirmModal, NameModal } from './modals';
 import { LINK_OPEN_PATH } from '../link/sites';
 import { bindSyncButton, type PanelContext } from './fields';
 import { forgetLogin } from '../login-check';
@@ -122,6 +122,24 @@ export function loginMethodSetting(ctx: PanelContext, el: HTMLElement, provider:
 				else delete account.web.linkBrowser;
 				await ctx.plugin.saveSettings();
 				ctx.refresh();
+			});
+		})
+		.addButton((b) => {
+			// Renames the chosen browser (on this computer); with "Any", there is none to rename.
+			const chosen = browsers.find((x) => x.id === account.web.linkBrowser);
+			b.setButtonText('Rename…').setDisabled(!chosen).onClick(() => {
+				if (!chosen) return;
+				new NameModal(ctx.app, {
+					title: 'Rename this browser',
+					hint: 'A name for this paired browser or browser profile, e.g. "Chrome" or "Edge (work)". Kept on this computer only.',
+					action: 'Rename',
+					initial: chosen.name,
+					problem: (n) => (n.trim() ? null : 'Enter a name.'),
+					submit: (n) => {
+						ctx.plugin.setBrowserName(chosen.id, n);
+						ctx.refresh();
+					},
+				}).open();
 			});
 		});
 }
