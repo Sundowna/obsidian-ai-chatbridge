@@ -123,7 +123,12 @@ async function handle(msg: LinkRequest & { id: number }): Promise<unknown[]> {
 			// reading it across sites (seen 2026-11-27). GET only; only a picture comes back.
 			if (isLinkImage(msg.url)) {
 				if (msg.method !== 'GET' || msg.body64 !== undefined) throw new LinkFail('not-allowed', 'method not allowed');
-				const res = await self.fetch(msg.url, { credentials: 'include', redirect: 'follow' });
+				let res: Response;
+				try {
+					res = await self.fetch(msg.url, { credentials: 'include', redirect: 'follow' });
+				} catch (e) {
+					throw new LinkFail('failed', `picture fetch (extension ${chrome.runtime.getManifest().version}): ${e instanceof Error ? e.message : 'failed'}`);
+				}
 				const type = (res.headers.get('content-type') ?? '').toLowerCase();
 				const bytes = type.startsWith('image/') ? new Uint8Array(await res.arrayBuffer()) : new Uint8Array(0);
 				if (bytes.byteLength > MAX_BODY_BYTES) throw new LinkFail('blocked', 'picture too large');

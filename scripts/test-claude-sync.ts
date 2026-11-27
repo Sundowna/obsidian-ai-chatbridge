@@ -245,6 +245,14 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 			projectRawFolders: { [PROJECT.uuid]: 'Raw/Second/Custom' },
 		});
 		currentMembership = 'archived';
+		// The same login as Main (its chats already saved there) stops before anything is written.
+		const filesBefore = files.size;
+		const same = await runSync(plugin, second);
+		expect('same login: chats another account already saved stop the sync, nothing written', (same.stopped ?? '').startsWith('These are the chats of "Main"') && same.newCount === 0 && files.size === filesBefore && !Object.keys(second.web.index).length, same.stopped ?? '');
+		// The fake claude.ai serves Main's chats to every account, so for the folder checks below
+		// Main's sync history is set aside: the second account then stands for another person.
+		const mainIndex = account.web.index;
+		account.web.index = {};
 		const secondSync = await runSync(plugin, second);
 		const secondRoot = `${second.web.chatFolder}/Archived/_Accounts/claude-${second.id}`;
 		const secondProject = second.web.index[CHAT]!;
@@ -255,6 +263,9 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 		currentMembership = 'active';
 		const secondReturn = await runSync(plugin, second);
 		expect('separation: a new archived chat returns to its configured active project', secondReturn.archive?.moved === 1 && secondProject.md.startsWith('Projects/Second/') && secondProject.json.startsWith('Raw/Second/Custom/'));
+		account.web.index = mainIndex;
+		// The stand-in for another person goes again: it holds the same chats as Main.
+		settings.claude.splice(settings.claude.indexOf(second), 1);
 	}
 	settings.rawRootOn = true;
 	project = null;

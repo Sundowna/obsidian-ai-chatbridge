@@ -104,17 +104,24 @@ export class GeminiApi {
 	async picture(url: string): Promise<{ bytes: ArrayBuffer; type: string } | null> {
 		const full = pictureUrl(url);
 		if (!full || !this.transport?.canFetchInBrowser()) return null;
+		// Why a picture was not saved goes to the Error logs tab; its address never does (it is a key to the picture).
+		const shown = 'https://lh3.googleusercontent.com/(picture)';
 		let res: Response;
 		try {
 			res = await this.transport.fetchInBrowser(full, { method: 'GET', credentials: 'include' }, 60_000);
 		} catch (e) {
 			if (e instanceof BrowserLinkUnavailable) throw e;
+			recordError(this.source, { service: 'Gemini picture', method: 'GET', url: shown, status: null, message: `picture not fetched: ${e instanceof Error ? e.message.slice(0, 200) : 'unknown error'}` });
 			return null;
 		}
 		const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
 		if (res.status === 429) throw new RateLimitError('Gemini', retryDeadline(res.headers.get('retry-after') ?? ''));
-		if (res.status !== 200 || !type.startsWith('image/')) return null;
+		if (res.status !== 200 || !type.startsWith('image/')) {
+			recordError(this.source, { service: 'Gemini picture', method: 'GET', url: shown, status: res.status, message: `picture not saved: answered ${res.status} ${type || 'without a type'}` });
+			return null;
+		}
 		const bytes = await res.arrayBuffer();
+		if (!bytes.byteLength) recordError(this.source, { service: 'Gemini picture', method: 'GET', url: shown, status: res.status, message: 'picture not saved: empty answer' });
 		return bytes.byteLength ? { bytes, type } : null;
 	}
 
