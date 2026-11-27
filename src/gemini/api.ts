@@ -69,8 +69,11 @@ export class GeminiApi {
 		}
 	}
 
-	/** Every chat: the pinned ones and the rest. */
-	async listChats(wait: () => Promise<void>, progress: (page: number) => void): Promise<GeminiListItem[]> {
+	/**
+	 * Every chat: the pinned ones and the rest. `settled` is shown every page and may end that
+	 * list early (quick-list.ts).
+	 */
+	async listChats(wait: () => Promise<void>, progress: (page: number) => void, settled?: (page: GeminiListItem[], pinned: boolean) => boolean): Promise<GeminiListItem[]> {
 		const byId = new Map<string, GeminiListItem>();
 		let page = 0;
 		for (const pinned of [true, false]) {
@@ -82,6 +85,7 @@ export class GeminiApi {
 				await wait();
 				const r = readListPage(await this.call(LIST_CHATS, [LIST_PAGE, cursor, [pinned ? 1 : 0, null, 1]]), pinned);
 				for (const item of r.items) if (!byId.has(item.uuid)) byId.set(item.uuid, item);
+				if (settled?.(r.items, pinned) === true) break;
 				if (r.next && seen.has(r.next)) break;
 				cursor = r.next;
 				if (cursor) seen.add(cursor);

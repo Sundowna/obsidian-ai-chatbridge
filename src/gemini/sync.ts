@@ -14,11 +14,12 @@ import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
 import { pastedSession } from '../cookies';
 import { MassMissingError } from '../missing-guard';
 import { GeminiApi } from './api';
-import { emptyResult, failureText, geminiFromRaw, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, writeLog, type GoogleSyncResult } from './save';
+import { emptyResult, failureText, fileGone, geminiFromRaw, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, writeLog, type GoogleSyncResult } from './save';
 import { renderGeminiTranscript } from './transcript';
 import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
 import { BrowserLinkUnavailable } from '../link/errors';
+import { listFailed, readList } from '../quick-list';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
@@ -46,7 +47,13 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 			g.userId = who;
 			await plugin.saveSettings();
 		}
-		const items = await a.listChats(wait, (page) => progress(`reading Gemini chat list… page ${page}`));
+		// The chat list: all of it, or only its recent part when the rest is known (quick-list.ts).
+		// The pinned chats are a short list of their own, always read whole, so an unpin shows at once.
+		const list = await readList(g, { scope: 'chats', fileGone: fileGone(plugin.app, g.index), now: Date.now(), wholeSecond: true },
+			(settled) => a.listChats(wait, (page) => progress(`reading Gemini chat list… page ${page}`), settled));
+		if (list.changed) await plugin.saveSettings();
+		result.quickList = list.quick;
+		const items: GeminiListItem[] = list.rows.map((row) => ({ ...row.item, pinned: row.archived !== false }));
 		const byId = new Map<string, GeminiListItem>(items.map((it) => [it.uuid, it]));
 		const odd = new OddChats();
 		await saveChats(plugin, items, g.index, folder, masterRaw(plugin.settings) !== undefined ? mirrorRaw(folder, masterRaw(plugin.settings)) : rawBase(g.rawFolder) ?? folder, async (item) => {
@@ -64,9 +71,13 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
 		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true } });
 	} catch (e) {
-		if (pausedBy(e, g, result)) await plugin.saveSettings();
+		const paused = pausedBy(e, g, result);
 		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
-		else if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
+		const skipped = !paused && e instanceof BrowserLinkUnavailable;
+		// After a run that failed, the next one reads the whole chat list again (quick-list.ts).
+		if (paused || (!skipped && listFailed(g))) await plugin.saveSettings();
+		if (paused) { /* waiting for the pause to end, not an error */ }
+		else if (skipped) result.linkSkipped = (e as Error).message;
 		else if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Gemini's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else if (e instanceof GeminiError) result.stopped = `Gemini refused the request (${e.message}).`;

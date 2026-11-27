@@ -185,6 +185,8 @@ export interface GeminiSettings {
 	cooldownUntil?: number;
 	resumeAfter429?: { consecutive: number } | null;
 	index: Record<string, IndexEntry>;
+	/** The chat list as last read on this computer (quick-list.ts). */
+	listCatalog?: ListCatalog;
 	/** The Google account behind this login (its email, not secret), to notice the same login twice. */
 	userId?: string;
 	/** Login window (missing) or the Browser link (your own browser, through the extension). */
@@ -201,6 +203,8 @@ export interface StudioSettings {
 	cooldownUntil?: number;
 	resumeAfter429?: { consecutive: number } | null;
 	index: Record<string, IndexEntry>;
+	/** The library list as last read on this computer (quick-list.ts). */
+	listCatalog?: ListCatalog;
 }
 
 /** One person's login at a provider, with its two surfaces: the website and the desktop app. */

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.48.0 - 2026-11-27
+
+### Added
+- **Gemini and AI Studio: quick list** - like Claude's and ChatGPT's syncs, these two no longer read the whole list every time. They stop at the first page with nothing new and remember the rest. The whole list is still read once a week, after a failed run, and whenever a saved note is missing. Pinning or unpinning a Gemini chat still shows at the next sync; a chat deleted at Google can take up to a week to drop out of the count.
+
 ## 0.47.1 - 2026-11-27
 
 ### Fixed

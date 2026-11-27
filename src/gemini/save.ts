@@ -2,7 +2,7 @@
 // plus ones whose files were deleted from the vault. A chat has one note: when it continues,
 // the note is rewritten and the version before stays in the raw folder (see versions.ts).
 
-import { TFile } from 'obsidian';
+import { TFile, type App } from 'obsidian';
 import { withAccount } from '../accounts';
 import { appendLog } from '../log';
 import { guardMissing } from '../missing-guard';
@@ -34,6 +34,8 @@ export interface GoogleSyncResult {
 	/** Notes you had edited whose chat continued. */
 	edits: EditedReport;
 	stopped?: string;
+	/** Only the recent part of the list was read; the rest was known (quick-list.ts). */
+	quickList?: boolean;
 	/** Set when the run waits for a rate-limit pause to end (not an error). */
 	resumeAt?: number;
 	/** The Browser link could not reach the browser (closed, not paired, not logged in there): skipped, not an error. */
@@ -93,6 +95,12 @@ export async function keepFlags(plugin: AIChatBridge, items: readonly ListItem[]
 	}
 	if (dirty) await plugin.saveSettings();
 	return changed;
+}
+
+/** A saved chat whose note or raw file is gone: the whole list is then read, so it comes back at this sync. */
+export function fileGone(app: App, index: Record<string, IndexEntry>): boolean {
+	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
+	return Object.values(index).some((entry) => !exists(entry.md) || !exists(entry.json));
 }
 
 export async function saveChats(
