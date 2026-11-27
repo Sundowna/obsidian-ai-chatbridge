@@ -4,10 +4,11 @@
 // its own cookies and session refresh. Lumo's chats are end-to-end encrypted: opening them
 // takes the account's keys, which are unlocked here for one sync and kept in memory only.
 
-import { StopError } from '../api';
+import { RateLimitError, StopError } from '../api';
 import { isLoggedIn, openHiddenPage, type HiddenPage, type LoginRef } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
 import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
+import { retryDeadline } from '../rate-limit';
 import { sessionKeyPassword, openMasterKeys, unlockUserKeys } from './keys';
 import { checkAsset, checkClientKey, checkConversation, checkFullMessage, checkMasterKeys, checkSpaces, checkUser, parseStoredSession } from './schema';
 import type { LumoWireAsset, LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
@@ -39,6 +40,9 @@ function checkId(id: string): string {
 	if (!/^[\w=-]{1,200}$/.test(id)) throw new StopError('Refusing to fetch: Lumo ID has an odd format.');
 	return id;
 }
+
+/** The answer's Retry-After header (a page's fetch gives header names in lower case), or ''. */
+const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class LumoApi {
 	userId = '';
@@ -121,7 +125,7 @@ export class LumoApi {
 		if (res.status !== 200) recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: res.status, headers: res.headers, body: res.text, message: `Lumo answered ${res.status}`, secrets: [this.page.uid] });
 		if (res.status === 401) throw new StopError('Lumo answered 401 (not logged in). Log in to Lumo again in the plugin settings.');
 		if (res.status === 403) throw new StopError('Lumo answered 403 (forbidden). Log in to Lumo again in the plugin settings.');
-		if (res.status === 429) throw new StopError('Lumo is rate limiting this account. Try again later.');
+		if (res.status === 429) throw new RateLimitError('Lumo', retryDeadline(retryAfter(res.headers)));
 		let body: unknown;
 		try {
 			body = JSON.parse(res.text);

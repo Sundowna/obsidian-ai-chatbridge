@@ -7,6 +7,7 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { NetworkFailure, sendWithRetry, triedText } from './net-retry';
+import { retryDeadline } from './rate-limit';
 import { BrowserLinkUnavailable } from './link/errors';
 import { isUuid } from './schema';
 import { isOutputPath } from './files';
@@ -21,6 +22,13 @@ function networkWhy(e: unknown, key: string): string {
 }
 
 export class StopError extends Error {}
+
+/** A provider answered 429: this account pauses until `until` and is retried by itself (rate-limit.ts). */
+export class RateLimitError extends StopError {
+	constructor(readonly service: string, readonly until: number) {
+		super(`${service} answered 429 (too many requests). Sync can resume after ${new Date(until).toLocaleString()}.`);
+	}
+}
 
 const ORIGIN = 'https://claude.ai';
 /** The headers that carry the login window's login. */
@@ -265,7 +273,7 @@ export class ClaudeApi {
 			return null;
 		}
 		if (r.status === 403) throw new StopError('claude.ai answered 403 (forbidden) to ReadConversation.');
-		if (r.status === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');
+		if (r.status === 429) throw new RateLimitError('claude.ai', retryDeadline(''));
 		if (r.status !== 200 || !r.contentType.includes('application/json')) return null;
 		try {
 			return JSON.parse(r.text) as unknown;
@@ -314,7 +322,7 @@ export class ClaudeApi {
 		if (s !== 200) recordAnswer(this.source, 'claude.ai', 'POST', `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`, res, `reading memory answered ${s}`, [key]);
 		if (s === 401) throw new StopError('claude.ai answered 401 (not logged in). The login has probably expired – log in again in the plugin settings.');
 		if (s === 403) throw new StopError('claude.ai answered 403 (forbidden) to reading memory.');
-		if (s === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');
+		if (s === 429) throw new RateLimitError('claude.ai', retryDeadline(header(res.headers, 'retry-after')));
 		if (s !== 200) throw new StopError(`claude.ai answered ${s} to reading memory – unexpected, so the sync stopped.`);
 		try {
 			return JSON.parse(res.text) as unknown;
@@ -378,7 +386,7 @@ export class ClaudeApi {
 		if (!accepted) recordAnswer(this.source, 'claude.ai', 'GET', url.toString(), res, `claude.ai answered ${s}`, [key]);
 		if (s === 401) throw new StopError('claude.ai answered 401 (not logged in). The login has probably expired – log in again in the plugin settings.');
 		if (s === 403 && notFoundOk !== 'soft') throw new StopError('claude.ai answered 403 (forbidden). Session key expired, or claude.ai/Cloudflare blocked the request.');
-		if (s === 429) throw new StopError('claude.ai answered 429 (too many requests). Wait a while before syncing again.');
+		if (s === 429) throw new RateLimitError('claude.ai', retryDeadline(header(res.headers, 'retry-after')));
 		if (notFoundOk === 'any' || notFoundOk === 'soft') return res; // caller looks at the status
 		if (s === 404 && notFoundOk) return null;
 		if (s !== 200) throw new StopError(`claude.ai answered ${s} – unexpected, so the sync stopped.`);
