@@ -228,8 +228,7 @@ async function connect(code?: string): Promise<LinkState> {
 	return new Promise<LinkState>((resolve) => {
 		let answered = false;
 		sock.onopen = () => {
-			const agent = navigator.userAgent;
-			sock.send(JSON.stringify(code ? { op: 'pair', code: code.trim(), agent } : { op: 'hello', token: pairing?.token ?? '', agent }));
+			sock.send(JSON.stringify(code ? { op: 'pair', code: code.trim() } : { op: 'hello', token: pairing?.token ?? '' }));
 		};
 		sock.onmessage = (ev) => {
 			const text = String(ev.data);
