@@ -29,10 +29,16 @@
 		<span class="dot" aria-hidden="true"></span><span id="state-text">Not paired</span>
 	</div>
 
+	<section id="access" hidden>
+		<p>This browser has not given the extension access to the chat sites yet (Firefox asks you first).</p>
+		<button id="grant" class="primary">Allow site access</button>
+		<p class="muted">Only claude.ai, chatgpt.com, gemini.google.com, aistudio.google.com and 127.0.0.1 (Obsidian on this computer).</p>
+	</section>
+
 	<section>
 		<label for="code">Pairing code from the plugin settings</label>
 		<div class="row">
-			<input id="code" autocomplete="off" spellcheck="false" placeholder="48213-K7QF-9M2D-4XJP">
+			<input id="code" autocomplete="off" spellcheck="false" placeholder="48213-K7QF-9M2D-4XJP" autofocus>
 			<button id="pair" class="primary">Pair</button>
 		</div>
 		<p class="muted">In Obsidian: Settings → AI ChatBridge → Gemini → your account → Login method "Browser link" → Pair browser…. The code works once, for 5 minutes.</p>

@@ -25,6 +25,8 @@ async function ask(msg: Record<string, string>): Promise<LinkState> {
 	return r.state;
 }
 
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') pairButton.click(); });
+
 pairButton.addEventListener('click', () => {
 	const code = input.value.trim();
 	if (!/^\d{2,5}-[A-Za-z0-9]{4}-?[A-Za-z0-9]{4}-?[A-Za-z0-9]{4}$/.test(code)) {
@@ -41,6 +43,17 @@ pairButton.addEventListener('click', () => {
 });
 
 document.getElementById('unpair')!.addEventListener('click', () => void ask({ op: 'unpair' }).then(show));
+
+// Site access: Chrome grants it at install; Firefox may leave it to you.
+const origins = chrome.runtime.getManifest().host_permissions ?? [];
+const access = document.getElementById('access')!;
+async function checkAccess(): Promise<void> {
+	access.hidden = await chrome.permissions.contains({ origins });
+}
+document.getElementById('grant')!.addEventListener('click', () => {
+	void chrome.permissions.request({ origins }).then(checkAccess);
+});
+void checkAccess();
 
 chrome.storage.session.onChanged.addListener((changes) => {
 	const s = changes.state?.newValue as LinkState | undefined;

@@ -306,5 +306,9 @@ chrome.alarms.onAlarm.addListener((a) => {
 	void connect();
 });
 chrome.runtime.onStartup.addListener(() => void connect());
-chrome.runtime.onInstalled.addListener(() => void connect());
+chrome.runtime.onInstalled.addListener((d) => {
+	// Right after installing: open the page where you paste the pairing code.
+	if (d.reason === 'install') void chrome.runtime.openOptionsPage();
+	void connect();
+});
 void closeLeftovers().then(() => connect());
