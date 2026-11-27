@@ -80,7 +80,7 @@ async function main() {
 	let moveHeadOnSecondPage: GptListItem | undefined;
 	let previousSavedJobCount = 0;
 	const scan = async ({ force = false, archive = false, pin = true, time = now } = {}) => {
-		const stats: ScanStats = { requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set() };
+		const stats: ScanStats = { requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set(), pinned: new Set() };
 		await scanInventory(inventory, {
 			forceFull: force, archived: archive, pinned: pin, overlapMinutes: 10, now: time,
 			needsCapture: (item) => !captured.has(item.id + '/' + item.update_time),
@@ -136,7 +136,10 @@ async function main() {
 	previousSavedJobCount = 0;
 	const quiet = await scan();
 	assert.equal(quiet.requests, 6);
-	assert.equal(quiet.incrementalLists, 4);
+	// The pinned lists are read whole every run (2026-11-27), the others incrementally; same requests as before.
+	assert.equal(quiet.incrementalLists, 2);
+	assert.equal(quiet.fullLists, 2);
+	assert.deepEqual([...quiet.pinned!], [pinned[0]!.id], 'the pinned set is complete each run');
 	assert.equal(Object.keys(inventory.queue).length, 0);
 
 	const edited = { ...normal.at(-1)!, update_time: iso(now + 1000) };
@@ -152,7 +155,7 @@ async function main() {
 	// A changed order on the first page requires a full traversal.
 	[normalRows[1], normalRows[2]] = [normalRows[2]!, normalRows[1]!];
 	const disordered = await scan({ time: now + 1000 });
-	assert.equal(disordered.fullLists, 1);
+	assert.equal(disordered.fullLists, 3, 'the disordered list, plus the two pinned lists read whole every run');
 	assert.equal(disordered.requests, 14);
 	assert.equal(inventory.checkpoints['active-normal']?.watermark, null);
 	normalRows.sort((a, b) => Date.parse(b.update_time) - Date.parse(a.update_time));
@@ -192,6 +195,7 @@ async function main() {
 	assert.equal(unpinned.fullLists, 2);
 	assert(!unpinned.seen.has(pinned[0]!.id));
 	assert.equal(inventory.checkpoints['pinned-normal'], undefined);
+	assert.equal(unpinned.pinned!.size, 0, 'pinned lists off: nothing is known as pinned');
 	assert.equal(inventory.queue[pinned[0]!.id], undefined);
 	console.log(`Inventory tests passed. Quiet run: ${quiet.requests} chat-list requests vs ${bootstrap.requests} for full discovery of 241 rows.`);
 }

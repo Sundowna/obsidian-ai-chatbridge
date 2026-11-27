@@ -183,6 +183,8 @@ export interface GptTranscriptMeta {
 	filePaths?: Map<string, string>;
 	/** Put ChatGPT's reasoning into the note, folded. Off unless the account's switch is on. */
 	showReasoning?: boolean;
+	/** Pinned in ChatGPT (its pinned list, read whole each run): `pinned: true` in the properties. */
+	pinned?: boolean;
 }
 
 export function renderGptTranscript(chat: GptChat, meta: GptTranscriptMeta): string {
@@ -193,6 +195,7 @@ export function renderGptTranscript(chat: GptChat, meta: GptTranscriptMeta): str
 		`created: ${isoFromUnix(chat.create_time)}`,
 		`updated: ${isoFromUnix(chat.update_time)}`,
 	];
+	if (meta.pinned) fm.push('pinned: true');
 	if (meta.projectName) fm.push(`project: ${y(meta.projectName)}`);
 	// The models that answered, as each answer names it; without any, the chat's own default.
 	const answered = chat.messages.filter((m) => m.author.role === 'assistant').map((m) => m.metadata?.model_slug);

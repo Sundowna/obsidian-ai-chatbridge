@@ -132,7 +132,10 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		}
 		return { ...result, nothingSelected: true };
 	}
-	const scan: ScanStats ={ requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set() };
+	const scan: ScanStats = { requests: 0, fullLists: 0, incrementalLists: 0, seen: new Set(), pinned: new Set() };
+	/** Pinned now, when the pinned lists were read this run; otherwise unknown and not shown. */
+	let pinnedKnown = false;
+	const isPinned = (id: string): boolean => pinnedKnown && scan.pinned!.has(id);
 	let queuedCount = () => 0;
 	let fullStillRequested = forceFull || g.resumeAfter429?.forceFull === true;
 	const cooldownUntil = g.cooldownUntil ?? 0;
@@ -169,7 +172,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 	};
 	/** `paths`: where the transcript and the main raw .json are (or will be). */
 	const transcript = (chat: GptChat, item: ListItem, paths: { json: string; md: string }) =>
-		tagAccount(renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(paths.md.split('/').slice(0, -1).join('/'), paths.json), filePaths: savedPaths(chat), showReasoning: g.showReasoning === true }), account.label);
+		tagAccount(renderGptTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(paths.md.split('/').slice(0, -1).join('/'), paths.json), filePaths: savedPaths(chat), showReasoning: g.showReasoning === true, pinned: isPinned(item.uuid) }), account.label);
 	// The account line is left out, so notes saved before it existed do not count as changed.
 	const viewHash = (value: string): Promise<string> => fingerprint(untagAccount(value).replace(/^(---\r?\n[\s\S]*?\r?\n)unread: false(?=\r?\n)/, '$1unread: true'));
 
@@ -323,6 +326,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			},
 		}, scan);
 
+		pinnedKnown = includePinned;
 		const discovered = [...scan.seen].flatMap((id) => inventory.known[id]?.item ?? []);
 		const completedJobs = Object.values(inventory.queue).filter((row) => !needsCapture(row));
 		for (const row of completedJobs) completeInventoryJob(inventory, row.id, row.update_time);
@@ -554,6 +558,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 				g.downloadFiles, files.map((id) => [g.fileIndex[id] ?? '', !missingId(id)]),
 				// What the note shows: a changed switch redraws the saved notes.
 				g.showReasoning === true,
+				// Pinned or not: a pin or unpin in ChatGPT redraws that note.
+				isPinned(item.uuid),
 				Intl.DateTimeFormat().resolvedOptions().timeZone,
 			]);
 		};

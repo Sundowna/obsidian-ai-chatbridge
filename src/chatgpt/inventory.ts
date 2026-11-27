@@ -81,6 +81,8 @@ export interface ScanStats {
 	fullLists: number;
 	incrementalLists: number;
 	seen: Set<string>;
+	/** Chats in the pinned lists. Those short lists are read whole every run, so this is complete when they were asked for. */
+	pinned?: Set<string>;
 }
 
 /** Each completed page persists discoveries before a separate save advances the list watermark. */
@@ -105,7 +107,8 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 	const overlap = (Number.isFinite(configured) ? Math.max(1, Math.min(1440, configured)) : DEFAULT_OVERLAP_MINUTES) * 60_000;
 	for (const list of lists) {
 		const previous = inventory.checkpoints[list];
-		let full = !previous || options.now - previous.fullAt >= WEEK || inventory.manual?.includes(list) === true ||
+		// Pinned chats are a short list: read whole each run, so a pin or unpin shows at once.
+		let full = list.startsWith('pinned-') || !previous || options.now - previous.fullAt >= WEEK || inventory.manual?.includes(list) === true ||
 			(!!options.archive && !inventory.archiveReady);
 		const cutoff = !full && previous?.watermark != null ? previous.watermark - overlap : -Infinity;
 		let ordered = true;
@@ -137,6 +140,7 @@ export async function scanInventory(inventory: Inventory, options: ScanOptions, 
 					discovered++;
 				}
 				stats.seen.add(item.id);
+				if (list.startsWith('pinned-')) stats.pinned?.add(item.id);
 				(options.archive ?? options.observeArchive)?.add(item.id, list.startsWith('archived-'), typeof item.is_archived === 'boolean' ? item.is_archived : undefined);
 				const known = inventory.known[item.id];
 				if (!known || compareRevision(item.update_time, known.item.update_time) >= 0) {
