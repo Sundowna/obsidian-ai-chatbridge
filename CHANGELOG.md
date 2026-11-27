@@ -5,6 +5,11 @@
 ### Fixed
 - **ChatGPT: pasted text from your Library is saved too** - 0.41.2 fetched Library files, but long pastes (the "Pasted text(…).txt" files ChatGPT makes when you paste a lot of text) were still skipped as "not a file download": chatgpt.com sends these to be shown rather than downloaded. They are the exact pasted text, with their file name and size, so the plugin now saves them like the other Library files. An answer that does not name a file is still never saved
 
+## 0.41.3 - 2026-11-27
+
+### Fixed
+- **ChatGPT: a brief network hiccup no longer stops the sync** - when a connection to chatgpt.com broke for a moment (for example "Network error: net::ERR_SSL_BAD_RECORD_MAC_ALERT"), the whole sync stopped. The plugin now tries that request again after a few seconds, up to three times, and only stops if every try fails. The error then says how often it was tried and is listed in the Error logs tab (#48)
+
 ## 0.41.2 - 2026-11-26
 
 ### Fixed

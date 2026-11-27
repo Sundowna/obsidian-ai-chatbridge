@@ -58,6 +58,12 @@ const SUMMARY_STREAM = '/backend-api/memories/about_you/summary/stream';
  */
 const NUM_TURNS = 10;
 
+/**
+ * Pauses before a ChatGPT GET is sent again after a network error (no HTTP answer at all, such as
+ * a broken TLS connection). Two more tries, then the sync stops as before (issue #48).
+ */
+export const NETWORK_RETRY_WAITS_MS = [2000, 5000];
+
 /** chatgpt.com handed out a download link to an address we have not checked yet. */
 export class BlockedLinkError extends Error {
 	constructor(readonly where: string) {
@@ -376,6 +382,11 @@ export class GptApi {
 		return headers;
 	}
 
+	/** Pause before a network retry (tests replace it). */
+	protected pause(ms: number): Promise<void> {
+		return new Promise((r) => window.setTimeout(r, ms));
+	}
+
 	/** The single request used by everything above. Stops on anything but 200 (and 404 if allowed). */
 	private async request(path: string, accept: string, auth: boolean, notFoundOk: true): Promise<RequestUrlResponse | null>;
 	private async request(path: string, accept: string, auth: boolean, notFoundOk: false, method?: 'GET' | 'POST'): Promise<RequestUrlResponse>;
@@ -387,12 +398,25 @@ export class GptApi {
 		}
 		const headers = this.headers(accept, auth);
 		let res;
-		try {
-			res = await requestUrl({ url: url.toString(), method, headers, throw: false });
-		} catch (e) {
-			const why = `Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`;
-			recordError(this.source, { service: 'ChatGPT', method, url: url.toString(), status: null, message: why, secrets: this.secrets });
-			throw new StopError(why);
+		// A GET that fails below HTTP (seen: net::ERR_SSL_BAD_RECORD_MAC_ALERT, issue #48) is tried
+		// again after a short pause; only when every try fails does the sync stop. The POST is
+		// never sent twice.
+		const waits = method === 'GET' ? NETWORK_RETRY_WAITS_MS : [];
+		for (let attempt = 0; ; attempt++) {
+			try {
+				res = await requestUrl({ url: url.toString(), method, headers, throw: false });
+				break;
+			} catch (e) {
+				const wait = waits[attempt];
+				if (wait !== undefined) {
+					await this.pause(wait);
+					continue;
+				}
+				const tries = attempt + 1;
+				const why = `Network error: ${this.redact(e instanceof Error ? e.message : String(e))}${tries > 1 ? ` (tried ${tries} times)` : ''}`;
+				recordError(this.source, { service: 'ChatGPT', method, url: url.toString(), status: null, message: why, secrets: this.secrets });
+				throw new StopError(why);
+			}
 		}
 		const s = res.status;
 		if (s !== 200 && !(s === 404 && notFoundOk)) recordAnswer(this.source, 'ChatGPT', method, url.toString(), res, `chatgpt.com answered ${s}`, this.secrets);
