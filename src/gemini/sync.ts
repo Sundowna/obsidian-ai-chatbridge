@@ -10,8 +10,9 @@ import { ShapeError } from '../schema';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
 import { pastedSession } from '../cookies';
+import { MassMissingError } from '../missing-guard';
 import { GeminiApi } from './api';
-import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from './save';
+import { emptyResult, failureText, geminiFromRaw, saveChats, writeLog, type GoogleSyncResult } from './save';
 import { renderGeminiTranscript } from './transcript';
 import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
@@ -52,9 +53,9 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 				throw e;
 			}
 			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
-		}, progress, result);
+		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label) });
 	} catch (e) {
-		if (e instanceof StopError) result.stopped = e.message;
+		if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Gemini's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else if (e instanceof GeminiError) result.stopped = `Gemini refused the request (${e.message}).`;
 		else result.stopped = `Something went wrong while reading Gemini (${failureText(e)}).`;

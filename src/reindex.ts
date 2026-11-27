@@ -158,7 +158,7 @@ export function vaultLookup(app: App): VaultLookup {
 /** Downloaded files (Artifacts/, Attachments/) found again by their unique name. Returns how many. */
 export function refreshFiles(s: Settings, vault: VaultLookup): number {
 	let n = 0;
-	for (const a of [...s.claude, ...s.chatgpt]) {
+	for (const a of [...s.claude, ...s.chatgpt, ...s.lumo]) {
 		for (const [id, path] of Object.entries(a.web.fileIndex)) {
 			if (path.startsWith('skipped: ') || vault.exists(path)) continue;
 			const found = vault.uniqueByName(nameOf(path));

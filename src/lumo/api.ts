@@ -8,8 +8,8 @@ import { StopError } from '../api';
 import { isLoggedIn, openHiddenPage, type HiddenPage, type LoginRef } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
 import { sessionKeyPassword, openMasterKeys, unlockUserKeys } from './keys';
-import { checkClientKey, checkConversation, checkFullMessage, checkMasterKeys, checkSpaces, checkUser, parseStoredSession } from './schema';
-import type { LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
+import { checkAsset, checkClientKey, checkConversation, checkFullMessage, checkMasterKeys, checkSpaces, checkUser, parseStoredSession } from './schema';
+import type { LumoWireAsset, LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
 
 const ORIGIN = 'https://lumo.proton.me';
 const API_URLS = `${ORIGIN}/api/*`;
@@ -29,6 +29,7 @@ const ALLOWED = [
 	/^\/api\/lumo\/v1\/spaces$/,
 	/^\/api\/lumo\/v1\/conversations\/[\w=-]{1,200}$/,
 	/^\/api\/lumo\/v1\/messages\/[\w=-]{1,200}$/,
+	/^\/api\/lumo\/v1\/assets\/[\w=-]{1,200}$/,
 ];
 
 const READ_SESSIONS = `JSON.stringify(Object.keys(localStorage).filter((k) => k.startsWith('ps-')).map((k) => localStorage.getItem(k)))`;
@@ -92,8 +93,14 @@ export class LumoApi {
 		return checkFullMessage(await this.get(`/api/lumo/v1/messages/${checkId(id)}`));
 	}
 
+	/** One file of a space with its encrypted content (an upload, or something Lumo made); null when Lumo no longer has it. */
+	async asset(id: string): Promise<LumoWireAsset | null> {
+		const body = await this.get(`/api/lumo/v1/assets/${checkId(id)}`, true);
+		return body === null ? null : checkAsset(body);
+	}
+
 	/** The single GET used by everything above. */
-	private async get(path: string): Promise<unknown> {
+	private async get(path: string, goneOk = false): Promise<unknown> {
 		const url = new URL(path, ORIGIN);
 		if (url.origin !== ORIGIN || !ALLOWED.some((re) => re.test(url.pathname))) {
 			throw new StopError('Blocked a request to a Lumo address the plugin does not use.');
@@ -107,6 +114,8 @@ export class LumoApi {
 			recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: null, message: 'Network error while talking to Lumo.' });
 			throw new StopError('Network error while talking to Lumo.');
 		}
+		// A file Lumo no longer has (deleted meanwhile): not an error, and not recorded.
+		if (goneOk && (res.status === 404 || res.status === 422)) return null;
 		if (res.status !== 200) recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: res.status, headers: res.headers, body: res.text, message: `Lumo answered ${res.status}`, secrets: [this.page.uid] });
 		if (res.status === 401) throw new StopError('Lumo answered 401 (not logged in). Log in to Lumo again in the plugin settings.');
 		if (res.status === 403) throw new StopError('Lumo answered 403 (forbidden). Log in to Lumo again in the plugin settings.');

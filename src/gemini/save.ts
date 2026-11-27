@@ -5,11 +5,15 @@
 import { TFile } from 'obsidian';
 import { withAccount } from '../accounts';
 import { appendLog } from '../log';
+import { guardMissing } from '../missing-guard';
+import { restoreNote, savedChat, type FromRaw } from '../restore';
 import type AIChatBridge from '../main';
-import { baseName, dailyNoteName } from '../naming';
+import { baseName, dailyNoteName, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { newestFirst, pickTodo, type Todo } from '../select';
 import type { GeminiAccount } from '../settings';
+import { renderGeminiTranscript, renderStudioTranscript } from './transcript';
+import type { GeminiChat, StudioPrompt } from './types';
 import type { IndexEntry, ListItem } from '../types';
 import { ensureFolder, findFile, freeStem } from '../vaultio';
 import { dirOf, rawLink } from '../raw-folders';
@@ -42,6 +46,11 @@ export interface Saved {
 	md: (jsonLink: string) => string;
 }
 
+/** A Gemini chat's note from its saved raw file. */
+export const geminiFromRaw = (label: string): FromRaw => (raw, link, uuid) => tagAccount(renderGeminiTranscript(savedChat<GeminiChat>(raw, uuid, 'turns'), link), label);
+/** An AI Studio prompt's note from its saved raw file. */
+export const studioFromRaw = (label: string): FromRaw => (raw, link, uuid) => tagAccount(renderStudioTranscript(savedChat<StudioPrompt>(raw, uuid, 'messages'), link), label);
+
 export async function saveChats(
 	plugin: AIChatBridge,
 	items: ListItem[],
@@ -52,6 +61,8 @@ export async function saveChats(
 	read: (item: ListItem) => Promise<Saved | null>,
 	progress: ProgressFn,
 	result: GoogleSyncResult,
+	/** `label`: what the chats are called in the safety stop; `fromRaw`: the note from its saved raw file. */
+	o: { label: string; fromRaw: FromRaw },
 ): Promise<void> {
 	const app = plugin.app;
 	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
@@ -61,9 +72,22 @@ export async function saveChats(
 		const known = index[it.uuid];
 		return !!known && !queued.has(it.uuid) && (!exists(known.json) || !exists(known.md));
 	};
-	const recoveries: Todo[] = items.filter(lost).map((item) => ({ item, isUpdate: true }));
+	// Before anything is written: many saved chats missing means a wrong sync history, not deletions.
+	const saved = Object.values(index);
+	guardMissing(o.label, saved.length, saved.filter((e) => !exists(e.md) || !exists(e.json)).length);
 	result.listed = items.length;
-	result.unchanged = items.length - todo.length - recoveries.length;
+	// A deleted note whose raw file is still there is written again from it; the rest is fetched.
+	const recoveries: Todo[] = [];
+	let rebuilt = 0;
+	for (const item of items.filter(lost)) {
+		const known = index[item.uuid]!;
+		if (await restoreNote(app, item.uuid, known, o.fromRaw)) {
+			await plugin.saveSettings();
+			result.restored.push(stemOf(known.md));
+			rebuilt++;
+		} else recoveries.push({ item, isUpdate: true });
+	}
+	result.unchanged = items.length - todo.length - recoveries.length - rebuilt;
 	const jobs = newestFirst([...todo, ...recoveries]);
 	const max = plugin.settings.maxChatsPerRun;
 	const batch = max > 0 ? jobs.slice(0, max) : jobs;

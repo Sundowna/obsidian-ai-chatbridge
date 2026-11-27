@@ -31,6 +31,9 @@ export const conversationAd = (id: string, spaceId: string): string => stable({ 
 export const messageAd = (id: string, role: string, conversationId: string, parentId?: string): string =>
 	stable({ app: 'lumo', type: 'message', id, role, parentId, conversationId });
 
+/** A file (asset) of a space; Proton's client calls it an attachment. */
+export const attachmentAd = (id: string): string => stable({ app: 'lumo', type: 'attachment', id });
+
 export function importMasterKey(raw: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
 	return subtle().importKey('raw', raw, 'AES-KW', false, ['unwrapKey']);
 }

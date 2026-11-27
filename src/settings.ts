@@ -144,7 +144,11 @@ export interface LumoSettings {
 	projectFolders?: Record<string, string>;
 	/** Picker row ID -> folder for that project's raw .json files. Missing = the default (see raw-folders.ts). */
 	projectRawFolders?: Record<string, string>;
+	/** Also save the chats' files: your uploads to Attachments/, what Lumo made to Artifacts/. */
+	downloadFiles: boolean;
 	index: Record<string, IndexEntry>;
+	/** File key (see lumo/assets.ts) -> vault path, so each file is fetched once. */
+	fileIndex: Record<string, string>;
 	/** The Proton account behind this login (not secret), to notice the same login twice. */
 	userId?: string;
 }
@@ -276,9 +280,11 @@ export const DEFAULT_LUMO: LumoSettings = {
 	folder: FIRST.lumoChat,
 	projectSubfolders: true,
 	recentFolderName: 'Recent',
+	downloadFiles: true,
 	onlyProjects: false,
 	projects: [],
 	index: {},
+	fileIndex: {},
 };
 
 export const DEFAULT_GEMINI: GeminiSettings = {

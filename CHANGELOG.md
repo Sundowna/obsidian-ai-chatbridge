@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.42.0 - 2026-11-27
+
+### Added
+- **Lumo: files are saved too** - your uploads (pictures, documents) go to `Attachments/` and what Lumo made (artifacts, pictures) to `Artifacts/`, next to the chat, as for Claude and ChatGPT. The note shows pictures and links the other files instead of saying "not saved". Files are unlocked on your computer with the same key as the chat, one read-only request per file. Chats you saved earlier get their files over the next syncs. Turn it off under Lumo → Content → **Download files and images**. Lumo keeps a reduced copy of a picture, so that is what you get.
+
+### Fixed
+- **Gemini, AI Studio, Lumo and Hermes: safety stop when many chats are missing** - if many saved chats are not where the plugin expects them (for example after moving folders outside Obsidian), the sync now stops with a hint to use "Refresh index" instead of fetching them all again. Claude and ChatGPT already did this.
+- **Gemini, AI Studio and Lumo: a deleted note comes back without a download** - when you delete a chat note but its raw file is still in the vault, the note is written again from that file. It no longer asks the provider and no longer uses up the "max chats per run" limit.
+
 ## 0.41.4 - 2026-11-27
 
 ### Fixed

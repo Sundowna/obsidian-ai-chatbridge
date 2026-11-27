@@ -8,9 +8,10 @@ import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
-import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } from '../gemini/save';
+import { emptyResult, failureText, saveChats, studioFromRaw, writeLog, type GoogleSyncResult } from '../gemini/save';
 import { renderStudioTranscript } from '../gemini/transcript';
 import { pastedSession } from '../cookies';
+import { MassMissingError } from '../missing-guard';
 import { StudioApi } from './api';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -33,9 +34,9 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 			if (!p) return null;
 			const created = p.messages.find((m) => m.createdAt)?.createdAt ?? p.updatedAt;
 			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name), account.label) };
-		}, progress, result);
+		}, progress, result, { label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label) });
 	} catch (e) {
-		if (e instanceof StopError) result.stopped = e.message;
+		if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `AI Studio's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else result.stopped = `Something went wrong while reading AI Studio (${failureText(e)}).`;
 	} finally {

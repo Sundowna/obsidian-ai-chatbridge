@@ -124,6 +124,15 @@ export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAc
 	filingOptions(ctx, el, 'Lumo', g);
 
 	new Setting(el).setName('Content').setHeading();
+	new Setting(el)
+		.setName('Download files and images')
+		.setDesc('Files Lumo made go to Artifacts/, files you uploaded to Attachments/, next to the chat. Chats saved earlier get theirs over the next syncs. Lumo keeps a reduced copy of a picture, so that is what is saved.')
+		.addToggle((t) =>
+			t.setValue(g.downloadFiles).onChange(async (v) => {
+				g.downloadFiles = v;
+				await ctx.plugin.saveSettings();
+			}),
+		);
 	projectFilterOptions(ctx, el, 'lumo', account, g);
 }
 

@@ -2,7 +2,7 @@
 // Gemini and AI Studio. Run: npm run test:versions
 
 import { Platform, TFile, TFolder } from 'obsidian';
-import { emptyResult, saveChats, type Saved } from '../src/gemini/save';
+import { emptyResult, geminiFromRaw, saveChats, type Saved } from '../src/gemini/save';
 import { followRename } from '../src/follow';
 import { normalizeSettings } from '../src/migrate';
 import { localStamp } from '../src/naming';
@@ -167,7 +167,7 @@ const note = (body: string, extra = '') => `---\nuuid: abc\nupdated: 2026-11-07T
 		});
 		const run = async (updated: string) => {
 			const r = emptyResult();
-			await saveChats(plugin, [item(updated)], index, 'AI/Gemini', 'Raw/AI/Gemini', read, () => undefined, r);
+			await saveChats(plugin, [item(updated)], index, 'AI/Gemini', 'Raw/AI/Gemini', read, () => undefined, r, { label: 'Gemini chats', fromRaw: geminiFromRaw('') });
 			return r;
 		};
 		const md = 'AI/Gemini/2026-11-06 Plan a trip.md';
