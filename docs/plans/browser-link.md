@@ -178,7 +178,8 @@ Signed-in run, owner's own Chrome 158 (through Claude in Chrome, page context, s
 **Stage 0 done.** Option C (packaged functions, no code strings) works on all four sites; no userScripts, no debugger. Every cookie value the plugin reads today is reachable without the `cookies` permission (`sessionKey` is not needed under the Browser link).
 
 Notes for later stages:
-- AI Studio redirected the tab to `/onboarding` (account barely used there). The call still worked; Stage 4's ready check must not insist on `/library`.
+- AI Studio redirected the tab to `/onboarding` on the first try (account barely used there). The call still worked; Stage 4's ready check must not insist on `/library`.
+- AI Studio second try: tab stayed on `/library`; `ListPrompts` 200 but `[]` (2 bytes). The page's own list call is also `ListPrompts`, and its only `/prompts/` links are "new chat" buttons, so the library is empty, not a wrong call. Real rows are still unproven: save one prompt in AI Studio and rerun before Stage 4.
 - Gemini list rows are at `payload[2]` (as `wire.ts` reads them), not `[0]`.
 - Claude in Chrome hides any result whose key mentions "token" or "session"; use neutral keys when testing this way.
 
