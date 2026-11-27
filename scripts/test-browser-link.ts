@@ -573,6 +573,15 @@ async function testSeveralBrowsers() {
 		const updated = await namedBrowser(p2, { op: 'hello', token: 'legacy-token-value', browser: 'upgraded-01' }, val('u'));
 		expect('updated extension: keeps the old pairing under its new ID', updated.reply.op === 'welcome' && Object.keys(readTokens(old.value)).join() === 'upgraded-01');
 		updated.ws.close();
+		await sleep(50);
+		// Seen live 27.11.2026: one Chrome made a second ID at start-up and was refused with its own token.
+		const second = await namedBrowser(p2, { op: 'hello', token: 'legacy-token-value', browser: 'second-id-02' }, val('s'));
+		expect('a paired extension that sends a new ID stays the same paired browser', second.reply.op === 'welcome' && s2.linkedBrowsers().join() === 'upgraded-01' && Object.keys(readTokens(old.value)).join() === 'upgraded-01');
+		second.ws.close();
+		await sleep(50);
+		const wrong = await namedBrowser(p2, { op: 'hello', token: 'not-the-token-value', browser: 'upgraded-01' }, val('w'));
+		expect('a known ID with the wrong token is still refused', wrong.reply.op !== 'welcome' && s2.linkedBrowsers().length === 0);
+		wrong.ws.close();
 	} finally {
 		await s2.stop();
 	}

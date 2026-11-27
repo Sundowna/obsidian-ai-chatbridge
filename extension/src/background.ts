@@ -233,12 +233,17 @@ function disconnected(sock: WebSocket, refused: boolean): void {
  * This install's own random ID (one per browser or browser profile), so the plugin can pair
  * several browsers and send each account's requests to its own one. Made once, kept.
  */
-async function browserId(): Promise<string> {
-	const { browserId: saved } = await chrome.storage.local.get<{ browserId?: string }>('browserId');
-	if (typeof saved === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(saved)) return saved;
-	const id = self.crypto.randomUUID().replace(/-/g, '');
-	await chrome.storage.local.set({ browserId: id });
-	return id;
+let browserIdOnce: Promise<string> | null = null;
+function browserId(): Promise<string> {
+	// Asked once per start: two connects at the same moment must not each make a new ID.
+	browserIdOnce ??= (async () => {
+		const { browserId: saved } = await chrome.storage.local.get<{ browserId?: string }>('browserId');
+		if (typeof saved === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(saved)) return saved;
+		const id = self.crypto.randomUUID().replace(/-/g, '');
+		await chrome.storage.local.set({ browserId: id });
+		return id;
+	})();
+	return browserIdOnce;
 }
 
 /**

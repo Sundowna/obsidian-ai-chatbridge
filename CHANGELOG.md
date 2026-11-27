@@ -4,6 +4,7 @@
 
 ### Fixed
 - **Claude stopped syncing since 0.54.0** - the new login check asks claude.ai who is signed in, but the plugin's own request guard blocked that address, so every Claude account stopped with "Blocked a request". The guard now lets exactly that one address through.
+- **Browser link refused a paired browser** - a browser extension that made a second ID of its own at start-up (two connects at the same moment) was turned away although it brought the right token, so every Browser link account said "browser closed". The plugin now goes by the token, and the extension (0.2.7) makes its ID only once.
 
 ## 0.55.0 - 2026-11-27
 

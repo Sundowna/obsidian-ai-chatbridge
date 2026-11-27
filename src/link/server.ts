@@ -267,19 +267,22 @@ export class LinkServer {
 		const browser = isBrowserId(hello.browser) ? hello.browser : LEGACY_BROWSER;
 		if (hello.op === 'hello') {
 			if (typeof hello.token !== 'string') return null;
+			// The token says which paired browser this is; the ID it sends is only a label. (An
+			// extension that made a second ID once, e.g. two starts at the same moment, stays paired.)
 			const tokens = readTokens(this.opts.store.get());
-			const token = tokens[browser];
-			if (token) return sameSecret(hello.token, token) ? { welcome: { op: 'welcome' }, browser } : null;
-			// An extension updated to send its own ID, paired before with the one older token: it keeps that pairing.
-			const legacy = tokens[LEGACY_BROWSER];
-			if (browser !== LEGACY_BROWSER && legacy && sameSecret(hello.token, legacy)) {
+			const given = hello.token;
+			const known = Object.keys(tokens).find((id) => sameSecret(given, tokens[id]!));
+			// An ID that is paired itself must bring its own token, never another browser's.
+			if (!known || (tokens[browser] && known !== browser)) return null;
+			// An extension updated to send its own ID, paired before with the one older token: the pairing moves to its ID.
+			if (known === LEGACY_BROWSER && browser !== LEGACY_BROWSER && !tokens[browser]) {
 				delete tokens[LEGACY_BROWSER];
-				tokens[browser] = legacy;
+				tokens[browser] = given;
 				this.opts.store.set(writeTokens(tokens));
 				this.opts.onPaired?.(browser);
 				return { welcome: { op: 'welcome' }, browser };
 			}
-			return null;
+			return { welcome: { op: 'welcome' }, browser: known };
 		}
 		if (hello.op === 'pair' && typeof hello.code === 'string') {
 			const c = this.code;
