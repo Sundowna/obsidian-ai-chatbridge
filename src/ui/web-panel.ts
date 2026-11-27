@@ -13,6 +13,7 @@ import { masterRaw } from '../raw-folders';
 import { lastRunLine, runKey } from '../last-run';
 import { archiveSettings } from './archive-settings';
 import { BrowserLoginModal } from './browser-login-modal';
+import { linkLoginRow, loginMethodSetting, usesLinkRow } from './browser-link-section';
 
 /** Login state with only the buttons that make sense for it. */
 function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, account: AnyAccount, note: () => string, surface: 'web' | 'studio' = 'web'): void {
@@ -129,7 +130,8 @@ export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAc
 
 export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: GeminiAccount): void {
 	const g = account.web;
-	loginRow(ctx, el, 'gemini', account, () => `${count(Object.keys(g.index).length, 'chat')} saved. The same Google login is used for AI Studio.`);
+	(usesLinkRow('gemini', account) ? linkLoginRow : loginRow)(ctx, el, 'gemini', account, () => `${count(Object.keys(g.index).length, 'chat')} saved. The same Google login is used for AI Studio.`);
+	loginMethodSetting(ctx, el, account);
 
 	new Setting(el).setName('Folders').setHeading();
 	chatFolderSetting(ctx, el, 'Chat folder', 'Where Gemini chats are saved.', { kind: 'gemini', id: account.id });
@@ -153,7 +155,7 @@ export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: Gemi
 
 export function studioPanel(ctx: PanelContext, el: HTMLElement, account: GeminiAccount): void {
 	const st = account.studio;
-	loginRow(ctx, el, 'gemini', account, () => `${count(Object.keys(st.index).length, 'prompt')} saved.`, 'studio');
+	(usesLinkRow('gemini', account) ? linkLoginRow : loginRow)(ctx, el, 'gemini', account, () => `${count(Object.keys(st.index).length, 'prompt')} saved.`, 'studio');
 
 	new Setting(el)
 		.setName('Sync AI Studio')

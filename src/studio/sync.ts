@@ -12,6 +12,7 @@ import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } 
 import { renderStudioTranscript } from '../gemini/transcript';
 import { pastedSession } from '../cookies';
 import { StudioApi } from './api';
+import { BrowserLinkUnavailable } from '../link/errors';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
@@ -35,7 +36,9 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name), account.label) };
 		}, progress, result);
 	} catch (e) {
-		if (e instanceof StopError) result.stopped = e.message;
+		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
+		if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
+		else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `AI Studio's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else result.stopped = `Something went wrong while reading AI Studio (${failureText(e)}).`;
 	} finally {

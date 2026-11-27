@@ -15,6 +15,7 @@ import { emptyResult, failureText, saveChats, writeLog, type GoogleSyncResult } 
 import { renderGeminiTranscript } from './transcript';
 import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
+import { BrowserLinkUnavailable } from '../link/errors';
 
 /** Chats in one run that may fail verification and be skipped before the sync stops. */
 const MAX_ODD_CHATS = 2;
@@ -54,7 +55,9 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
 		}, progress, result);
 	} catch (e) {
-		if (e instanceof StopError) result.stopped = e.message;
+		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
+		if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
+		else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Gemini's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else if (e instanceof GeminiError) result.stopped = `Gemini refused the request (${e.message}).`;
 		else result.stopped = `Something went wrong while reading Gemini (${failureText(e)}).`;

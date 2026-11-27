@@ -1,7 +1,7 @@
 # Browser link: plan and implementation plan
 
 Handover document. Written 27 Nov 2026 by the session that did the kickoff (reading and research only).
-**Progress: stages 0–3 done (see each "Stage N status" below). Next: Stage 4.**
+**Progress: stages 0–3 done, Stage 4 code done (signed-in run pending). See each "Stage N status" below.**
 
 The next session should read this file top to bottom, then start at [Stage 0](#stage-0-proof-in-the-real-browser).
 
@@ -234,6 +234,25 @@ Done for Chrome (Edge and Brave use the same build; not run on them yet). `test:
 | Test | `scripts/test-extension.ts` (`npm run test:extension`; needs Chrome + internet, so not in `test:ci`; `CHROME=` to point at another binary) |
 
 Found and fixed by the test: logged-out Gemini stays on gemini.google.com (Google allows signed-out use), so the extension said "could not open the site". It now reports "not logged in" when a page loaded on its own site but the sign-in check never passed.
+
+### Stage 4 status (27 Nov 2026)
+
+Code done; real signed-in run **not done yet** (needs the owner's Chrome, see below). `test:ci` 1150 → 1198 PASS, 0 FAIL (39 new in `test:browser-link`, 6 new in `test:bundle`, + the existing suites); lint 0 errors, same 14 warnings; build OK. Both new suites proven to bite (skip handling off: 2 fail; `ws` alias off: 2 fail). **No provider `api.ts` file was touched** (coordinator rule 3).
+
+| Piece | Where |
+|---|---|
+| Transport | `src/transport/browser-link.ts` (`BrowserLinkTransport`); `transportFor` picks it through `setBrowserLink(uses, server)`, set by `main.ts` on load |
+| Setting | `GeminiSettings.loginMethod` (`'window'` missing / `'browser'`); `Settings.browserLinkPort`; kept by `migrate.ts`; new Google accounts start on `'browser'` (`accounts.ts`) |
+| Plugin | `main.ts`: `browserLink` (`LinkManager`), `linkTokens()` (secret storage), `updateBrowserLink()`; stops on unload; `canSyncWeb` lets a link account run (its skip is the message) |
+| Skip | `GoogleSyncResult.linkSkipped` (`gemini/save.ts`), set in `gemini/sync.ts` / `studio/sync.ts`; `runOne` shows it as "waiting", never pauses automatic sync |
+| UI | `src/ui/browser-link-section.ts` (login method, link login row, pairing window, `accountReady`); small hooks in `web-panel.ts`, `overview-tab.ts`, `provider-tab.ts` |
+| Build | `esbuild.shared.mjs` (options shared by the build and `test:bundle`): `ws` aliased to its Node build, `bufferutil` / `utf-8-validate` external. **Bug fixed:** since Stage 2 the bundle held `ws`'s browser stub, so the server would have thrown in Obsidian |
+
+Known gaps:
+- **Signed-in run**: the owner loads `extension/dist` unpacked in Chrome, pairs, and syncs one Gemini account and AI Studio in a test vault; then compare files and frontmatter with the login-window route.
+- With a skip, Gemini and AI Studio each show their own notice (two notices for one closed browser).
+- The status bar shows the skip only as a notice; no permanent link state there yet.
+- The first Google account of a fresh install keeps the login window (only accounts added later default to the Browser link).
 
 Not done in Stage 3: Edge and Brave by hand; a signed-in run through the real extension (Stage 4 does it with the plugin wired in); attribution file (nothing was copied from sho7650/obsidian-AI-exporter or browser-tools-mcp, only the manifest idea, so no notice is needed yet).
 

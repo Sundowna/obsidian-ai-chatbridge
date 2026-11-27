@@ -10,6 +10,7 @@ import type { IndexEntry } from './types';
 import type { AssetRetry, Capture } from './chatgpt/recovery';
 import type { Inventories } from './chatgpt/inventory';
 import type { ChatCounts } from './progress';
+import type { LoginMethod } from './link/account';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import type { ProjectCatalog } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
@@ -159,6 +160,8 @@ export interface GeminiSettings {
 	index: Record<string, IndexEntry>;
 	/** The Google account behind this login (its email, not secret), to notice the same login twice. */
 	userId?: string;
+	/** Login window (missing) or the Browser link (your own browser, through the extension). */
+	loginMethod?: LoginMethod;
 }
 
 /** The same login's Google AI Studio prompts, which AI Studio keeps in Google Drive. */
@@ -235,6 +238,8 @@ export interface Settings {
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
 	lastAll?: LastAll;
+	/** The Browser link's port on 127.0.0.1, kept so a paired extension finds it again (not a secret). */
+	browserLinkPort?: number;
 	/** System file renames done in this vault (see system-names.ts). */
 	systemNames?: number;
 }

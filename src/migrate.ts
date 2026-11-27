@@ -193,6 +193,7 @@ export function normalizeSettings(loaded: unknown): { settings: Settings; migrat
 			lastRuns: { ...(saved.lastRuns ?? {}) },
 			lastAll: saved.lastAll,
 			systemNames: saved.systemNames,
+			browserLinkPort: saved.browserLinkPort,
 		},
 	};
 }

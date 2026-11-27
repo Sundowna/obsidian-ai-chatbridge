@@ -12,7 +12,7 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"test": "npm run test:offline && npm run test:ci",
-		"test:ci": "npm run test:versions && npm run test:merge && npm run test:claude && npm run test:desktop && npm run test:hermes && npm run test:memory && npm run test:cloud && npm run test:codex-cloud && npm run test:gemini && npm run test:lumo && npm run test:inventory && npm run test:sync && npm run test:mobile && npm run test:remote && npm run test:computers && npm run test:handoff && npm run test:error-log && npm run test:transport && npm run test:channel",
+		"test:ci": "npm run test:versions && npm run test:merge && npm run test:claude && npm run test:desktop && npm run test:hermes && npm run test:memory && npm run test:cloud && npm run test:codex-cloud && npm run test:gemini && npm run test:lumo && npm run test:inventory && npm run test:sync && npm run test:mobile && npm run test:remote && npm run test:computers && npm run test:handoff && npm run test:error-log && npm run test:transport && npm run test:channel && npm run test:browser-link && npm run test:bundle",
 		"test:sync": "esbuild scripts/test-chatgpt-sync.ts --bundle --platform=node --conditions=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-chatgpt-sync.cjs && node scripts/.test-chatgpt-sync.cjs",
 		"test:inventory": "esbuild scripts/test-chatgpt-inventory.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-chatgpt-inventory.cjs && node scripts/.test-chatgpt-inventory.cjs",
 		"test:offline": "esbuild scripts/test-offline.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=scripts/.test-offline.cjs && node scripts/.test-offline.cjs",
@@ -31,6 +31,8 @@
 		"test:handoff": "esbuild scripts/test-handoff.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-handoff.cjs && node scripts/.test-handoff.cjs",
 		"test:lumo": "esbuild scripts/test-lumo.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-lumo.cjs && node scripts/.test-lumo.cjs",
 		"test:channel": "esbuild scripts/test-channel.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-channel.cjs && node scripts/.test-channel.cjs",
+		"test:browser-link": "esbuild scripts/test-browser-link.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-browser-link.cjs && node scripts/.test-browser-link.cjs",
+		"test:bundle": "node scripts/test-bundle.mjs",
 		"test:transport": "esbuild scripts/test-transport.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-transport.cjs && node scripts/.test-transport.cjs",
 		"test:error-log": "esbuild scripts/test-error-log.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-error-log.cjs && node scripts/.test-error-log.cjs",
 		"test:extension": "npm run build:extension && esbuild scripts/test-extension.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-extension.cjs && node scripts/.test-extension.cjs"
