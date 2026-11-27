@@ -133,6 +133,15 @@ Work moved to a Linux Mint PC: repo at `~/code/obsidian-ai-chatbridge`, Node LTS
 - Baseline: `test:ci` 1034 PASS, 0 FAIL. Lint 0 errors, 14 warnings. `test:offline` cannot run here (no `samples/`).
 - Reading `src/gemini/api.ts` and `src/studio/api.ts`: their `page.run` code is only two fixed signed `fetch` calls. **Option C chosen**: the extension ships them as packaged functions (`sign: 'wiz-at'` for Gemini batchexecute, `sign: 'sapisidhash'` for AI Studio). No code strings, no eval, no userScripts, no debugger. The signing values stay in the page. Ready checks become named checks (`gemini-signed-in`, `studio-ready`). Consequence for Stage 1: `TransportPage.run(code)` becomes `call(request, sign?)`; the login-window transport builds today's code strings from it.
 - Spike in `extension/spike/` (README there). Server-side checks done: non-extension origin rejected, wrong token rejected. Needs the owner's Chrome run for the rest.
+- `extension/spike/drive-headless.mjs`: runs the spike in Chrome for Testing without a person (logged-out profile: proves pairing, tabs, refusal, idle survival). Written, **never run to the end** (stopped by the owner). Untested.
+
+### Handover back to the Windows PC (27 Nov 2026)
+
+The owner stopped work on the Linux PC; the Windows PC takes over from this branch.
+
+1. In the Windows worktree: `git pull` on `claude/chatbridge-browser-link-963ceb`.
+2. Stage 0 next steps: in `extension/spike`, `npm install`, then either run `drive-headless.mjs` (needs Chrome for Testing; `--load-extension` does not work in branded Chrome 137+) or have the owner follow `extension/spike/README.md` in their signed-in Chrome.
+3. Fill the per-site table (fetch OK / signed call OK / cookies readable) into this section, then Stage 1.
 
 ---
 
