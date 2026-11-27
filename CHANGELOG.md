@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.56.2 - 2026-11-27
+
+### Fixed
+- **ChatGPT unpinned chats** - unpinning a chat now removes `pinned: true` from its note (it stayed since 0.53.0).
+- **Browser names** - **Rename…** no longer accepts a made-up "Browser 2" (the next connect would replace it) or another browser's name.
+
+### Changed
+- **Safer releases** - a release is only built after lint and every test pass on the tagged version.
+- **More tests** - from the fresh-eyes audit: the rate-limit pause, network retry and odd-chat skip are now tested through Lumo's and AI Studio's own syncs, and eight more breaks are caught.
+
 ## 0.56.1 - 2026-11-27
 
 ### Changed

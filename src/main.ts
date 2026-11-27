@@ -45,7 +45,7 @@ import { hasArchiveToRestore, restoreSavedChats, separateSavedChats, type Archiv
 import { archiveSummary } from './archive-move';
 import { LinkManager } from './link/manager';
 import type { TokenStore } from './link/server';
-import { isMadeUpBrowserName, kindName, LINK_PROVIDERS, pickBrowser, secretTokenStore, usesBrowserLink } from './link/account';
+import { browserNameProblem, isMadeUpBrowserName, kindName, LINK_PROVIDERS, pickBrowser, secretTokenStore, usesBrowserLink } from './link/account';
 import { setBrowserLink } from './transport';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
@@ -124,7 +124,9 @@ export default class AIChatBridge extends Plugin {
 
 	private namePairedBrowser(browser: string): void {
 		const names = this.browserNames();
-		if (this.pendingBrowserName) this.setBrowserName(browser, this.pendingBrowserName);
+		// A name typed in the pairing window is used unless it is made up or another browser's; then the browser's own kind names it.
+		const others = Object.entries(names).filter(([id]) => id !== browser).map(([, n]) => n);
+		if (this.pendingBrowserName && !browserNameProblem(this.pendingBrowserName, others)) this.setBrowserName(browser, this.pendingBrowserName);
 		else if (!names[browser]) this.setBrowserName(browser, `Browser ${Object.keys(names).length + 1}`);
 		this.pendingBrowserName = null;
 	}

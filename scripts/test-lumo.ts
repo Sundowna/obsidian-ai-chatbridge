@@ -10,7 +10,9 @@ import { openMasterKey, openMasterKeys, sessionKeyPassword, unlockUserKeys } fro
 import { decryptChat, decryptListing, projectInstructions, shallowMessages, type LumoEntry } from '../src/lumo/chat';
 import { renderLumoTranscript, shownBranch } from '../src/lumo/transcript';
 import { TFile } from 'obsidian';
-import { saveLumoChats, type LumoFileSource, type LumoSyncResult } from '../src/lumo/sync';
+import { runLumoSync, saveLumoChats, type LumoFileSource, type LumoSyncResult } from '../src/lumo/sync';
+import { LumoApi } from '../src/lumo/api';
+import { netRetry } from '../src/net-retry';
 import { artifactFileName, artifactKey, assetKey, collectFiles, decryptAsset, extraKey, type CollectedFiles } from '../src/lumo/assets';
 import { unpack } from '../src/lumo/msgpack';
 import { StopError } from '../src/api';
@@ -598,6 +600,74 @@ async function main() {
 		halfSaved = false;
 	}
 	expect('a tampered message stops the whole chat', !halfSaved);
+
+	// --- Lumo's own sync with the real request code (audit 2026-11-27) -----------------
+	// A dropped connection is tried again, a 429 starts the pause and the next run waits for it,
+	// one odd chat is skipped and named, the third in one run stops.
+	{
+		const files = new Map<string, string>();
+		const vault = {
+			getAbstractFileByPath: (p: string) => (files.has(p) ? Object.assign(new TFile(p, { size: 0 }), { path: p }) : null),
+			createFolder: async () => undefined,
+			create: async (p: string, d: string) => void files.set(p, d),
+			process: async (f: { path: string }, fn: (d: string) => string) => void files.set(f.path, fn(files.get(f.path) ?? '')),
+			...readWrite(files),
+		};
+		const { settings } = normalizeSettings({});
+		settings.delaySeconds = 0;
+		const account = settings.lumo[0]!;
+		const plugin = { app: { vault, fileManager: { processFrontMatter: async () => undefined } }, settings, saveSettings: async () => undefined } as never;
+		const asked: string[] = [];
+		let answer: (path: string, n: number) => unknown = () => ({ status: 200, text: JSON.stringify({ Code: 1000, Spaces: [] }) });
+		const page = {
+			uid: 'uid-1', appVersion: 'web-lumo@1.0.0', close: () => undefined,
+			run: async (code: string) => {
+				const path = /fetch\("([^"]+)"/.exec(code)![1]!;
+				asked.push(path);
+				const r = answer(path, asked.filter((x) => x === path).length);
+				if (r instanceof Error) throw r;
+				return JSON.stringify(r);
+			},
+		};
+		// The real LumoApi (its single GET with retry, 429 and checks), opened without a login window; a fresh one each run (closing it forgets the keys).
+		const connect = LumoApi.connect;
+		LumoApi.connect = async () => Object.assign(Object.create(LumoApi.prototype) as LumoApi, { userId: 'proton-1', masterKeys: [...masterKeys], page, source: { provider: 'lumo', accountId: account.id } });
+		const realTimeout = globalThis.setTimeout;
+		const realPause = netRetry.pause;
+		const realError = console.error;
+		console.error = () => undefined;
+		(globalThis as { setTimeout: unknown }).setTimeout = (cb: () => void) => realTimeout(cb, 0);
+		(globalThis as { window?: unknown }).window ??= globalThis;
+		netRetry.pause = async () => undefined;
+		try {
+			answer = (_path, n) => (n === 1 ? new Error('connection reset') : { status: 429, text: '{}', headers: { 'retry-after': '120' } });
+			const limited = await runLumoSync(plugin, account);
+			expect('Lumo sync: a dropped connection is tried again through its own sync', asked.length === 2, asked.join());
+			expect('Lumo sync: a 429 starts the pause, not an error', limited.resumeAt !== undefined && (account.web.cooldownUntil ?? 0) > Date.now() && (limited.stopped ?? '').includes('Automatic retry'), limited.stopped);
+			asked.length = 0;
+			const held = await runLumoSync(plugin, account);
+			expect('Lumo sync: while paused, the next run asks nothing', asked.length === 0 && (held.stopped ?? '').includes('cooling down'), held.stopped);
+			account.web.cooldownUntil = undefined;
+			account.web.resumeAfter429 = undefined;
+
+			// Chats whose message has a role Lumo never sends: an odd shape.
+			const three = [await space('o1', 'to1', 0, {}), await space('o2', 'to2', 0, {}), await space('o3', 'to3', 0, {})];
+			let listed = three.slice(0, 1);
+			const oddConversation = (id: string) => ({ Code: 1000, Conversation: { ID: id, ConversationTag: `ct-${id.slice(2)}`, CreateTime: '2026-03-01T10:00:00Z', Messages: [{ ...conversation.Messages![0]!, Role: 9 }] } });
+			answer = (path) => (path.includes('/conversations/') ? { status: 200, text: JSON.stringify(oddConversation(path.split('/').pop()!)) }
+				: { status: 200, text: JSON.stringify({ Code: 1000, Spaces: path.includes('CreateTimeUntil') ? [] : listed }) });
+			const odd = await runLumoSync(plugin, account);
+			expect('Lumo sync odd chat: one odd chat is skipped and named, the sync goes on', !odd.stopped && odd.failed.some((f) => f.includes('o1')) && odd.newCount === 0, odd.stopped ?? odd.failed.join());
+			listed = three;
+			const many = await runLumoSync(plugin, account);
+			expect('Lumo sync odd chat: the third odd chat in one run stops the sync', (many.stopped ?? '').includes('could not be verified'), many.stopped ?? many.failed.join());
+		} finally {
+			LumoApi.connect = connect;
+			(globalThis as { setTimeout: unknown }).setTimeout = realTimeout;
+			netRetry.pause = realPause;
+			console.error = realError;
+		}
+	}
 	expect('outline-only messages are noticed', shallowMessages({ ...conversation, Messages: [{ ...conversation.Messages![0]!, Encrypted: null }] }).length === 1);
 
 	const raw = await importAesGcm(clientRaw);

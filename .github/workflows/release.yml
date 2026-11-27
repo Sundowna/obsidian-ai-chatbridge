@@ -26,6 +26,13 @@ jobs:
                   npm ci
                   npm run build
 
+            # Nothing is attached to a release unless lint and the tests pass on the tagged commit.
+            - name: Lint (the Obsidian review lints extension/ too)
+              run: npm run lint
+
+            - name: Tests
+              run: npm run test:ci
+
             - name: Build the Browser link extension (Chrome, Edge, Brave and Firefox zips)
               run: |
                   npm run build:extension

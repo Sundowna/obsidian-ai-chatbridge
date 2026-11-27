@@ -12,7 +12,7 @@ import { testHooks } from 'obsidian';
 import { LinkServer, type TokenStore } from '../src/link/server';
 import { BrowserLinkUnavailable } from '../src/link/errors';
 import { fetchFrames, fromBase64 } from '../src/link/protocol';
-import { browserKind, isMadeUpBrowserName, kindName, linkState, loginMethodOf, pairButtonText, pickBrowser, readTokens, unpairForgetsAll, secretTokenStore, usesBrowserLink, writeTokens, LINK_SECRET_ID } from '../src/link/account';
+import { browserKind, browserNameProblem, isMadeUpBrowserName, kindName, linkState, loginMethodOf, pairButtonText, pickBrowser, readTokens, unpairForgetsAll, secretTokenStore, usesBrowserLink, writeTokens, LINK_SECRET_ID } from '../src/link/account';
 import { BrowserLinkTransport } from '../src/transport/browser-link';
 import { setBrowserLink, transportFor, type PageCall } from '../src/transport';
 import { pageCallCode, READ_CODE, READY_CODE, SITE_VALUE_COOKIE } from '../src/transport/login-window';
@@ -601,6 +601,7 @@ async function testSeveralBrowsers() {
 function testPickBrowser() {
 	expect('browser names: the kind is read from the User-Agent', browserKind('… Chrome/140.0 Safari/537.36') === 'Chrome' && browserKind('… Chrome/140.0 Safari/537.36 Edg/140.0') === 'Edge' && browserKind('Mozilla/5.0 (Windows NT 10.0; rv:140.0) Gecko/20100101 Firefox/140.0') === 'Firefox' && browserKind('… Chrome/140 OPR/120') === 'Opera' && browserKind(undefined) === undefined);
 	expect('browser names: only made-up names are replaced, never one you chose', isMadeUpBrowserName('Browser 2') && isMadeUpBrowserName(undefined) && isMadeUpBrowserName('Browser (paired before names)') && !isMadeUpBrowserName('Work') && !isMadeUpBrowserName('Chrome'));
+	expect('browser names: Rename refuses an empty name, a made-up "Browser 2" and another browser\'s name (any case)', !!browserNameProblem('  ', []) && !!browserNameProblem('Browser 2', []) && !!browserNameProblem('chrome', ['Chrome']) && browserNameProblem('Chrome (work)', ['Chrome']) === null);
 	expect('browser names: a second browser of the same kind gets a number', kindName('Chrome', ['Edge']) === 'Chrome' && kindName('Chrome', ['Chrome', 'Chrome 2']) === 'Chrome 3');
 	expect('any browser: an account\'s own browser wins', pickBrowser('edge', ['edge'], ['chrome', 'edge']) === 'edge');
 	expect('any browser: a browser another account picked is passed over', pickBrowser(undefined, ['edge'], ['edge', 'chrome']) === 'chrome');
@@ -689,9 +690,70 @@ async function testGeminiLoginCheck() {
 	}
 }
 
+/**
+ * AI Studio through its own sync and the real StudioApi, over a stand-in Browser link: a dropped
+ * connection is tried again, a 429 starts the pause (and the next run waits for it), one odd
+ * prompt is skipped and named, the third in one run stops (audit 2026-11-27).
+ */
+async function testStudioSyncWiring() {
+	const settings = normalizeSettings({ claude: [{}], gemini: [{ id: 'g1', label: 'Home', web: { folder: 'AI chats/Gemini', loginMethod: 'browser' }, studio: { folder: 'AI chats/Studio' } }] }).settings;
+	settings.delaySeconds = 0;
+	const account = settings.gemini[0]!;
+	const plugin = { app: { secretStorage: { getSecret: () => null }, vault: { adapter: {}, getAbstractFileByPath: () => null } }, settings, saveSettings: async () => undefined } as unknown as AIChatBridge;
+	const calls: string[] = [];
+	let answer: (method: string, n: number) => { status: number; text: string; headers?: Record<string, string> } | Error = () => ({ status: 200, text: '[[]]' });
+	const link = {
+		paired: true, pairedBrowsers: () => [], isLinked: () => true,
+		open: async () => 'page-1', read: async () => '', closePage: async () => undefined, siteValue: async () => '', status: async () => true,
+		call: async (_page: string, c: PageCall) => {
+			const method = c.url.split('/').pop()!;
+			calls.push(method);
+			const r = answer(method, calls.filter((m) => m === method).length);
+			if (r instanceof Error) throw r;
+			return { ...r, headers: r.headers ?? {} };
+		},
+	};
+	const realTimeout = globalThis.setTimeout;
+	const realPause = netRetry.pause;
+	const realError = console.error;
+	console.error = () => undefined;
+	// Waits between requests and retries pass at once.
+	(globalThis as { setTimeout: unknown }).setTimeout = (cb: () => void) => realTimeout(cb, 0);
+	netRetry.pause = async () => undefined;
+	setBrowserLink((l) => l.provider === 'gemini', () => link as unknown as LinkServer);
+	try {
+		answer = (method, n) => (method === 'ListPrompts' ? (n === 1 ? new Error('connection reset') : { status: 429, text: '', headers: { 'retry-after': '120' } }) : { status: 200, text: '[]' });
+		const limited = await runStudioSync(plugin, account);
+		expect('AI Studio: a dropped connection is tried again through its own sync', calls.filter((m) => m === 'ListPrompts').length === 2, calls.join());
+		expect('AI Studio: a 429 starts the pause, not an error', limited.resumeAt !== undefined && (account.studio.cooldownUntil ?? 0) > Date.now() && (limited.stopped ?? '').includes('Automatic retry'), limited.stopped);
+		calls.length = 0;
+		const held = await runStudioSync(plugin, account);
+		expect('AI Studio: while paused, the next run asks nothing', calls.length === 0 && (held.stopped ?? '').includes('cooling down'), held.stopped);
+		account.studio.cooldownUntil = undefined;
+		account.studio.resumeAfter429 = undefined;
+
+		const meta = (title: string) => [title, null, ['Owner', 1, 'photo'], null, [['1788164186', 894000000], ['Owner', 1, 'photo']], [1, 1, 1]];
+		const prompts = (n: number) => JSON.stringify([Array.from({ length: n }, (_, i) => [`prompts/oddPrompt${i + 1}xxxxxxxxxxxxxxxxxxxxx`, null, null, null, meta(`Odd ${i + 1}`)])]);
+		let count = 1;
+		answer = (method) => (method === 'ListPrompts' ? { status: 200, text: prompts(count) } : { status: 200, text: 'not json' });
+		const odd = await runStudioSync(plugin, account);
+		expect('AI Studio odd prompt: one odd prompt is skipped and named, the sync goes on', !odd.stopped && odd.failed.includes('Odd 1') && odd.newCount === 0, odd.stopped ?? odd.failed.join());
+		count = 3;
+		account.studio.listCatalog = undefined;
+		const many = await runStudioSync(plugin, account);
+		expect('AI Studio odd prompt: the third odd prompt in one run stops the sync', (many.stopped ?? '').includes('could not be verified'), many.stopped);
+	} finally {
+		(globalThis as { setTimeout: unknown }).setTimeout = realTimeout;
+		netRetry.pause = realPause;
+		console.error = realError;
+		setBrowserLink(() => false, () => null);
+	}
+}
+
 async function main() {
 	testSwitch();
 	await testGeminiLoginCheck();
+	await testStudioSyncWiring();
 	await testTransport();
 	await testSamePage();
 	await testSkip();
