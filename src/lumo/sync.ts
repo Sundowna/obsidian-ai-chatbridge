@@ -136,7 +136,7 @@ export async function saveLumoChats(
 		artifact: (id) => savedPath(artifactKey(chatId, id)),
 		extras: Object.keys(g.fileIndex).filter((k) => k.startsWith(extraKey(chatId, ''))).flatMap((k) => savedPath(k) ?? []),
 	});
-	const noteOf = (chat: LumoChat, link: string): string => tagAccount(renderLumoTranscript(chat, link, linksFor(chat.id)), account.label);
+	const noteOf = (chat: LumoChat, link: string): string => tagAccount(renderLumoTranscript(chat, link, linksFor(chat.id), g.showReasoning !== false), account.label);
 
 	const todo = pickTodo(items, g.index);
 	const queued = new Set(todo.map((t) => t.item.uuid));

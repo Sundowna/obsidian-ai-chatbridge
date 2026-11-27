@@ -330,6 +330,16 @@ async function quickLists() {
 	expect('file gone: a deleted raw file', fileGone(app, { a: entry }));
 }
 
+function reasoningSwitch() {
+	const turn = { rid: 'r1', createdAt: '2026-03-01T10:00:00.000Z', prompt: 'Q', answer: 'A', reasoning: 'Deep thoughts.', images: [], generated: [] };
+	const chat = { id: 'c_1', title: 'T', createdAt: '2026-03-01T10:00:00.000Z', updatedAt: '2026-03-01T10:00:00.000Z', turns: [turn] } as unknown as GeminiChat;
+	expect('reasoning switch: Gemini shows reasoning by default', renderGeminiTranscript(chat, 'x.json').includes('Deep thoughts.'));
+	expect('reasoning switch: Gemini off leaves it out, the answer stays', !renderGeminiTranscript(chat, 'x.json', false).includes('Deep thoughts.') && renderGeminiTranscript(chat, 'x.json', false).includes('\nA'));
+	const prompt = { id: 'prompts/x', updatedAt: '2026-03-01T10:00:00.000Z', messages: [{ role: 'model', text: 'Hmm, thinking.', thought: true }, { role: 'model', text: 'Answer.' }] } as unknown as StudioPrompt;
+	expect('reasoning switch: AI Studio thinking shown by default, left out when off', renderStudioTranscript(prompt, 'x.json').includes('Hmm, thinking.') && !renderStudioTranscript(prompt, 'x.json', false).includes('Hmm, thinking.') && renderStudioTranscript(prompt, 'x.json', false).includes('Answer.'));
+	expect('reasoning switch: missing setting means on', normalizeSettings({}).settings.gemini[0]!.web.showReasoning !== false && normalizeSettings({}).settings.lumo[0]!.web.showReasoning !== false);
+}
+
 async function main() {
 	// --- batchexecute framing --------------------------------------------------
 	const list = [null, 'next-token', [['c_238ce75d1feb162e', 'Website review', null, null, null, at(1788451602)], ['c_421ec87547ddea3f', '', null, null, null, at(1788426966)]]];
@@ -445,6 +455,7 @@ async function main() {
 	// --- the save loop of Gemini and AI Studio, on a fake vault ---------------------------
 	await saveLoop();
 	await quickLists();
+	reasoningSwitch();
 
 	console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 	if (failures) process.exit(1);

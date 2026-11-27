@@ -584,6 +584,8 @@ async function main() {
 	const md = renderLumoTranscript(chat, 'x.json');
 	expect('transcript has the answer', md.includes('Retried answer') && !md.includes('First answer'));
 	expect('transcript folds the reasoning', md.includes('> [!note]- Reasoning\n> Think of roots.'));
+	const quiet = renderLumoTranscript(chat, 'x.json', undefined, false);
+	expect('reasoning switch: off leaves the reasoning out, the answer stays', !quiet.includes('Think of roots.') && quiet.includes('Retried answer'));
 	expect('transcript counts tool steps', md.includes('*(1 tool step)*'));
 	expect('transcript front matter', md.includes('project: "Garden"') && md.includes('starred: true') && md.includes('raw: "[[x.json]]"'));
 	expect('saved chat holds no key or blob', !JSON.stringify(chat).includes(wrapped) && !JSON.stringify(chat).includes(conversation.Messages![0]!.Encrypted!));

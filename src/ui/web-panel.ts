@@ -158,6 +158,15 @@ export function lumoWebPanel(ctx: PanelContext, el: HTMLElement, account: LumoAc
 				await ctx.plugin.saveSettings();
 			}),
 		);
+	new Setting(el)
+		.setName('Show reasoning in the note')
+		.setDesc('Lumo\'s reasoning, folded above each answer. On by default; off leaves it out of the notes (it stays in the raw file). Notes follow when a chat next changes.')
+		.addToggle((t) =>
+			t.setValue(g.showReasoning !== false).onChange(async (v) => {
+				g.showReasoning = v;
+				await ctx.plugin.saveSettings();
+			}),
+		);
 	projectFilterOptions(ctx, el, 'lumo', account, g);
 }
 
@@ -172,7 +181,16 @@ export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: Gemi
 	rawMoveRow(ctx, el, () => googleRawMoves(ctx.app, account, 'web', masterRaw(ctx.plugin.settings)));
 	new Setting(el)
 		.setName('What is saved')
-		.setDesc("Each chat's prompts and answers, including the reasoning Gemini shows. Images and files in chats are listed but not downloaded. Gemini has no public API, so the plugin reads what the website itself loads; if Google changes that, the sync stops instead of saving something wrong.");
+		.setDesc("Each chat's prompts and answers, including the reasoning Gemini shows (switch below). Images and files in chats are listed but not downloaded. Gemini has no public API, so the plugin reads what the website itself loads; if Google changes that, the sync stops instead of saving something wrong.");
+	new Setting(el)
+		.setName('Show reasoning in the note')
+		.setDesc('Gemini\'s reasoning and AI Studio\'s thinking, folded above each answer. On by default; off leaves it out of the notes (it stays in the raw file). Notes follow when a chat next changes.')
+		.addToggle((t) =>
+			t.setValue(g.showReasoning !== false).onChange(async (v) => {
+				g.showReasoning = v;
+				await ctx.plugin.saveSettings();
+			}),
+		);
 
 	const more = advanced(ctx, el, `gemini-web-${account.id}`);
 	new Setting(more)

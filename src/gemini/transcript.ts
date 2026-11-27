@@ -41,13 +41,14 @@ export function generatedAsLinks(answer: string, generated: readonly GeminiGener
 	});
 }
 
-export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string): string {
+/** `showReasoning`: the AI's reasoning, folded, above each answer (the account's switch; on unless turned off). */
+export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string, showReasoning = true): string {
 	const fm = ['---', `uuid: ${chat.id}`, `created: ${chat.createdAt}`, `updated: ${chat.updatedAt}`];
 	if (chat.pinned) fm.push('pinned: true');
 	fm.push(`raw: ${y(`[[${jsonFileName}]]`)}`, 'unread: true', '---', '');
 	const body = chat.turns.flatMap((t) => {
 		const answer: string[] = [];
-		if (t.reasoning) answer.push(callout('Reasoning', t.reasoning));
+		if (t.reasoning && showReasoning) answer.push(callout('Reasoning', t.reasoning));
 		answer.push(generatedAsLinks(imagesAsLinks(t.answer, t.images), t.generated).trim() || '*(no text)*');
 		if (t.otherDrafts) answer.push(`*(${t.otherDrafts} other draft${t.otherDrafts === 1 ? '' : 's'} in the raw file)*`);
 		return [
@@ -58,7 +59,7 @@ export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string): 
 	return fm.join('\n') + body.join('\n');
 }
 
-export function renderStudioTranscript(p: StudioPrompt, jsonFileName: string): string {
+export function renderStudioTranscript(p: StudioPrompt, jsonFileName: string, showReasoning = true): string {
 	const fm = ['---', `uuid: ${p.id}`, `updated: ${p.updatedAt}`];
 	if (p.model) fm.push(`model: ${y(p.model)}`);
 	fm.push(`raw: ${y(`[[${jsonFileName}]]`)}`, 'unread: true', '---', '');
@@ -66,7 +67,7 @@ export function renderStudioTranscript(p: StudioPrompt, jsonFileName: string): s
 	if (p.systemInstruction?.trim()) body.push(callout('System instructions', p.systemInstruction), '');
 	for (const m of p.messages) {
 		if (m.thought) {
-			body.push(callout('Thinking', m.text || '(empty)'), '');
+			if (showReasoning) body.push(callout('Thinking', m.text || '(empty)'), '');
 			continue;
 		}
 		const when = m.createdAt ? ` · ${localDateTime(m.createdAt)}` : '';

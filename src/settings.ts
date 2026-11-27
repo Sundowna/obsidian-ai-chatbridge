@@ -149,6 +149,8 @@ export interface GptSettings {
 /** One Lumo login: its folders and what has been synced. No keys: those exist only during a sync. */
 export interface LumoSettings {
 	folder: string;
+	/** Lumo's reasoning in the notes, folded. Missing = on (as before the switch); always in the raw file. */
+	showReasoning?: boolean;
 	/** Folder for the raw .json files. Empty = next to the transcripts. */
 	rawFolder?: string;
 	projectSubfolders: boolean;
@@ -191,6 +193,8 @@ export interface GeminiSettings {
 	userId?: string;
 	/** Login window (missing) or the Browser link (your own browser, through the extension). */
 	loginMethod?: LoginMethod;
+	/** Gemini's reasoning and AI Studio's thinking in the notes, folded. Missing = on (as before the switch); always in the raw file. */
+	showReasoning?: boolean;
 }
 
 /** The same login's Google AI Studio prompts, which AI Studio keeps in Google Drive. */
