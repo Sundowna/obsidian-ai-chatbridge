@@ -29,6 +29,11 @@
 - **Gemini, AI Studio, Lumo and Hermes: safety stop when many chats are missing** - if many saved chats are not where the plugin expects them (for example after moving folders outside Obsidian), the sync now stops with a hint to use "Refresh index" instead of fetching them all again. Claude and ChatGPT already did this.
 - **Gemini, AI Studio and Lumo: a deleted note comes back without a download** - when you delete a chat note but its raw file is still in the vault, the note is written again from that file. It no longer asks the provider and no longer uses up the "max chats per run" limit.
 
+## 0.41.8 - 2026-11-27
+
+### Fixed
+- **ChatGPT: older photos are saved again** - chatgpt.com now serves some older photos only as a smaller, resized copy. These waited for ever as "size mismatch"; the resized copy is now saved. Other files of the wrong size are still skipped
+
 ## 0.41.7 - 2026-11-27
 
 ### Added

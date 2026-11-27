@@ -177,6 +177,17 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 		return null;
 	};
 
+	/**
+	 * A real PNG, JPEG, GIF or WebP. chatgpt.com serves some older photos only as a resized copy
+	 * (seen 2026-11-27: 3172335 bytes stated, 823189 served), so for an image that is still an
+	 * image the stated size does not count; any other file of the wrong size is skipped.
+	 */
+	const isImageBytes = (bytes: ArrayBuffer): boolean => {
+		const b = new Uint8Array(bytes.slice(0, 12));
+		const at = (i: number, ...v: number[]) => v.every((x, j) => b[i + j] === x);
+		return at(0, 0x89, 0x50, 0x4e, 0x47) || at(0, 0xff, 0xd8, 0xff) || at(0, 0x47, 0x49, 0x46, 0x38) || (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50));
+	};
+
 	const fetchFile = async (a: GptApi, chatId: string, task: GptFileTask): Promise<{ bytes: ArrayBuffer | null; expected?: number }> => {
 		await sleep(delayMs);
 		const file = safeFileName(task.name);
@@ -204,7 +215,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			try {
 				const { bytes, expected } = await fetchFile(a, chat.conversation_id, task);
 				if (!bytes) failure = 'download unavailable';
-				else if (expected !== undefined && bytes.byteLength !== expected) failure = 'size mismatch';
+				else if (expected !== undefined && bytes.byteLength !== expected && !(task.isImage && isImageBytes(bytes))) failure = 'size mismatch';
 				else {
 					const existing = await sameContent(bytes, folder, stem);
 					if (existing) {
