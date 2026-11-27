@@ -16,9 +16,11 @@ export default defineConfig(
 		'tsconfig.json',
 		'scripts',
 		'samples',
-		// The browser extension is not Obsidian code: Obsidian's rules do not apply there.
-		// It is type-checked with its own tsconfig by `npm run build:extension`.
-		'extension',
+		// The browser extension's build output and build script (not shipped as source).
+		'extension/dist',
+		'extension/dist-firefox',
+		'extension/build.mjs',
+		'extension/spike',
 	]),
 	{
 		languageOptions: {
@@ -35,6 +37,20 @@ export default defineConfig(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		// The browser extension: Obsidian's plugin review lints every TypeScript file in the
+		// repository with these same rules, so the extension is linted here too, with its own
+		// tsconfig and the browser-extension globals.
+		files: ['extension/src/**/*.ts'],
+		languageOptions: {
+			globals: { ...globals.serviceworker, chrome: 'readonly' },
+			parserOptions: {
+				projectService: false,
+				project: ['./extension/tsconfig.json'],
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+	},
 	{
 		rules: {
 			// Product names keep their own casing in UI text.
