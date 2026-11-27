@@ -2,6 +2,7 @@
 
 import type { Chat, ChatMessage, ContentBlock, FileRef } from './types';
 import { localDateTime } from './naming';
+import { fitsInline, pastedText, type PastedText } from './files';
 
 const ROOT_PARENT = '00000000-0000-4000-8000-000000000000';
 
@@ -73,6 +74,30 @@ function fileLines(list: FileRef[] | undefined, filePaths: Map<string, string>):
 	return out;
 }
 
+/**
+ * Text claude.ai keeps in the chat (issue #64): a saved file is linked; otherwise the text goes
+ * into a callout, open when short, folded when long. Every line is quoted, so headings in the
+ * pasted text never become headings of the transcript.
+ */
+function pastedLine(p: PastedText, filePaths: Map<string, string>): string {
+	const label = p.fileName || 'Pasted text';
+	const path = p.key ? filePaths.get(p.key) : undefined;
+	if (path) return `📎 [[${path}|${label}]]`;
+	const lines = p.text.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
+	const short = fitsInline(p.text);
+	const head = `> [!quote]${short ? '' : '-'} ${label}${short ? '' : ` (${lines.length} lines)`}`;
+	return [head, ...lines.map((l) => (l ? `> ${l}` : '>'))].join('\n');
+}
+
+function attachmentLines(list: FileRef[] | undefined, filePaths: Map<string, string>): string[] {
+	const out: string[] = [];
+	for (const a of list ?? []) {
+		const pasted = a.file_uuid && filePaths.has(a.file_uuid) ? null : pastedText(a);
+		out.push(...(pasted ? [pastedLine(pasted, filePaths)] : fileLines([a], filePaths)));
+	}
+	return out;
+}
+
 function messageBody(m: ChatMessage, filePaths: Map<string, string>): string {
 	const out: string[] = [];
 	let tools = 0; // consecutive tool steps, merged into one line
@@ -94,7 +119,7 @@ function messageBody(m: ChatMessage, filePaths: Map<string, string>): string {
 	} else if (typeof m.text === 'string' && m.text.trim()) {
 		out.push(m.text.trim());
 	}
-	out.push(...fileLines(m.attachments, filePaths), ...fileLines(m.files, filePaths));
+	out.push(...attachmentLines(m.attachments, filePaths), ...fileLines(m.files, filePaths));
 	return out.join('\n\n') || '*(no text)*';
 }
 

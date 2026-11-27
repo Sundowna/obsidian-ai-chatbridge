@@ -16,7 +16,10 @@ import { appendLog } from './log';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
 import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
-import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, safeFileName, visibleFiles } from './files';
+import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, pastedFiles, safeFileName, visibleFiles } from './files';
+
+/** The chat's own files: downloadable ones, and long pasted texts kept in its JSON (issue #64). */
+const ownFiles = (chat: Chat): FileTask[] => [...chatFiles(chat), ...pastedFiles(chat)];
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
 import type { ProgressFn } from './progress';
@@ -119,6 +122,11 @@ async function fetchFiles(
 ): Promise<Fetched[]> {
 	const out: Fetched[] = [];
 	for (const task of tasks) {
+		if (task.text !== undefined) {
+			// Text kept in the chat JSON (a "Pasted" card, issue #64): nothing to download.
+			out.push({ task, bytes: new TextEncoder().encode(task.text).buffer });
+			continue;
+		}
 		await sleep(delayMs);
 		let bytes: ArrayBuffer | null;
 		try {
@@ -189,7 +197,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const transcriptFor = (chat: Chat, item: ListItem, json: string, mdFolder: string, visible: FileTask[]): string => {
 		const filePaths = new Map<string, string>();
 		const inline = new Set<string>();
-		for (const f of chatFiles(chat)) {
+		for (const f of ownFiles(chat)) {
 			inline.add(f.fileUuid);
 			const p = savedPath(f.fileUuid);
 			if (p) filePaths.set(f.fileUuid, p);
@@ -365,7 +373,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			}
 
 			// Fetch all new files BEFORE writing anything, so a stop leaves no half-written chat.
-			const allFiles = mergeFiles(chatFiles(chat), visible);
+			const allFiles = mergeFiles(ownFiles(chat), visible);
 			const fetched = s.downloadFiles ? await fetchFiles(api, allFiles.filter(isMissing), delayMs, result, s.fileIndex) : [];
 
 			const stem = before ? stemOf(before.json) : freeStem(app, folder, baseName(chat.created_at, chat.name || item.name), item.uuid, rawFolder);
@@ -446,7 +454,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 					outputsChecked = item.updated_at;
 				}
 			}
-			const fetched = s.downloadFiles ? await fetchFiles(api, mergeFiles(chatFiles(chat), visible).filter(isMissing), delayMs, result, s.fileIndex) : [];
+			const fetched = s.downloadFiles ? await fetchFiles(api, mergeFiles(ownFiles(chat), visible).filter(isMissing), delayMs, result, s.fileIndex) : [];
 
 			const jsonPath = jsonOk ? entry.json : `${rawFolder}/${stem}.json`;
 			const mdPath = jsonOk || mdOk ? entry.md : `${folder}/${stem}.md`;
@@ -497,13 +505,13 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 						viewRead = true;
 					}
 				}
-				const tasks = mergeFiles(chatFiles(chat), visible).filter(isMissing);
+				const tasks = mergeFiles(ownFiles(chat), visible).filter(isMissing);
 				if (tasks.length) {
 					const fetched = await fetchFiles(api, tasks, delayMs, result, s.fileIndex);
 					await saveFiles(fetched, folder, stem);
 					result.backfilledChats++;
 				}
-				const files = chatFiles(chat).map((f) => f.fileUuid);
+				const files = ownFiles(chat).map((f) => f.fileUuid);
 				const quick = key ? { files, key } : undefined;
 				if (viewRead) entry.outputsChecked = item.updated_at;
 				const keyChanged = JSON.stringify(entry.quick) !== JSON.stringify(quick);

@@ -41,6 +41,9 @@ export interface FileRef {
 	file_kind?: string;
 	size_bytes?: number;
 	success?: boolean;
+	/** messages[].attachments[]: text claude.ai keeps in the chat itself (a "Pasted" card, a text file); issue #64 */
+	id?: string;
+	extracted_content?: string;
 	[key: string]: unknown;
 }
 
