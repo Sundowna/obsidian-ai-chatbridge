@@ -10,8 +10,24 @@
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is changed or deleted on their side. The plugin reads the same web pages your browser uses, which can change without notice.
 
+**New: sync Google logins through your own browser (Browser link)**
+
+Google blocks its sign-in inside apps, so Gemini, AI Studio, and Claude or ChatGPT accounts made with "Continue with Google" can't log in through the plugin's login window. The **Browser link** uses your own browser instead, where you are already logged in, through a small companion extension.
+
+> [!WARNING]
+> **Unofficial extension, use at your own risk.** The AI ChatBridge Browser link extension is made by this project, not by Google, Mozilla, Anthropic or OpenAI. It is not in the Chrome Web Store or Firefox Add-ons and has not been reviewed there. It acts with the logins in your browser, only on claude.ai, chatgpt.com, gemini.google.com, aistudio.google.com and your own computer (127.0.0.1), and never stores your chats. Automated access may be limited by the providers' terms. Install it only if you are comfortable with that; the plugin works without it.
+
+1. **Download** the extension from the [latest release](https://github.com/Sundowna/obsidian-ai-chatbridge/releases/latest): `ai-chatbridge-browser-link-chrome-….zip` for Chrome, Edge or Brave, `ai-chatbridge-browser-link-firefox-….zip` for Firefox
+2. **Install** it: Chrome, Edge or Brave: unzip it into a folder you keep, open `chrome://extensions`, switch on **Developer mode**, **Load unpacked**, choose the folder. Firefox: `about:debugging` → **This Firefox** → **Load Temporary Add-on…** → choose the zip
+3. **Choose it** in Obsidian: Settings → AI ChatBridge → Gemini, Claude or ChatGPT → your account → **Login method** = **Browser link**
+4. **Pair**: **Pair browser…** → **Open in browser** → paste the code into the extension's page → **Enter**
+5. **Keep the browser open while you sync.** If it is closed, those accounts are skipped and the others carry on
+
+Details, and exactly what the extension can reach: [Browser link](#browser-link-google-logins).
+
 **What's new**
 
+- **0.49:** the [Browser link](#browser-link-google-logins): Gemini, AI Studio and Google-made Claude or ChatGPT accounts sync through your own browser
 - **0.41:** changing a chat folder moves the notes already saved there
 - **0.40:** **Use browser login…** for ChatGPT accounts made with Google ([FAQ](#faq))
 - **0.39:** an **Error logs** tab with a **Copy** button for bug reports
