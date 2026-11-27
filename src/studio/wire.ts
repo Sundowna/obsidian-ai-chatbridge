@@ -42,8 +42,9 @@ export function readPromptList(payload: unknown): { items: ListItem[]; next: str
 }
 
 /**
- * One message ("chunk"): [0]=text, [8]="user"/"model", [18]=tokens, [19]=1 for thinking,
- * [32]=[seconds, nanos].
+ * One message ("chunk"): [0]=text, [8]="user"/"model", [10]=[language, code] the model ran,
+ * [11]=[outcome, output] of that code, [12]=[type, base64] a picture, [18]=tokens, [19]=1 for
+ * thinking, [32]=[seconds, nanos]. (Code, output and pictures seen 2026-11-27.)
  */
 function readChunk(c: unknown, i: number): StudioMessage {
 	if (!isList(c)) throw new ShapeError(`AI Studio message ${i} is not a list`);
@@ -52,6 +53,9 @@ function readChunk(c: unknown, i: number): StudioMessage {
 	const m: StudioMessage = { role, text: str(c[0]) ? c[0] : '' };
 	if (c[19] === 1 || c[19] === true) m.thought = true;
 	if (typeof c[18] === 'number') m.tokens = c[18];
+	if (isList(c[10]) && str(c[10][1])) m.code = { language: c[10][0] === 1 ? 'python' : 'text', text: c[10][1] };
+	if (isList(c[11])) m.codeResult = str(c[11][1]) ? c[11][1] : '';
+	if (isList(c[12]) && str(c[12][0]) && c[12][0].startsWith('image/') && str(c[12][1])) m.picture = { type: c[12][0], chunk: i };
 	if (isList(c[32])) {
 		try {
 			m.createdAt = isoFromStamp(c[32], `AI Studio message ${i} time`);
@@ -79,4 +83,20 @@ export function readPrompt(payload: unknown, expectedName: string): StudioPrompt
 		messages: chunks.map(readChunk),
 		raw: p,
 	};
+}
+
+/** A picture's bytes from the prompt's raw row (base64 at [13][0][chunk][12][1]); null when not there. */
+export function studioPictureBytes(raw: unknown, chunk: number): Uint8Array<ArrayBuffer> | null {
+	const chunks = isList(raw) && isList(raw[13]) && isList(raw[13][0]) ? raw[13][0] : [];
+	const c = chunks[chunk];
+	const data = isList(c) && isList(c[12]) && str(c[12][1]) ? c[12][1] : '';
+	if (!data) return null;
+	try {
+		const bin = atob(data);
+		const out = new Uint8Array(bin.length);
+		for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+		return out;
+	} catch {
+		return null;
+	}
 }

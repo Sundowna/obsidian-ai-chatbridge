@@ -11,10 +11,11 @@ import { endCooldown, heldByCooldown, pausedBy } from '../cooldown-run';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
 import { emptyResult, failureText, fileGone, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, writeLog, type GoogleSyncResult } from '../gemini/save';
-import { renderStudioTranscript } from '../gemini/transcript';
+import { renderStudioTranscript, studioPictures } from '../gemini/transcript';
 import { pastedSession } from '../cookies';
 import { MassMissingError } from '../missing-guard';
 import { StudioApi } from './api';
+import { studioPictureBytes } from './wire';
 import { BrowserLinkUnavailable } from '../link/errors';
 import { listFailed, readList } from '../quick-list';
 import { usesBrowserLink } from '../link/account';
@@ -41,6 +42,7 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 		const twin = sameGoogleLogin(plugin.settings.gemini, account, account.web.userId);
 		if (twin) throw new StopError(SAME_GOOGLE_LOGIN(twin.label));
 		const odd = new OddChats();
+		const picturesOf = new Map<string, { raw: unknown; chunk: number; type: string }>();
 		// The library list: all of it, or only its recent part when the rest is known (quick-list.ts).
 		const list = await readList(st, { scope: 'prompts', fileGone: fileGone(plugin.app, st.index), now: Date.now() },
 			(settled) => a.listPrompts(wait, (page) => progress(`reading AI Studio library… page ${page}`), (page) => settled(page, false)));
@@ -52,8 +54,18 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 			const p = await readOrSkip(odd, item.name, () => a.prompt(item.uuid, wait));
 			if (!p) return null;
 			const created = p.messages.find((m) => m.createdAt)?.createdAt ?? p.updatedAt;
-			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name, account.web.showReasoning !== false), account.label) };
-		}, progress, result, { label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label, account.web.showReasoning !== false) });
+			// Pictures the prompt holds (e.g. drawn by its code) are saved beside it; their bytes are in the prompt itself.
+			const pics = studioPictures(p);
+			for (const pic of pics) picturesOf.set(pic.url, { raw: p.raw, chunk: pic.chunk, type: pic.type });
+			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name, saved) => tagAccount(renderStudioTranscript(p, name, account.web.showReasoning !== false, saved), account.label), pictures: pics.map(({ url, name }) => ({ url, name })) };
+		}, progress, result, {
+			label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label, account.web.showReasoning !== false),
+			...(account.web.downloadFiles !== false ? { pictures: async (key: string) => {
+				const pic = picturesOf.get(key);
+				const bytes = pic ? studioPictureBytes(pic.raw, pic.chunk) : null;
+				return pic && bytes ? { bytes: bytes.buffer, type: pic.type } : null;
+			} } : {}),
+		});
 	} catch (e) {
 		const paused = pausedBy(e, st, result);
 		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.

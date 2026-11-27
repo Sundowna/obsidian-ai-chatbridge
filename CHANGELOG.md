@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.55.0 - 2026-11-27
+
+### Added
+- **AI Studio: code and pictures** - when Gemini runs code in AI Studio, the note shows the code and its output (folded), and pictures the code drew are saved next to the prompt and shown in the note. Before, those parts were empty "(no text)" sections. A model's turn now stays under one heading.
+
 ## 0.54.0 - 2026-11-27
 
 ### Added

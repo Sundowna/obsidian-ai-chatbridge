@@ -107,7 +107,10 @@ export const SAME_GOOGLE_LOGIN = (label: string): string => `This login is the s
 /** A Gemini chat's note from its saved raw file. */
 export const geminiFromRaw = (label: string, showReasoning = true): FromRaw => (raw, link, uuid) => tagAccount(renderGeminiTranscript(savedChat<GeminiChat>(raw, uuid, 'turns'), link, showReasoning), label);
 /** An AI Studio prompt's note from its saved raw file. */
-export const studioFromRaw = (label: string, showReasoning = true): FromRaw => (raw, link, uuid) => tagAccount(renderStudioTranscript(savedChat<StudioPrompt>(raw, uuid, 'messages'), link, showReasoning), label);
+export const studioFromRaw = (label: string, showReasoning = true, pictures?: (p: StudioPrompt) => ReadonlyMap<string, string>): FromRaw => (raw, link, uuid) => {
+	const p = savedChat<StudioPrompt>(raw, uuid, 'messages');
+	return tagAccount(renderStudioTranscript(p, link, showReasoning, pictures?.(p)), label);
+};
 
 /** A yes/no mark the provider's chat list carries for every chat (Gemini: pinned), kept up to date in the note. */
 export interface ChatFlag {

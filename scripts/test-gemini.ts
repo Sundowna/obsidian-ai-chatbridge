@@ -4,7 +4,7 @@
 
 import { batchPayload, buildChat, GeminiError, readChatPage, readListPage, readTurn } from '../src/gemini/wire';
 import { generatedAsLinks, imagesAsLinks, renderGeminiTranscript, renderStudioTranscript } from '../src/gemini/transcript';
-import { promptFileId, readPrompt, readPromptList } from '../src/studio/wire';
+import { promptFileId, readPrompt, readPromptList, studioPictureBytes } from '../src/studio/wire';
 import { normalizeSettings } from '../src/migrate';
 import { ShapeError } from '../src/schema';
 import { TFile } from 'obsidian';
@@ -16,7 +16,7 @@ import type { IndexEntry, ListItem } from '../src/types';
 import { noteHash } from '../src/versions';
 import { readWrite } from './fake-vault';
 import { pictureUrl } from '../src/gemini/api';
-import { chatPictures } from '../src/gemini/transcript';
+import { chatPictures, studioPictures } from '../src/gemini/transcript';
 import { isLinkImage, isLinkTarget } from '../src/link/sites';
 import { GeminiApi } from '../src/gemini/api';
 import { StudioApi } from '../src/studio/api';
@@ -383,6 +383,34 @@ async function geminiPictures() {
 	expect('pictures: the switch is on unless turned off', normalizeSettings({}).settings.gemini[0]!.web.downloadFiles !== false);
 }
 
+/** AI Studio code execution: the code, its output and the pictures it drew (made-up prompt in the live shape of 2026-11-27). */
+function studioCode() {
+	const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]).toString('base64');
+	const chunk = (fields: Record<number, unknown>) => { const c: unknown[] = new Array(33).fill(null); for (const [k, v] of Object.entries(fields)) c[Number(k)] = v; return c; };
+	const meta = ['Cars', null, null, null, [['1788164186', 0]]];
+	const rows = [
+		chunk({ 0: 'Compare the cars', 8: 'user' }),
+		chunk({ 0: 'Thinking it over', 8: 'model', 19: 1 }),
+		chunk({ 8: 'model', 10: [1, 'print("hi")\nplot()'] }),
+		chunk({ 8: 'model', 11: [1, 'hi\n'] }),
+		chunk({ 8: 'model', 12: ['image/png', png] }),
+		chunk({ 8: 'model', 12: ['image/png', png] }),
+		chunk({ 8: 'model', 11: [1] }),
+		chunk({ 0: 'Here is the answer.', 8: 'model' }),
+	];
+	const payload = [['prompts/code-test-0001', null, null, [null, null, 'gemini-4'], meta, null, null, null, null, null, null, null, null, [rows]]];
+	const p = readPrompt(payload, 'prompts/code-test-0001');
+	expect('AI Studio code: the code, its output and the picture are read', p.messages[2]!.code?.text === 'print("hi")\nplot()' && p.messages[2]!.code?.language === 'python' && p.messages[3]!.codeResult === 'hi\n' && p.messages[4]!.picture?.type === 'image/png' && p.messages[6]!.codeResult === '');
+	const pics = studioPictures(p);
+	expect('AI Studio code: a picture sent twice in a row is one picture', pics.length === 1 && pics[0]!.name === 'AI Studio picture 1' && pics[0]!.url === 'studio:prompts/code-test-0001#4');
+	const bytes = studioPictureBytes(p.raw, 4);
+	expect('AI Studio code: the picture\'s bytes come from the prompt itself', !!bytes && bytes[0] === 0x89 && bytes.length === 11 && studioPictureBytes(p.raw, 2) === null);
+	const md = renderStudioTranscript(p, 'x.json', true, new Map([[pics[0]!.url, 'S/Attachments/Cars/AI Studio picture 1.png']]));
+	expect('AI Studio code: the model turn keeps one heading for its code, output, picture and answer', (md.match(/^## Model/gm) ?? []).length === 1 && (md.match(/^## You/gm) ?? []).length === 1, md);
+	expect('AI Studio code: code and output folded, the picture shown once, empty output left out', md.includes('> [!note]- Code (python)') && md.includes('```python') && md.includes('> [!note]- Code output') && (md.match(/!\[\[S\/Attachments\/Cars\/AI Studio picture 1\.png\]\]/g) ?? []).length === 1 && !md.includes('(no text)') && md.includes('Here is the answer.'), md);
+	expect('AI Studio code: a picture not saved says so', renderStudioTranscript(p, 'x.json').includes('*(Picture, not saved)*'));
+}
+
 async function main() {
 	// --- batchexecute framing --------------------------------------------------
 	const list = [null, 'next-token', [['c_238ce75d1feb162e', 'Website review', null, null, null, at(1788451602)], ['c_421ec87547ddea3f', '', null, null, null, at(1788426966)]]];
@@ -500,6 +528,7 @@ async function main() {
 	await quickLists();
 	reasoningSwitch();
 	await geminiPictures();
+	studioCode();
 
 	console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 	if (failures) process.exit(1);
