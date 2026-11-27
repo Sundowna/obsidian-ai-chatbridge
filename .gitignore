@@ -24,3 +24,6 @@ scripts/.test-*.cjs
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# Browser link spike output
+extension/spike/spike-results.json

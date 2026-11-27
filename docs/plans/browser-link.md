@@ -116,6 +116,24 @@ Asked at kickoff, **not answered yet**. Ask again in one short table. If there i
 | 4 | Which folder is the Test vault, and where is its CLAUDE.md with the handoff rules? | Unknown. `D:\BrainTest` has no `CLAUDE.md` and no `.obsidian` at the top; `D:\BrainTest\SecondBrain\Open` holds `Brain`, `TAlpha_v0.1`, `TAlpha_v0.2`. Ask |
 | 5 | The real run needs the owner once: load the extension unpacked and be signed in to Gemini, AI Studio and one Google-made ChatGPT or Claude account. Which browser? | Chrome, once at Stage 0 and again at Stage 4 |
 
+### Answers (27 Nov 2026, second session)
+
+| # | Answer |
+|---|---|
+| 1 | Owner chose **debugger permission** as the fallback. Likely not needed: see "Stage 0 status" below |
+| 2 | Not answered: recommendation used (no) |
+| 3 | Not answered: recommendation used (no) |
+| 4 | New test vault on the owner's Linux Mint PC (being set up). Path to follow |
+| 5 | Chrome |
+
+Work moved to a Linux Mint PC: repo at `~/code/obsidian-ai-chatbridge`, Node LTS in `~/.local/node` (no sudo).
+
+### Stage 0 status
+
+- Baseline: `test:ci` 1034 PASS, 0 FAIL. Lint 0 errors, 14 warnings. `test:offline` cannot run here (no `samples/`).
+- Reading `src/gemini/api.ts` and `src/studio/api.ts`: their `page.run` code is only two fixed signed `fetch` calls. **Option C chosen**: the extension ships them as packaged functions (`sign: 'wiz-at'` for Gemini batchexecute, `sign: 'sapisidhash'` for AI Studio). No code strings, no eval, no userScripts, no debugger. The signing values stay in the page. Ready checks become named checks (`gemini-signed-in`, `studio-ready`). Consequence for Stage 1: `TransportPage.run(code)` becomes `call(request, sign?)`; the login-window transport builds today's code strings from it.
+- Spike in `extension/spike/` (README there). Server-side checks done: non-extension origin rejected, wrong token rejected. Needs the owner's Chrome run for the rest.
+
 ---
 
 ## 5. Research results (27 Nov 2026)
