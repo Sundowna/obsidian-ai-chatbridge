@@ -1,7 +1,8 @@
 // Functions the extension runs inside a tab of the site (world: MAIN), as packaged code: Chrome
 // copies each function into the page, so each must be self-contained (no outer variables, no
 // shared helpers). No code strings, no eval: this works whatever the page's CSP says.
-// They read login values inside the page and never hand them out.
+// They read login values inside the page and never hand them out. They run in a web page, not
+// in Obsidian, so they use the page's own window.fetch (Obsidian's requestUrl does not exist here).
 
 /** One request from the page, with the browser's own cookies. Body in and out as base64. */
 export async function pageFetch(req: { url: string; method: string; headers: Record<string, string>; body64?: string; redirect?: 'follow' | 'manual' }): Promise<{ status: number; headers: Record<string, string>; body64: string }> {
@@ -12,7 +13,7 @@ export async function pageFetch(req: { url: string; method: string; headers: Rec
 		return btoa(s);
 	};
 	const body = req.body64 === undefined ? undefined : Uint8Array.from(atob(req.body64), (c) => c.charCodeAt(0));
-	const r = await fetch(req.url, {
+	const r = await window.fetch(req.url, {
 		method: req.method,
 		credentials: 'include',
 		redirect: req.redirect ?? 'follow',
@@ -44,7 +45,7 @@ export async function pageCall(c: { url: string; method: string; headers: Record
 		u.searchParams.set('f.sid', typeof w.FdrFJe === 'string' ? w.FdrFJe : '');
 		const body = new URLSearchParams(c.body);
 		body.set('at', w.SNlM0e);
-		const r = await fetch(u.toString(), { method: c.method, credentials: 'same-origin', headers: c.headers, body });
+		const r = await window.fetch(u.toString(), { method: c.method, credentials: 'same-origin', headers: c.headers, body });
 		return { status: r.status, text: await r.text(), headers: collect(r.headers) };
 	}
 	if (c.sign === 'sapisidhash') {
@@ -55,7 +56,7 @@ export async function pageCall(c: { url: string; method: string; headers: Record
 		const d = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(`${ts} ${sid} ${location.origin}`));
 		const h = `${ts}_${Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('')}`;
 		const headers = { ...c.headers, 'X-Goog-Api-Key': key, Authorization: `SAPISIDHASH ${h} SAPISID1PHASH ${h} SAPISID3PHASH ${h}` };
-		const r = await fetch(c.url, { method: c.method, credentials: 'include', headers, body: c.body });
+		const r = await window.fetch(c.url, { method: c.method, credentials: 'include', headers, body: c.body });
 		return { status: r.status, text: await r.text(), headers: collect(r.headers) };
 	}
 	return { status: 400, text: '', headers: {} };

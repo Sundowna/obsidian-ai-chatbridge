@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "AI ChatBridge Browser link",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Lets the AI ChatBridge Obsidian plugin sync your chats through this browser, where you are logged in. Talks only to the supported sites and 127.0.0.1.",
 	"minimum_chrome_version": "116",
 	"background": { "service_worker": "background.js" },

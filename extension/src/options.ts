@@ -21,7 +21,7 @@ function show(s: LinkState): void {
 }
 
 async function ask(msg: Record<string, string>): Promise<LinkState> {
-	const r = await chrome.runtime.sendMessage(msg) as { state: LinkState };
+	const r = await chrome.runtime.sendMessage<Record<string, string>, { state: LinkState }>(msg);
 	return r.state;
 }
 
@@ -45,7 +45,7 @@ pairButton.addEventListener('click', () => {
 document.getElementById('unpair')!.addEventListener('click', () => void ask({ op: 'unpair' }).then(show));
 
 // Site access: Chrome grants it at install; Firefox may leave it to you.
-const origins = chrome.runtime.getManifest().host_permissions ?? [];
+const origins = (chrome.runtime.getManifest() as chrome.runtime.ManifestV3).host_permissions ?? [];
 const access = document.getElementById('access')!;
 async function checkAccess(): Promise<void> {
 	access.hidden = await chrome.permissions.contains({ origins });

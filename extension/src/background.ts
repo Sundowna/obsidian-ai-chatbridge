@@ -8,6 +8,7 @@ import { fetchFrames, fromBase64, type LinkRequest } from '../../src/link/protoc
 import { isLinkOpenPage, isLinkPage, isLinkTarget } from '../../src/link/sites';
 import { pageCall, pageFetch, pageRead, readyCheck } from './page';
 
+// Timers go through self: this is a service worker, which has no window.
 const PING_MS = 20_000;
 const READY_CHECKS = new Set(['gemini-signed-in', 'studio-ready', 'loaded']);
 const PAGE_VALUES = new Set(['google-account-id']);
@@ -22,7 +23,7 @@ interface Pairing { port: number; token: string }
 
 let ws: WebSocket | null = null;
 let state: LinkState = 'not-paired';
-let pingTimer: ReturnType<typeof setInterval> | undefined;
+let pingTimer: number | undefined;
 
 // ---- tabs this extension opened (never the user's own) ---------------------------------------
 
@@ -36,7 +37,7 @@ async function remember(): Promise<void> {
 
 /** After a restart of this worker: close the tabs an earlier run opened. */
 async function closeLeftovers(): Promise<void> {
-	const { ownTabs } = await chrome.storage.session.get('ownTabs') as { ownTabs?: number[] };
+	const { ownTabs } = await chrome.storage.session.get<{ ownTabs?: number[] }>('ownTabs');
 	for (const id of ownTabs ?? []) await chrome.tabs.remove(id).catch(() => undefined);
 	await chrome.storage.session.set({ ownTabs: [] });
 }
@@ -66,7 +67,7 @@ class LinkFail extends Error {
 	}
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => self.setTimeout(r, ms));
 
 async function inPage<A extends unknown[], R>(tabId: number, func: (...args: A) => R | Promise<R>, args: A): Promise<R> {
 	const [res] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args });
@@ -179,7 +180,7 @@ async function onRequest(sock: WebSocket, raw: string): Promise<void> {
 		return;
 	}
 	if (msg.op === 'pong' || typeof (msg as { id?: unknown }).id !== 'number') return;
-	const req = msg as LinkRequest & { id: number };
+	const req = msg;
 	let frames: unknown[];
 	try {
 		frames = await handle(req);
@@ -200,7 +201,7 @@ async function setState(s: LinkState): Promise<void> {
 function disconnected(sock: WebSocket, refused: boolean): void {
 	if (ws !== sock) return;
 	ws = null;
-	clearInterval(pingTimer);
+	self.clearInterval(pingTimer);
 	void closeAllOwn();
 	void setState(refused ? 'refused' : 'plugin-closed');
 }
@@ -210,7 +211,7 @@ function disconnected(sock: WebSocket, refused: boolean): void {
  * once the plugin has answered (or the attempt failed).
  */
 async function connect(code?: string): Promise<LinkState> {
-	const { pairing } = await chrome.storage.local.get('pairing') as { pairing?: Pairing };
+	const { pairing } = await chrome.storage.local.get<{ pairing?: Pairing }>('pairing');
 	const port = code ? Number(/^(\d{2,5})-/.exec(code.trim())?.[1]) : pairing?.port;
 	if (!port || port > 65535) {
 		await setState(code ? 'refused' : 'not-paired');
@@ -245,8 +246,8 @@ async function connect(code?: string): Promise<LinkState> {
 						resolve(state);
 						return;
 					}
-					clearInterval(pingTimer);
-					pingTimer = setInterval(() => { if (sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify({ op: 'ping' })); }, PING_MS);
+					self.clearInterval(pingTimer);
+					pingTimer = self.setInterval(() => { if (sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify({ op: 'ping' })); }, PING_MS);
 					await setState('linked');
 					resolve('linked');
 				})();
@@ -270,7 +271,7 @@ async function unpair(): Promise<void> {
 	const s = ws;
 	ws = null;
 	s?.close();
-	clearInterval(pingTimer);
+	self.clearInterval(pingTimer);
 	await closeAllOwn();
 	await setState('not-paired');
 }
