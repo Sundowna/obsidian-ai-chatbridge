@@ -2,6 +2,7 @@
 
 import type { Chat, ChatMessage, ContentBlock, FileRef } from './types';
 import { localDateTime, modelProperty } from './naming';
+import { fitsInline, PASTE_PREVIEW_LINES, pastedLines, pastedText, type PastedText, type PasteMode } from './files';
 
 const ROOT_PARENT = '00000000-0000-4000-8000-000000000000';
 
@@ -82,7 +83,34 @@ function fileLines(list: FileRef[] | undefined, filePaths: Map<string, string>):
 	return out;
 }
 
-function messageBody(m: ChatMessage, filePaths: Map<string, string>, showReasoning = false): string {
+const quoted = (lines: string[]): string[] => lines.map((l) => (l ? `> ${l}` : '>'));
+
+/**
+ * Text claude.ai keeps in the chat (issue #64), always as a callout with every line quoted, so
+ * headings in the pasted text never become headings of the transcript. Up to 5 lines: all of
+ * it. Longer: with "note", all of it; else a saved file's link with its first 5 lines, or (no
+ * file saved) all of it folded.
+ */
+function pastedLine(p: PastedText, filePaths: Map<string, string>, mode: PasteMode): string {
+	const label = p.fileName || 'Pasted text';
+	const lines = pastedLines(p.text);
+	if (fitsInline(p.text)) return [`> [!quote] ${label}`, ...quoted(lines)].join('\n');
+	const count = `(${lines.length} lines)`;
+	const path = mode === 'file' && p.key ? filePaths.get(p.key) : undefined;
+	if (path) return [`> [!quote] [[${path}|${label}]] ${count}`, ...quoted(lines.slice(0, PASTE_PREVIEW_LINES)), '> …'].join('\n');
+	return [`> [!quote]${mode === 'note' ? '' : '-'} ${label} ${count}`, ...quoted(lines)].join('\n');
+}
+
+function attachmentLines(list: FileRef[] | undefined, filePaths: Map<string, string>, mode: PasteMode): string[] {
+	const out: string[] = [];
+	for (const a of list ?? []) {
+		const pasted = a.file_uuid && filePaths.has(a.file_uuid) ? null : pastedText(a);
+		out.push(...(pasted ? [pastedLine(pasted, filePaths, mode)] : fileLines([a], filePaths)));
+	}
+	return out;
+}
+
+function messageBody(m: ChatMessage, filePaths: Map<string, string>, mode: PasteMode, showReasoning = false): string {
 	const out: string[] = [];
 	let tools = 0; // consecutive tool steps, merged into one line
 	const flushTools = () => {
@@ -103,7 +131,7 @@ function messageBody(m: ChatMessage, filePaths: Map<string, string>, showReasoni
 	} else if (typeof m.text === 'string' && m.text.trim()) {
 		out.push(m.text.trim());
 	}
-	out.push(...fileLines(m.attachments, filePaths), ...fileLines(m.files, filePaths));
+	out.push(...attachmentLines(m.attachments, filePaths, mode), ...fileLines(m.files, filePaths));
 	return out.join('\n\n') || '*(no text)*';
 }
 
@@ -127,6 +155,8 @@ export interface TranscriptMeta {
 	extraFiles?: { name: string; path: string }[];
 	/** Put Claude's reasoning into the note, folded. Off unless the account's switch is on. */
 	showReasoning?: boolean;
+	/** Long pasted text: linked file with a preview, or all of it in the note (issue #64). */
+	pasteMode?: PasteMode;
 }
 
 export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
@@ -153,7 +183,7 @@ export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
 	}
 	for (const m of messages) {
 		const when = m.created_at ? ` · ${localDateTime(m.created_at)}` : '';
-		body.push(`## ${speaker(m.sender)}${when}`, '', messageBody(m, meta.filePaths ?? new Map<string, string>(), meta.showReasoning === true), '');
+		body.push(`## ${speaker(m.sender)}${when}`, '', messageBody(m, meta.filePaths ?? new Map<string, string>(), meta.pasteMode ?? 'file', meta.showReasoning === true), '');
 	}
 	if (meta.extraFiles?.length) {
 		body.push('## Files', '');

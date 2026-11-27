@@ -29,6 +29,28 @@
 - **Gemini, AI Studio, Lumo and Hermes: safety stop when many chats are missing** - if many saved chats are not where the plugin expects them (for example after moving folders outside Obsidian), the sync now stops with a hint to use "Refresh index" instead of fetching them all again. Claude and ChatGPT already did this.
 - **Gemini, AI Studio and Lumo: a deleted note comes back without a download** - when you delete a chat note but its raw file is still in the vault, the note is written again from that file. It no longer asks the provider and no longer uses up the "max chats per run" limit.
 
+## 0.41.7 - 2026-11-27
+
+### Added
+- **Claude: setting "Long pasted text"** - choose how pastes longer than 5 lines are saved: **File, with a 5-line preview** (the default) or **All of it in the note**. Changing it updates your saved notes on the next sync (issue #64)
+
+### Changed
+- **Claude: pasted text in the note is shorter** - only pastes of up to 5 lines go into the note in full (was about two pages). A longer paste is saved as a file, and the note shows its first 5 lines with a link to it
+
+### Fixed
+- **Claude: chats synced before 0.41.6 get their pasted text too** - on the next sync, each saved chat is checked once from its saved file (nothing is asked of claude.ai). Notes with pasted text are redrawn; your edits are handled as set under "When an edited note gets an update"
+
+## 0.41.6 - 2026-11-27
+
+### Fixed
+- **Claude: pasted text is no longer missing** - when you paste a long text into claude.ai it shows a "Pasted" card, and these cards were left out of synced chats. Short pastes (up to about two pages) now appear in the note as a quote. Longer ones are saved as "Pasted text.md" in the chat's Attachments folder and linked from the note, or folded into the note when Download files is off. Text files you added to a chat are handled the same way. Chats synced before get their pasted text the next time they change (issue #64)
+
+## 0.41.5 - 2026-11-27
+
+### Fixed
+- **ChatGPT: one file that will not download no longer stops the whole sync** - when chatgpt.com refused to hand over a single file (seen: a generated script file answered "415"), the sync stopped there. Now only that file is skipped and tried again later, and the rest of the sync goes on. A missing login still stops the sync, as before
+- **ChatGPT: deleted files are named as such** - files chatgpt.com no longer has (old uploads, and files made with code that have expired) were listed as "unexpected file response" or "JSON without a download link". They now show as "download unavailable", which is what they are
+
 ## 0.41.4 - 2026-11-27
 
 ### Fixed

@@ -14,6 +14,7 @@ import { netRetry, NetworkFailure, sendWithRetry, triedText } from '../src/net-r
 import { OddChats, readOrSkip } from '../src/odd-chats';
 import { ShapeError } from '../src/schema';
 import { readWrite } from './fake-vault';
+import { noteHash } from '../src/versions';
 import { restoreSavedChats, separateSavedChats } from '../src/archive-local';
 
 let failures = 0;
@@ -93,10 +94,11 @@ const FILE = '55555555-5555-4555-8555-555555555555';
 let attach = false;
 let oddShape = false;
 let star: boolean | undefined;
+let pastes: Record<string, unknown>[] = [];
 const chat = () => ({
 	uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, model: 'claude-opus-5-5', ...(star === undefined ? {} : { is_starred: star }),
 	chat_messages: oddShape ? 'not a list' as never : turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z',
-		...(attach && i === 0 ? { attachments: [{ file_uuid: FILE, file_name: 'notes.txt', size_bytes: 5 }] } : {}) })),
+		...((attach || pastes.length) && i === 0 ? { attachments: [...(attach ? [{ file_uuid: FILE, file_name: 'notes.txt', size_bytes: 5 }] : []), ...pastes] } : {}) })),
 });
 let fileFetches = 0;
 ClaudeApi.prototype.getFile = async () => { fileFetches++; return new TextEncoder().encode('notes').buffer; };
@@ -374,6 +376,107 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	turns = [...turns, 'Eighth question'];
 	await runSync(plugin, account);
 	expect('#46 paths: a file gone from claude.ai (404) is remembered and not asked for again', (account.web.fileIndex[outputKey(CHAT, OUT2)] ?? '').startsWith('skipped: ') && outputCalls === goneCalls, `${account.web.fileIndex[outputKey(CHAT, OUT2)]} ${outputCalls - goneCalls}`);
+
+	// Issue #64: claude.ai keeps a long paste as a "Pasted" card: an attachment with no name and
+	// no file ID, its text in extracted_content. Short ones go into the note, long ones into a
+	// file in Attachments/ (no download needed), or folded into the note with downloads off.
+	const SHORT = 'Short pasted line one\n\n## A heading inside the paste\nline three';
+	const LONG = Array.from({ length: 80 }, (_, i) => `Long paste line ${i + 1}`).join('\n');
+	const LONG_KEY = 'pasted:66666666-6666-4666-8666-666666666666';
+	const PASTES = [
+		{ id: '77777777-7777-4777-8777-777777777777', file_name: '', file_size: SHORT.length, file_type: 'txt', extracted_content: SHORT },
+		{ id: LONG_KEY.slice(7), file_name: '', file_size: LONG.length, file_type: 'txt', extracted_content: LONG },
+		{ id: '88888888-8888-4888-8888-888888888888', file_name: 'notes.md', file_size: 15, file_type: 'text/markdown', extracted_content: 'Named file text' },
+		{ id: '99999999-9999-4999-8999-999999999999', file_name: '', file_size: 0, file_type: 'txt', extracted_content: '  ' },
+		{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', file_name: '', file_size: 29, file_type: 'txt', extracted_content: 'five 1\nfive 2\nfive 3\nfive 4\nfive 5' },
+		{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', file_name: 'six.txt', file_size: 23, file_type: 'txt', extracted_content: 'six 1\nsix 2\nsix 3\nsix 4\nsix 5\nsix 6' },
+	];
+	pastes = PASTES;
+	const fetchesBeforePaste = fileFetches;
+	const callsBeforePaste = outputCalls;
+	updated = '2026-11-11T13:00:00Z';
+	turns = [...turns, 'Ninth question'];
+	const pasted = await runSync(plugin, account);
+	const pNote = files.get(account.web.index[CHAT]!.md) ?? '';
+	const pFile = account.web.fileIndex[LONG_KEY] ?? '';
+	expect('#64: a short paste is in the note, every line quoted', !pasted.stopped && pNote.includes('> [!quote] Pasted text\n> Short pasted line one\n>\n> ## A heading inside the paste\n> line three'), pasted.stopped ?? pNote.slice(pNote.indexOf('Pasted') - 20, pNote.indexOf('Pasted') + 200));
+	expect('#64: a heading in a paste never becomes a transcript heading', !/^## A heading/m.test(pNote));
+	expect('#64: a short text file is in the note under its own name', pNote.includes('> [!quote] notes.md\n> Named file text'));
+	expect('#64: a long paste is saved in Attachments/ with its exact text', pFile.includes('/Attachments/') && pFile.endsWith('/Pasted text.md') && files.get(pFile) === LONG, pFile);
+	expect('#64: the note links the long paste with its first 5 lines', pNote.includes(`> [!quote] [[${pFile}|Pasted text]] (80 lines)\n> Long paste line 1\n> Long paste line 2\n> Long paste line 3\n> Long paste line 4\n> Long paste line 5\n> …`) && !pNote.includes('Long paste line 6'));
+	expect('#64: a paste of 5 lines is still in the note', pNote.includes('> [!quote] Pasted text\n> five 1\n> five 2\n> five 3\n> five 4\n> five 5'));
+	const sixFile = account.web.fileIndex['pasted:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'] ?? '';
+	expect('#64: 6 lines go to a file under their own name, linked', sixFile.endsWith('/Attachments/2026-11-06 Plan the vault/six.txt') && files.get(sixFile) === 'six 1\nsix 2\nsix 3\nsix 4\nsix 5\nsix 6' && pNote.includes(`> [!quote] [[${sixFile}|six.txt]] (6 lines)\n> six 1\n`) && pNote.includes('> six 5\n> …') && !pNote.includes('> six 6'), sixFile);
+	expect('#64: an empty paste adds nothing', (pNote.match(/\[!quote\]/g) ?? []).length === 5);
+	expect('#64: pastes need no download', fileFetches === fetchesBeforePaste && outputCalls === callsBeforePaste, `${fileFetches - fetchesBeforePaste} files, ${outputCalls - callsBeforePaste} outputs`);
+	const again = await runSync(plugin, account);
+	expect('#64: an unchanged chat saves its paste only once', again.filesSaved === 0 && again.unchanged >= 1 && [...files.keys()].filter((k) => k.includes('/Pasted text')).length === 1);
+	files.delete(pFile);
+	const back = await runSync(plugin, account);
+	expect('#64: a deleted paste file is written again', back.backfilledChats === 1 && files.get(account.web.fileIndex[LONG_KEY]!) === LONG, JSON.stringify({ backfilled: back.backfilledChats, path: account.web.fileIndex[LONG_KEY] }));
+	files.delete(account.web.fileIndex[LONG_KEY]!);
+	account.web.downloadFiles = false;
+	updated = '2026-11-11T14:00:00Z';
+	turns = [...turns, 'Tenth question'];
+	await runSync(plugin, account);
+	const folded = files.get(account.web.index[CHAT]!.md) ?? '';
+	expect('#64: downloads off: the long paste is folded into the note, all of it', folded.includes('> [!quote]- Pasted text (80 lines)\n> Long paste line 1\n') && folded.includes('> Long paste line 80') && !files.has(account.web.fileIndex[LONG_KEY]!));
+	account.web.downloadFiles = true;
+
+	// Issue #64, part 2: notes drawn by an older plugin lack the pasted text. Their saved .json
+	// has it, so each such note is redrawn once from that file, with no request to claude.ai.
+	updated = '2026-11-11T15:00:00Z';
+	turns = [...turns, 'Eleventh question'];
+	await runSync(plugin, account); // saves the paste files again
+	const e64 = () => account.web.index[CHAT]!;
+	const drawnNow = files.get(e64().md)!;
+	const asOld = (md: string) => md.split('\n').filter((l) => !l.startsWith('>') && !l.startsWith('📎')).join('\n').replace(/\n{3,}/g, '\n\n').replace('unread: true', 'unread: false');
+	const oldPlugin = () => {
+		delete e64().pastes;
+		files.set(e64().md, asOld(drawnNow));
+		e64().noteHash = noteHash(files.get(e64().md)!);
+	};
+	oldPlugin();
+	const bodiesBefore = bodyRequests;
+	const redraw = await runSync(plugin, account);
+	const redrawn = files.get(e64().md)!;
+	expect('#64 redraw: an older note gets its pasted text', redraw.redrawn.length === 1 && redrawn.includes('> [!quote] Pasted text\n> Short pasted line one') && redrawn.includes(`[[${sixFile}|six.txt]] (6 lines)`), JSON.stringify(redraw.redrawn));
+	expect('#64 redraw: nothing is asked of claude.ai', bodyRequests === bodiesBefore);
+	expect('#64 redraw: "unread" keeps your value', redrawn.includes('unread: false'));
+	expect('#64 redraw: the log names the note', (files.get('log.md') ?? '').includes('1 older notes redrawn with their pasted text: [[Vault plan (mine)]]'));
+	expect('#64 redraw: only once', e64().pastes === 1 && (await runSync(plugin, account)).redrawn.length === 0 && files.get(e64().md) === redrawn);
+	oldPlugin();
+	files.set(e64().md, files.get(e64().md)! + '\nMy own line\n');
+	const edited = await runSync(plugin, account);
+	const copy = [...files.keys()].find((k) => k.includes('(my edits') && files.get(k)!.includes('My own line'));
+	expect('#64 redraw: a note you edited is copied first (default setting)', !!copy && files.get(copy)!.includes('My own line') && files.get(e64().md)!.includes('> [!quote] Pasted text') && edited.edits.copies.length === 1, JSON.stringify({ copy, copies: edited.edits.copies, own: !!copy && files.get(copy)!.includes('My own line'), quote: files.get(e64().md)!.includes('> [!quote] Pasted text') }));
+	if (copy) files.delete(copy);
+
+	// Setting "Long pasted text" = all of it in the note: no file, the whole text open in the note.
+	// Changing the setting clears the marks (as the settings dropdown does), so notes are redrawn once.
+	account.web.pastedText = 'note';
+	for (const entry of Object.values(account.web.index)) delete entry.pastes;
+	const savedBefore = Object.keys(account.web.fileIndex).filter((k) => k.startsWith('pasted:')).length;
+	const toNote = await runSync(plugin, account);
+	const whole = files.get(e64().md)!;
+	expect('#64 setting "note": the whole long paste is open in the note, no link', toNote.redrawn.length === 1 && whole.includes('> [!quote] Pasted text (80 lines)\n> Long paste line 1\n') && whole.includes('> Long paste line 80') && whole.includes('> [!quote] six.txt (6 lines)') && !whole.includes(`[[${pFile}|`), JSON.stringify({ r: toNote.redrawn, long: whole.includes('> [!quote] Pasted text (80 lines)\n> Long paste line 1\n'), all: whole.includes('> Long paste line 80'), six: whole.includes('> [!quote] six.txt (6 lines)'), link: whole.includes(`[[${pFile}|`) }));
+	expect('#64 setting "note": no paste files saved', toNote.filesSaved === 0 && Object.keys(account.web.fileIndex).filter((k) => k.startsWith('pasted:')).length === savedBefore);
+	updated = '2026-11-11T15:30:00Z';
+	turns = [...turns, 'Question in note mode'];
+	await runSync(plugin, account);
+	expect('#64 setting "note": a chat that continues keeps it in the note', files.get(e64().md)!.includes('> Long paste line 80') && files.get(e64().md)!.includes('Question in note mode'));
+	delete account.web.pastedText;
+	for (const entry of Object.values(account.web.index)) delete entry.pastes;
+	const toFile = await runSync(plugin, account);
+	expect('#64 setting back to "file": the note shows the link and preview again', toFile.redrawn.length === 1 && files.get(e64().md)!.includes(`[[${account.web.fileIndex[LONG_KEY]}|Pasted text]] (80 lines)`) && !files.get(e64().md)!.includes('> Long paste line 80'));
+	pastes = [];
+	updated = '2026-11-11T16:00:00Z';
+	turns = [...turns, 'Twelfth question'];
+	await runSync(plugin, account);
+	delete e64().pastes;
+	const plainNote = files.get(e64().md)!;
+	const noPaste = await runSync(plugin, account);
+	expect('#64 redraw: a chat without pasted text is only marked, its note untouched', noPaste.redrawn.length === 0 && e64().pastes === 1 && files.get(e64().md) === plainNote, JSON.stringify({ r: noPaste.redrawn, m: e64().pastes, same: files.get(e64().md) === plainNote, stopped: noPaste.stopped }));
 	testHooks.requestUrl = null;
 	expect('#46: the sync is not stopped and the chat is saved', !blocked.stopped && blocked.changedCount === 1 && files.get(account.web.index[CHAT]!.md)!.includes('Fourth question'), JSON.stringify({ stopped: blocked.stopped, changed: blocked.changedCount }));
 	expect('#46: reported once as not offered, not as "will retry" per chat', blocked.viewUnavailable === true && blocked.viewNotRead.length === 0 && (files.get('log.md') ?? '').includes('claude.ai does not offer them for this account'), JSON.stringify(blocked.viewNotRead));

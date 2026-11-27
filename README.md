@@ -4,8 +4,8 @@
 
 - **Memories: See what each AI remembers about you:** Claude, ChatGPT, Claude Code and Codex memories, saved as dated snapshots ([AI memory](#ai-memory)) - so you can tweak behaviour.
 - **Part of the [Sundowna Second Brain Suite](#part-of-the-sundowna-second-brain-suite):** a low-friction, easy way into Karpathy-style LLM Wikis, second brains and project brains.
-- 	[OneNote Style](https://community.obsidian.md/plugins/onenote-style): The ribbon you already know - fully customisable.
-- 	[OneNote Style theme](https://community.obsidian.md/themes/onenote-style): the look you already know.
+	- [OneNote Style](https://community.obsidian.md/plugins/onenote-style): The ribbon you already know - fully customisable.
+	- [OneNote Style theme](https://community.obsidian.md/themes/onenote-style): the look you already know.
 
 > [!NOTE]
 > **Unofficial and read-only.** Not affiliated with Anthropic, OpenAI, Google, Proton or Nous Research. Nothing is changed or deleted on their side. The plugin reads the same web pages your browser uses, which can change without notice.
@@ -20,7 +20,7 @@
 
 **Default sorting structure:**
 
-<img width="371" height="646" alt="image" src="https://github.com/user-attachments/assets/63471285-d0fd-48bf-862e-e26470c3eaf4" />
+<img width="454" height="844" alt="2026-11-27 10_38_14-Greenshot" src="https://github.com/user-attachments/assets/b3e18a7b-8a14-4cc5-9c6b-e0f3ed1681d1" />
 
 
 Older changes are in the [changelog](CHANGELOG.md).
@@ -201,6 +201,7 @@ Up to 0.31 a chat that continued got a second note, `<name> (updated <date>)`, a
 - **Only sync selected projects** - fetch your project list and tick the ones you want (chats without a project are in the list too)
 - **Choose a folder per project** - under **Only sync selected projects**, give any ticked project its own folder. Empty means the default, shown greyed in the field. Folders that don't exist yet are created on the next sync. Changing a folder only affects chats synced from then on - move older ones in Obsidian and the plugin keeps track
 - **Download files and images** - on or off per Claude, ChatGPT and Lumo account
+- **Long pasted text** (Claude) - text you pasted into claude.ai shows as a "Pasted" card. Pastes of up to 5 lines always go into the note as a quote. For longer ones, choose **File, with a 5-line preview** (the default: saved in the chat's `Attachments` folder, and the note shows its first 5 lines with a link) or **All of it in the note**. Notes saved before follow the choice on the next sync
 - **Include archived chats** - claude.ai and ChatGPT keep archived chats in lists of their own. Turn this on to include them for the account. It is off by default. Sessions archived in the desktop apps follow the [Desktop app sessions](#desktop-app-sessions) settings.
 - **Separate archived chats** - off by default for each web account. This option appears when **Include archived chats** is on. On desktop, choose **Separate now** to file saved chats using the latest known status, including the status in their raw JSON, or **Next sync** to wait. If any saved status still needs checking, the account syncs. During a ChatGPT cooldown, local filing runs immediately and the existing retry handles the remaining checks. Turning separation off returns chats to their original folders and removes empty archive folders. Turning inclusion off pauses separation and remembers its setting. Normal syncs move newly archived or unarchived chats when the provider lists report the change. ChatGPT checks recent list pages on each sync and does a full reconciliation weekly. Use **Reconcile ChatGPT chats** to check the full lists sooner.
 
