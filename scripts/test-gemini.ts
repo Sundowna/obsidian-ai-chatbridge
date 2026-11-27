@@ -8,13 +8,16 @@ import { promptFileId, readPrompt, readPromptList } from '../src/studio/wire';
 import { normalizeSettings } from '../src/migrate';
 import { ShapeError } from '../src/schema';
 import { TFile } from 'obsidian';
-import { emptyResult, geminiFromRaw, googleAccountId, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, type Saved } from '../src/gemini/save';
+import { emptyResult, fileGone, geminiFromRaw, googleAccountId, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, type Saved } from '../src/gemini/save';
 import type { GeminiChat, StudioPrompt } from '../src/gemini/types';
 import { MassMissingError } from '../src/missing-guard';
 import { tagAccount } from '../src/naming';
 import type { IndexEntry, ListItem } from '../src/types';
 import { noteHash } from '../src/versions';
 import { readWrite } from './fake-vault';
+import { GeminiApi } from '../src/gemini/api';
+import { StudioApi } from '../src/studio/api';
+import { FULL_LIST_EVERY, listFailed, readList, type ListHolder } from '../src/quick-list';
 
 let failures = 0;
 function expect(label: string, ok: boolean, detail = '') {
@@ -217,6 +220,116 @@ async function saveLoop() {
 	expect('guard: ten of twelve missing stops the sync, nothing read or written', stop.startsWith('10 of 12 saved Gemini chats are not where the sync history says') && !reads.length && files.size === count, stop);
 }
 
+// --- quick list for Gemini and AI Studio (quick-list.ts) ---------------------------------
+
+type GeminiCalls = { call: (rpcId: string, args: unknown[]) => Promise<unknown> };
+type StudioCalls = { call: (method: string, body: unknown[]) => Promise<unknown> };
+type Bare<T> = new (page: unknown, source: unknown) => T;
+
+async function quickLists() {
+	const none = async () => undefined;
+	const sec = (dayNo: number) => 1767225600 + dayNo * 86400; // 2026-01-01 plus days
+	const gid = (n: number) => `c_${n.toString(16).padStart(8, '0')}`;
+	const sid = (n: number) => `prompts/quick-list-${String(n).padStart(4, '0')}`;
+
+	// Gemini as Google hands it out: two pinned chats in a list of their own, 120 others, newest activity first, 50 a page.
+	let pinned = [{ id: gid(901), at: 20 }, { id: gid(902), at: 10 }];
+	let rest = Array.from({ length: 120 }, (_, i) => ({ id: gid(120 - i), at: 120 - i }));
+	let gCalls: string[] = [];
+	const gemini = new (GeminiApi as unknown as Bare<GeminiApi>)(null, null);
+	(gemini as unknown as GeminiCalls).call = async (_rpc, args) => {
+		const isPinned = (args[2] as number[])[0] === 1;
+		const from = args[1] ? Number(args[1]) : 0;
+		const rows = isPinned ? pinned : rest;
+		gCalls.push(`${isPinned ? 'pinned' : 'rest'}@${from}`);
+		return [null, from + 50 < rows.length ? String(from + 50) : null, rows.slice(from, from + 50).map((r) => [r.id, `Chat ${r.id}`, null, null, null, [sec(r.at), 0]])];
+	};
+	const g: ListHolder = {};
+	const readG = async (fileGone = false, now = 1_000_000) => {
+		gCalls = [];
+		const r = await readList(g, { scope: 'chats', fileGone, now, wholeSecond: true }, (settled) => gemini.listChats(none, () => undefined, settled));
+		return { ...r, items: r.rows.map((row) => ({ ...row.item, pinned: row.archived !== false })) };
+	};
+	const g1 = await readG();
+	expect('Gemini quick list: the first read takes every page of both lists and remembers them', gCalls.join() === 'pinned@0,rest@0,rest@50,rest@100' && !g1.quick && g1.changed && g1.items.length === 122 && g.listCatalog!.ordered && g.listCatalog!.fullAt === 1_000_000, gCalls.join());
+	expect('Gemini quick list: pinned chats are still marked', g1.items.filter((it) => it.pinned).map((it) => it.uuid).join() === `${gid(901)},${gid(902)}`);
+	const g2 = await readG();
+	expect('Gemini quick list: nothing new, one page of each list, every chat still there', gCalls.join() === 'pinned@0,rest@0' && g2.quick && !g2.changed && g2.items.length === 122 && g2.items.filter((it) => it.pinned).length === 2, gCalls.join());
+
+	// An old chat (third page) goes on: Google moves it to the top.
+	const old = rest.splice(110, 1)[0]!;
+	rest.unshift({ id: old.id, at: 200 });
+	const g3 = await readG();
+	expect('Gemini quick list: an old chat that goes on is found; reading stops one page later', gCalls.join() === 'pinned@0,rest@0,rest@50' && g3.changed && g3.items.length === 122 && g3.items[2]!.uuid === old.id && g3.items[2]!.updated_at === new Date(sec(200) * 1000).toISOString(), gCalls.join());
+
+	// Unpinned on gemini.google.com: the chat leaves the short pinned list. That shows at once.
+	pinned = pinned.filter((p) => p.id !== gid(902));
+	rest.splice(115, 0, { id: gid(902), at: 10 });
+	const g4 = await readG();
+	expect('Gemini quick list: an unpinned chat is known at the same sync, without a full read', gCalls.join() === 'pinned@0,rest@0' && g4.changed && g4.items.length === 122 && g4.items.find((it) => it.uuid === gid(902))!.pinned === false && g4.items.find((it) => it.uuid === gid(901))!.pinned === true, gCalls.join());
+	// Pinned on gemini.google.com: the chat shows up in the pinned list.
+	pinned.push({ id: gid(5), at: 5 });
+	rest = rest.filter((r) => r.id !== gid(5));
+	const g5 = await readG();
+	expect('Gemini quick list: a newly pinned chat is marked at the same sync', g5.items.find((it) => it.uuid === gid(5))!.pinned === true && g5.items.length === 122 && g5.changed, gCalls.join());
+
+	const g6 = await readG(true);
+	expect('Gemini quick list: a missing note or raw file means a full read', gCalls.length === 4 && !g6.quick, gCalls.join());
+	expect('Gemini quick list: a failed run means a full read next time, a second failure changes nothing more', listFailed(g) && !listFailed(g) && g.listCatalog!.stale === true);
+	await readG();
+	expect('Gemini quick list: that full read clears the mark', gCalls.length === 4 && g.listCatalog!.stale === undefined);
+	await readG(false, 1_000_000 + FULL_LIST_EVERY);
+	expect('Gemini quick list: after a week the whole list is read again', gCalls.length === 4 && g.listCatalog!.fullAt === 1_000_000 + FULL_LIST_EVERY);
+	expect('Gemini quick list: nothing remembered, nothing to mark', !listFailed({}));
+
+	// A list that is not newest first is read whole every time.
+	const swap = rest[60]!;
+	rest[60] = rest[61]!;
+	rest[61] = swap;
+	g.listCatalog!.fullAt = 0;
+	await readG();
+	await readG();
+	expect('Gemini quick list: a list in another order is never cut short', gCalls.length === 4 && !g.listCatalog!.ordered);
+
+	// AI Studio: one list, 100 prompts a page.
+	const prompts = Array.from({ length: 230 }, (_, i) => ({ id: sid(230 - i), at: 230 - i }));
+	let sCalls: string[] = [];
+	const studio = new (StudioApi as unknown as Bare<StudioApi>)(null, null);
+	(studio as unknown as StudioCalls).call = async (_method, body) => {
+		const from = body[1] ? Number(body[1]) : 0;
+		sCalls.push(String(from));
+		const rows = prompts.slice(from, from + 100).map((p) => [p.id, null, null, null, [`Prompt ${p.at}`, null, null, null, [[String(sec(p.at)), 0]]]]);
+		return from + 100 < prompts.length ? [rows, String(from + 100)] : [rows];
+	};
+	const st: ListHolder = {};
+	const readS = async (fileGone = false) => {
+		sCalls = [];
+		return readList(st, { scope: 'prompts', fileGone, now: 1_000_000 }, (settled) => studio.listPrompts(none, () => undefined, (page) => settled(page, false)));
+	};
+	const s1 = await readS();
+	expect('AI Studio quick list: the first read takes every page', sCalls.join() === '0,100,200' && !s1.quick && s1.rows.length === 230 && st.listCatalog!.ordered, sCalls.join());
+	const s2 = await readS();
+	expect('AI Studio quick list: nothing new, one page, every prompt still there', sCalls.join() === '0' && s2.quick && s2.rows.length === 230 && !s2.changed, sCalls.join());
+	prompts.unshift({ id: sid(999), at: 300 });
+	const s3 = await readS();
+	expect('AI Studio quick list: a new prompt is found and the list is one longer', sCalls.join() === '0,100' && s3.rows.length === 231 && s3.rows[0]!.item.uuid === sid(999) && s3.rows[0]!.item.name === 'Prompt 300', sCalls.join());
+	await readS(true);
+	expect('AI Studio quick list: a missing note or raw file means a full read', sCalls.join() === '0,100,200');
+
+	// What counts as a missing file.
+	const { files, vault } = fakeVault();
+	const app = { vault } as never;
+	const entry = { updated_at: 'x', json: 'Raw/a.json', md: 'G/a.md', synced: 'x' } as IndexEntry;
+	files.set('Raw/a.json', '{}');
+	files.set('G/a.md', 'note');
+	expect('file gone: both files there', !fileGone(app, { a: entry }) && !fileGone(app, {}));
+	files.delete('G/a.md');
+	expect('file gone: a deleted note', fileGone(app, { a: entry }));
+	files.set('G/a.md', 'note');
+	files.delete('Raw/a.json');
+	expect('file gone: a deleted raw file', fileGone(app, { a: entry }));
+}
+
 async function main() {
 	// --- batchexecute framing --------------------------------------------------
 	const list = [null, 'next-token', [['c_238ce75d1feb162e', 'Website review', null, null, null, at(1788451602)], ['c_421ec87547ddea3f', '', null, null, null, at(1788426966)]]];
@@ -331,6 +444,7 @@ async function main() {
 
 	// --- the save loop of Gemini and AI Studio, on a fake vault ---------------------------
 	await saveLoop();
+	await quickLists();
 
 	console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 	if (failures) process.exit(1);
