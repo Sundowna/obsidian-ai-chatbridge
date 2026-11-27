@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.45.0 - 2026-11-27
+
+### Added
+- **ChatGPT: optional reasoning in the note** - a new switch per account, **Show reasoning in the note**, off by default. When on, the reasoning ChatGPT shows sits folded above each answer; saved notes follow on the next sync.
+
+### Fixed
+- **ChatGPT: one odd chat no longer stops the sync** - a chat that arrives in an unexpected shape is skipped, named in the log and tried again next time, as for the other providers. A third one in the same run still stops the sync.
+
 ## 0.44.0 - 2026-11-27
 
 ### Added

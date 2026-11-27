@@ -225,6 +225,15 @@ export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: Cha
 				await save();
 			}),
 		);
+	new Setting(el)
+		.setName('Show reasoning in the note')
+		.setDesc('Adds the reasoning ChatGPT shows to each answer, folded. Off: the note holds only the conversation. The reasoning is in the raw file either way. Saved notes follow on the next sync.')
+		.addToggle((t) =>
+			t.setValue(g.showReasoning === true).onChange(async (v) => {
+				g.showReasoning = v;
+				await save();
+			}),
+		);
 	archiveSettings(ctx, el, 'chatgpt', account);
 	new Setting(el)
 		.setName('Codex cloud tasks')

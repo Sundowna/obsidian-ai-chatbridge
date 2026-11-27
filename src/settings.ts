@@ -112,6 +112,8 @@ export interface GptSettings {
 	separateArchived?: boolean;
 	/** Archive folders awaiting empty-folder cleanup on this computer. */
 	archiveCleanup?: string[];
+	/** Put ChatGPT's reasoning into the note, folded. Missing = off; it is always in the raw file. */
+	showReasoning?: boolean;
 	/** Pinned chats sit in lists of their own (issue #32). Missing = on. */
 	includePinned?: boolean;
 	cooldownUntil?: number;
