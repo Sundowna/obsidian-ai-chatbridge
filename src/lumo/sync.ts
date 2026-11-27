@@ -14,6 +14,7 @@ import { baseName, dailyNoteName, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
 import { OddChats } from '../odd-chats';
+import { endCooldown, heldByCooldown, pausedBy } from '../cooldown-run';
 import { DEFAULT_RECENT, filterByProjects, newestFirst, nothingSelected, pickTodo, type Todo } from '../select';
 import { cleanFolder, MIN_DELAY_SECONDS, type LumoAccount } from '../settings';
 import type { ListItem } from '../types';
@@ -52,6 +53,8 @@ export interface LumoSyncResult {
 	/** Notes you had edited whose chat continued. */
 	edits: EditedReport;
 	stopped?: string;
+	/** Set when the run waits for a rate-limit pause to end (not an error). */
+	resumeAt?: number;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
 }
@@ -261,6 +264,10 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 	let api: LumoApi | null = null;
 
 	try {
+		if (heldByCooldown(g, 'Lumo', result)) {
+			await plugin.saveSettings();
+			return result;
+		}
 		const base = cleanFolder(g.folder);
 		if (!base) throw new StopError('The Lumo folder setting is empty or invalid.');
 		progress('unlocking Lumo…');
@@ -308,12 +315,14 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 			}),
 		}, (item) => entryOf.get(item.uuid)?.starred === true);
 	} catch (e) {
-		if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
+		if (pausedBy(e, g, result)) await plugin.saveSettings();
+		else if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Lumo's answer could not be verified (${e.message}).`;
 		else result.stopped = `Something went wrong while reading Lumo (${failureText(e)}).`;
 	} finally {
 		api?.close();
 	}
+	if (endCooldown(g, result)) await plugin.saveSettings();
 	await writeLog(plugin, account, result);
 	return result;
 }

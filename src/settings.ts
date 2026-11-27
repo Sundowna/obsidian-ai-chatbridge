@@ -64,6 +64,9 @@ export interface ClaudeWebSettings {
 	separateArchived?: boolean;
 	/** Archive folders awaiting empty-folder cleanup on this computer. */
 	archiveCleanup?: string[];
+	/** Rate-limit pause (rate-limit.ts): when claude.ai allows requests again, and the waiting retry. */
+	cooldownUntil?: number;
+	resumeAfter429?: { consecutive: number } | null;
 	index: Record<string, IndexEntry>;
 	/** file_uuid -> vault path, so each file is downloaded once. */
 	fileIndex: Record<string, string>;
@@ -153,6 +156,9 @@ export interface LumoSettings {
 	projectRawFolders?: Record<string, string>;
 	/** Also save the chats' files: your uploads to Attachments/, what Lumo made to Artifacts/. */
 	downloadFiles: boolean;
+	/** Rate-limit pause (rate-limit.ts). */
+	cooldownUntil?: number;
+	resumeAfter429?: { consecutive: number } | null;
 	index: Record<string, IndexEntry>;
 	/** File key (see lumo/assets.ts) -> vault path, so each file is fetched once. */
 	fileIndex: Record<string, string>;
@@ -167,6 +173,9 @@ export interface GeminiSettings {
 	rawFolder?: string;
 	/** Name of the secret holding pasted Google cookies (Gemini and AI Studio), used when the login window has none. */
 	secretId: string;
+	/** Rate-limit pause (rate-limit.ts). */
+	cooldownUntil?: number;
+	resumeAfter429?: { consecutive: number } | null;
 	index: Record<string, IndexEntry>;
 	/** The Google account behind this login (its email, not secret), to notice the same login twice. */
 	userId?: string;
@@ -178,6 +187,9 @@ export interface StudioSettings {
 	folder: string;
 	/** Folder for the raw .json files. Empty = next to the transcripts. */
 	rawFolder?: string;
+	/** Rate-limit pause (rate-limit.ts); AI Studio has its own, apart from Gemini's. */
+	cooldownUntil?: number;
+	resumeAfter429?: { consecutive: number } | null;
 	index: Record<string, IndexEntry>;
 }
 

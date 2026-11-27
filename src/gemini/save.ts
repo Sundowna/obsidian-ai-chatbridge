@@ -34,6 +34,8 @@ export interface GoogleSyncResult {
 	/** Notes you had edited whose chat continued. */
 	edits: EditedReport;
 	stopped?: string;
+	/** Set when the run waits for a rate-limit pause to end (not an error). */
+	resumeAt?: number;
 }
 
 const stemOf = (p: string): string => (p.split('/').pop() ?? '').replace(/\.md$/, '');

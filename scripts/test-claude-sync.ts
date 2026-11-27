@@ -4,7 +4,9 @@
 
 import { TFile, TFolder, testHooks } from 'obsidian';
 import { isOutputPath, outputFiles, outputKey, OUTPUTS_DIR } from '../src/files';
-import { ClaudeApi, chatViewNotOffered, StopError } from '../src/api';
+import { ClaudeApi, chatViewNotOffered, RateLimitError, StopError } from '../src/api';
+import { clearCooldown, coolingUntil, countdown, retryDeadline, startCooldown, stillCooling, type Cooling } from '../src/rate-limit';
+import { endCooldown, heldByCooldown, pausedBy } from '../src/cooldown-run';
 import { addAccount } from '../src/accounts';
 import { normalizeSettings } from '../src/migrate';
 import { localStamp } from '../src/naming';
@@ -114,7 +116,11 @@ const archivedChat = {
 const listed: string[] = [];
 let currentMembership: 'active' | 'archived' | 'both' = 'both';
 let bodyRequests = 0;
+let limited = false;
+let requests = 0;
 ClaudeApi.prototype.get = async function (path: string) {
+	requests++;
+	if (limited) throw new RateLimitError('claude.ai', Date.now() + 1000);
 	const current = { uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, project, ...(star === undefined ? {} : { is_starred: star }) };
 	if (path.includes('chat_conversations_v2')) listed.push(path);
 	else bodyRequests++;
@@ -530,6 +536,41 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 		const silent = await runSync(plugin, account);
 		expect('starred: a chat list that does not say is never compared', silent.flagChanges === 0);
 		testHooks.requestUrl = null;
+	}
+
+	// A 429 pauses this one account: the run waits (not an error), nothing is asked while the
+	// pause lasts, and a run that gets through ends it.
+	{
+		const web = account.web;
+		limited = true;
+		const hit = await runSync(plugin, account);
+		expect('429: the run waits, with the time the retry comes, and is not an error', typeof hit.resumeAt === 'number' && hit.resumeAt === web.cooldownUntil && web.resumeAfter429?.consecutive === 1 && (hit.stopped ?? '').startsWith('claude.ai answered 429') && (hit.stopped ?? '').endsWith('Automatic retry scheduled.'), hit.stopped);
+		expect('429: the first pause is at least 30 seconds', web.cooldownUntil! - Date.now() > 29_000 && web.cooldownUntil! - Date.now() <= 30_000);
+		requests = 0;
+		const held = await runSync(plugin, account);
+		expect('429: while the pause lasts nothing is asked of claude.ai', requests === 0 && held.resumeAt === web.cooldownUntil && (held.stopped ?? '').startsWith('claude.ai is cooling down until'), `${requests} ${held.stopped}`);
+		web.cooldownUntil = Date.now() - 1;
+		const again = await runSync(plugin, account);
+		expect('429: a second one in a row waits longer', again.resumeAt !== undefined && web.resumeAfter429?.consecutive === 2 && web.cooldownUntil! - Date.now() > 59_000, String(web.cooldownUntil! - Date.now()));
+		limited = false;
+		web.cooldownUntil = Date.now() - 1;
+		testHooks.requestUrl = async () => ({ status: 404, headers: { 'content-type': 'application/json' }, text: '{}', arrayBuffer: new ArrayBuffer(0) });
+		const through = await runSync(plugin, account);
+		testHooks.requestUrl = null;
+		expect('429: a run that gets through ends the pause', !through.stopped && through.resumeAt === undefined && web.cooldownUntil === undefined && web.resumeAfter429 === undefined, through.stopped ?? '');
+
+		// The shared rules, used the same way by Gemini, AI Studio and Lumo.
+		const c: Cooling = {};
+		const r: { stopped?: string; resumeAt?: number } = {};
+		expect('pause rules: not paused, nothing held', !heldByCooldown(c, 'Lumo', r, 1000) && r.resumeAt === undefined && coolingUntil(c, 1000) === 0);
+		expect('pause rules: only a 429 starts a pause', !pausedBy(new StopError('x'), c, r, 1000) && pausedBy(new RateLimitError('Lumo', 5000), c, r, 1000) && c.cooldownUntil === 31_000 && r.resumeAt === 31_000 && c.resumeAfter429?.consecutive === 1, JSON.stringify(c));
+		const r2: { stopped?: string; resumeAt?: number } = {};
+		expect('pause rules: a paused account is held and says until when', heldByCooldown(c, 'Lumo', r2, 2000) && r2.resumeAt === 31_000 && (r2.stopped ?? '').startsWith('Lumo is cooling down until'));
+		expect('pause rules: a waiting run does not end the pause, a finished one does', !endCooldown(c, r2) && endCooldown(c, {}) && c.cooldownUntil === undefined && !endCooldown(c, {}));
+		const adopted: Cooling = { cooldownUntil: 9000 };
+		expect('pause rules: a pause without a waiting retry gets one; a canceled retry stays canceled', stillCooling(adopted, 1000) === 9000 && adopted.resumeAfter429?.consecutive === 1 && stillCooling({ cooldownUntil: 9000, resumeAfter429: null }, 1000) === 9000);
+		expect('pause rules: the server\'s wait is respected when it is longer', startCooldown({}, 600_000, 0) === 600_000 && retryDeadline('120', 1000) === 121_000 && retryDeadline('', 1000) === 601_000 && clearCooldown({ resumeAfter429: null }));
+		expect('pause rules: the countdown reads mm:ss', countdown(65_000, 0) === '01:05' && countdown(0, 5000) === '00:00');
 	}
 
 	// A request that gets no answer at all is tried again, up to 3 times (as ChatGPT since 0.41.3).

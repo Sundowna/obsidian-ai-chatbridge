@@ -15,12 +15,12 @@ export const COMPUTER_FILE_VERSION = 1;
 
 /** Fields of one web account that a sync writes: they stay with the computer. */
 export const WEB_LOCAL = {
-	claude: ['index', 'fileIndex', 'cloudIndex', 'projectCatalog', 'archiveCleanup'],
+	claude: ['index', 'fileIndex', 'cloudIndex', 'cooldownUntil', 'resumeAfter429', 'projectCatalog', 'archiveCleanup'],
 	chatgpt: ['index', 'fileIndex', 'codexCloudIndex', 'cooldownUntil', 'resumeAfter429', 'assetRetries', 'pendingCaptures', 'inventories', 'chatProgress', 'projectCatalog', 'archiveCleanup'],
-	lumo: ['index', 'fileIndex', 'projectCatalog'],
-	gemini: ['index'],
+	lumo: ['index', 'fileIndex', 'cooldownUntil', 'resumeAfter429', 'projectCatalog'],
+	gemini: ['index', 'cooldownUntil', 'resumeAfter429'],
 } as const;
-export const STUDIO_LOCAL = ['index'] as const;
+export const STUDIO_LOCAL = ['index', 'cooldownUntil', 'resumeAfter429'] as const;
 /** A desktop app's sessions exist on one computer only, and so do its extra folders. */
 export const DESKTOP_LOCAL = ['extraFolders', 'index', 'ignored', 'groupCache'] as const;
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.46.0 - 2026-11-27
+
+### Added
+- **Claude, Gemini, AI Studio and Lumo: a rate limit pauses and retries by itself** - when one of them answers "too many requests", that account now waits, shows a countdown in the status bar and tries again by itself, as ChatGPT already did. Other accounts keep syncing, and the pause survives a restart of Obsidian. Before, the sync stopped and the source stayed out of the automatic sync until you synced it by hand.
+
 ## 0.45.0 - 2026-11-27
 
 ### Added

@@ -2,6 +2,7 @@ import { apiVersion, Notice, Platform, Plugin, setIcon } from 'obsidian';
 import { errorLogAccounts, flushErrorLog, initErrorLog, pruneErrors } from './error-log';
 import { handoffNote, MIN_INTERVAL_MINUTES, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount, type Settings } from './settings';
 import { accountsOf, hasPastedSession, loginRef, SITE_LABEL, withAccount, type AnyAccount } from './accounts';
+import { coolingUntil, type Cooling } from './rate-limit';
 import { normalizeSettings } from './migrate';
 import { AIChatBridgeSettingTab } from './ui/settings-tab';
 import { anyDesktopEnabled, elsewhereText, runDesktopSync, type DesktopOnly } from './desktop/sync';
@@ -325,10 +326,22 @@ export default class AIChatBridge extends Plugin {
 		this.showingGptCooldown = false;
 	}
 
-	/** The ChatGPT account whose automatic retry comes first. Each account cools down on its own. */
-	private nextGptResume(): ChatgptAccount | undefined {
-		const waiting = this.settings.chatgpt.filter((a) => a.web.resumeAfter429);
-		return waiting.sort((a, b) => (a.web.cooldownUntil ?? 0) - (b.web.cooldownUntil ?? 0))[0];
+	/** Every account whose automatic retry after a 429 is waiting, soonest first. Each cools down on its own. */
+	private waitingRetries(): { target: Target; state: Cooling }[] {
+		const s = this.settings;
+		const all: { target: Target; state: Cooling }[] = [
+			...s.chatgpt.map((account) => ({ target: { kind: 'chatgpt' as const, account }, state: account.web })),
+			...s.claude.map((account) => ({ target: { kind: 'claude' as const, account }, state: account.web })),
+			...s.lumo.map((account) => ({ target: { kind: 'lumo' as const, account }, state: account.web })),
+			...s.gemini.map((account) => ({ target: { kind: 'gemini' as const, account }, state: account.web })),
+			...s.gemini.filter((account) => account.studio.enabled).map((account) => ({ target: { kind: 'studio' as const, account }, state: account.studio })),
+		];
+		return all.filter((w) => w.state.resumeAfter429).sort((a, b) => (a.state.cooldownUntil ?? 0) - (b.state.cooldownUntil ?? 0));
+	}
+
+	/** The account whose automatic retry comes first (the name dates from when only ChatGPT had one). */
+	private nextGptResume(): { target: Target; state: Cooling } | undefined {
+		return this.waitingRetries()[0];
 	}
 
 	private gptLabel(account: ChatgptAccount): string {
@@ -338,15 +351,16 @@ export default class AIChatBridge extends Plugin {
 	private scheduleGptResume(): void {
 		this.clearGptResumeTimer();
 		if (this.unloaded || this.running) return;
-		const account = this.nextGptResume();
+		const next = this.nextGptResume();
 		// Idle: nothing running or waiting.
-		if (!account) {
+		if (!next) {
 			this.statusEl?.setText(this.idleStatus());
 			return;
 		}
-		const gpt = account.web;
-		const label = this.gptLabel(account);
-		const count = chatCountStatus(gpt.chatProgress, label);
+		const gpt = next.state;
+		const label = this.targetLabel(next.target);
+		// Only ChatGPT counts its chats while it waits.
+		const count = next.target.kind === 'chatgpt' ? chatCountStatus(next.target.account.web.chatProgress, label) : '';
 		const delay = Math.max(0, (gpt.cooldownUntil ?? 0) - Date.now());
 		if (delay > 0) {
 			const seconds = Math.ceil(delay / 1000);
@@ -363,7 +377,7 @@ export default class AIChatBridge extends Plugin {
 				this.scheduleGptResume();
 				return;
 			}
-			void this.guarded('resume', () => this.runOne({ kind: 'chatgpt', account }, 'resume')).catch(() => {
+			void this.guarded('resume', () => this.runOne(next.target, 'resume')).catch(() => {
 				this.clearGptResumeTimer();
 				new Notice('The sync retry could not finish. Check the settings and try again.');
 			});
@@ -372,7 +386,7 @@ export default class AIChatBridge extends Plugin {
 
 	private async cancelGptResume(): Promise<void> {
 		this.clearGptResumeTimer();
-		for (const { web } of this.settings.chatgpt) if (web.resumeAfter429) web.resumeAfter429 = null;
+		for (const { state } of this.waitingRetries()) state.resumeAfter429 = null;
 		await this.saveSettings();
 		this.scheduleGptResume();
 		new Notice('Pending retry canceled. The cooldown still applies.');
@@ -862,17 +876,14 @@ export default class AIChatBridge extends Plugin {
 		}
 		// One source that fails (an expired login, say) must not keep the others from syncing:
 		// each runs on its own. Only your Stop ends the run, and runOne skips the rest after it.
-		for (const account of claude) await this.runPart({ kind: 'claude', account }, trigger);
-		for (const account of gpt) {
-			const waiting = account.web.resumeAfter429 || (account.web.cooldownUntil ?? 0) > Date.now();
-			// A ChatGPT cooldown only waits; other accounts and the desktop apps still run.
-			if (trigger !== 'manual' && waiting) continue;
-			await this.runPart({ kind: 'chatgpt', account }, trigger);
-		}
-		for (const account of lumo) await this.runPart({ kind: 'lumo', account }, trigger);
+		// An account paused after a 429 only waits (its own retry comes); the others still run.
+		const held = (c: Cooling): boolean => trigger !== 'manual' && (!!c.resumeAfter429 || coolingUntil(c) > 0);
+		for (const account of claude) if (!held(account.web)) await this.runPart({ kind: 'claude', account }, trigger);
+		for (const account of gpt) if (!held(account.web)) await this.runPart({ kind: 'chatgpt', account }, trigger);
+		for (const account of lumo) if (!held(account.web)) await this.runPart({ kind: 'lumo', account }, trigger);
 		for (const account of gemini) {
-			await this.runPart({ kind: 'gemini', account }, trigger);
-			if (account.studio.enabled) await this.runPart({ kind: 'studio', account }, trigger);
+			if (!held(account.web)) await this.runPart({ kind: 'gemini', account }, trigger);
+			if (account.studio.enabled && !held(account.studio)) await this.runPart({ kind: 'studio', account }, trigger);
 		}
 		if (desktop) await this.runPart({ kind: 'desktop' }, trigger);
 		if (hermes) await this.runPart({ kind: 'hermes' }, trigger);

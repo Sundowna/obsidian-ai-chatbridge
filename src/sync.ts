@@ -4,9 +4,10 @@ import { guardMissing } from './missing-guard';
 import type AIChatBridge from './main';
 import { withAccount } from './accounts';
 import type { ClaudeAccount } from './settings';
-import { ClaudeApi, redact, StopError } from './api';
+import { ClaudeApi, RateLimitError, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
 import { OddChats, readOrSkip } from './odd-chats';
+import { endCooldown, heldByCooldown, pausedBy } from './cooldown-run';
 import { keepFlags } from './gemini/save';
 import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, targetFor } from './select';
 import { baseName, dailyNoteName, tagAccount } from './naming';
@@ -67,6 +68,8 @@ export interface SyncResult {
 	/** Notes you had edited whose chat continued. */
 	edits: EditedReport;
 	stopped?: string;
+	/** Set when the run waits for a rate-limit pause to end (not an error). */
+	resumeAt?: number;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
 	/** Claude Code cloud sessions (claude.ai/code); also counted in the totals above. */
@@ -151,6 +154,7 @@ async function fetchFiles(
 			}
 		} catch (e) {
 			// Name the file in the stop message.
+			if (e instanceof RateLimitError) throw e;
 			if (e instanceof StopError) throw new StopError(`While fetching file "${task.name}": ${e.message}`);
 			throw e;
 		}
@@ -177,6 +181,11 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], oddChats: [], flagChanges: 0, restored: [], redrawn: [], edits: noEdits() };
 	const odd = new OddChats();
 	if (nothingSelected(s)) return { ...result, nothingSelected: true };
+	// Paused after a 429: wait for the pause to end; the plugin retries by itself.
+	if (heldByCooldown(s, 'claude.ai', result)) {
+		await plugin.saveSettings();
+		return result;
+	}
 	const auth = await claudeAuth(plugin, account);
 	const getKey = auth.getKey;
 
@@ -606,12 +615,14 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		}
 	} catch (e) {
 		const key = getKey();
-		if (e instanceof StopError) result.stopped = e.message;
+		if (pausedBy(e, s, result)) await plugin.saveSettings();
+		else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof CloudShapeError) result.stopped = `Unexpected Claude Code session data (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;
 		else if (e instanceof ShapeError) result.stopped = `Unexpected JSON shape (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;
 		else result.stopped = redact(e instanceof Error ? e.message : String(e), key);
 	}
 
+	if (endCooldown(s, result)) await plugin.saveSettings();
 	await writeLog(plugin, account, result);
 	return result;
 }

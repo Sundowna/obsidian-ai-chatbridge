@@ -8,6 +8,7 @@ import type AIChatBridge from '../main';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
 import { OddChats } from '../odd-chats';
+import { endCooldown, heldByCooldown, pausedBy } from '../cooldown-run';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
 import { pastedSession } from '../cookies';
@@ -27,6 +28,10 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 	const result = emptyResult();
 	let api: GeminiApi | null = null;
 	try {
+		if (heldByCooldown(g, 'Gemini', result)) {
+			await plugin.saveSettings();
+			return result;
+		}
 		const folder = cleanFolder(g.folder);
 		if (!folder) throw new StopError('The Gemini folder setting is empty or invalid.');
 		progress('opening Gemini…');
@@ -58,13 +63,15 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name), account.label) };
 		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true } });
 	} catch (e) {
-		if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
+		if (pausedBy(e, g, result)) await plugin.saveSettings();
+		else if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Gemini's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else if (e instanceof GeminiError) result.stopped = `Gemini refused the request (${e.message}).`;
 		else result.stopped = `Something went wrong while reading Gemini (${failureText(e)}).`;
 	} finally {
 		api?.close();
 	}
+	if (endCooldown(g, result)) await plugin.saveSettings();
 	await writeLog(plugin, 'Gemini', account, result);
 	return result;
 }

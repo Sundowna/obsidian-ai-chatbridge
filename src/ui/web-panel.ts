@@ -10,6 +10,7 @@ import { advanced, bindSyncButton, contentOptions, count, filingOptions, project
 import { googleRawMoves, webRawMoves } from '../raw-move';
 import { chatFolderSetting } from './chat-folder';
 import { masterRaw } from '../raw-folders';
+import { coolingUntil, type Cooling } from '../rate-limit';
 import { lastRunLine, runKey } from '../last-run';
 import { archiveSettings } from './archive-settings';
 import { BrowserLoginModal } from './browser-login-modal';
@@ -31,7 +32,10 @@ function loginRow(ctx: PanelContext, el: HTMLElement, provider: Provider, accoun
 		});
 	void isLoggedIn(ref).then((ok) => {
 		if (!row.settingEl.isConnected) return;
-		const extra = note();
+		// A pause after a 429 is shown for every provider, with the time it ends.
+		const state = (surface === 'studio' ? (account as GeminiAccount).studio : account.web) as Cooling;
+		const until = coolingUntil(state);
+		const extra = `${note()}${until ? ` Rate limited, cooling down until ${new Date(until).toLocaleTimeString()}.` : ''}`;
 		row.setDesc(`${ok ? 'Logged in.' : `Not logged in. Select "Log in" and sign in to the ${SITE_LABEL[provider]} account you want here.`}${extra ? ` ${extra}` : ''}`);
 		if (ok) {
 			row.addButton((b) =>
@@ -192,10 +196,7 @@ export function studioPanel(ctx: PanelContext, el: HTMLElement, account: GeminiA
 export function chatgptWebPanel(ctx: PanelContext, el: HTMLElement, account: ChatgptAccount): void {
 	const g = account.web;
 	const save = () => ctx.plugin.saveSettings();
-	loginRow(ctx, el, 'chatgpt', account, () => {
-		const until = g.cooldownUntil ?? 0;
-		return `${count(Object.keys(g.index).length, 'chat')} saved.${until > Date.now() ? ` Rate limited, cooling down until ${new Date(until).toLocaleTimeString()}.` : ''}`;
-	});
+	loginRow(ctx, el, 'chatgpt', account, () => `${count(Object.keys(g.index).length, 'chat')} saved.`);
 	const saved = hasPastedSession('chatgpt', account);
 	new Setting(el)
 		.setName('Made your account with Google?')

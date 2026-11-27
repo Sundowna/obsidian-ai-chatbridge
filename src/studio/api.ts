@@ -4,10 +4,11 @@
 // They are signed the way AI Studio's own page signs them: a hash of the login cookie plus the
 // public API key in the page. Both are read in the page and never leave it.
 
-import { StopError } from '../api';
+import { RateLimitError, StopError } from '../api';
 import { openReadyPage, type LoginRef, type ReadyPage } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
 import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
+import { retryDeadline } from '../rate-limit';
 import { googleLogin } from '../gemini/api';
 import { ShapeError } from '../schema';
 import type { StudioPrompt } from '../gemini/types';
@@ -24,6 +25,9 @@ const MAX_PAGES = 300;
 
 const KEY_IN_PAGE = String.raw`(document.documentElement.innerHTML.match(/"WIu0Nc":"(AIza[\w-]{35})"/) || [])[1]`;
 const READY = `location.origin === ${JSON.stringify(ORIGIN)} && /(?:^|; )SAPISID=/.test(document.cookie) && !!${KEY_IN_PAGE}`;
+
+/** The answer's Retry-After header (a page's fetch gives header names in lower case), or ''. */
+const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class StudioApi {
 	private constructor(private readonly page: ReadyPage, private readonly source: ErrorSource) {}
@@ -95,7 +99,7 @@ export class StudioApi {
 		}
 		if (res.status === 401 || res.status === 403) throw new StopError(`AI Studio answered ${res.status} (not logged in). Log in to Google again in the plugin settings.`);
 		if (res.status === 404 && method === 'ResolveDriveResource') return null;
-		if (res.status === 429) throw new StopError('AI Studio is rate limiting this account. Try again later.');
+		if (res.status === 429) throw new RateLimitError('AI Studio', retryDeadline(retryAfter(res.headers)));
 		if (res.status !== 200) throw new StopError(`AI Studio answered ${res.status}, so the sync stopped.`);
 		try {
 			return JSON.parse(res.text);
