@@ -4,11 +4,12 @@
 
 import { Modal, Notice, Platform, Setting, type App } from 'obsidian';
 import { loginRef, type AnyAccount } from '../accounts';
-import { LINK_STATE_TEXT, linkState, readTokens, usesBrowserLink, type LinkState, type LoginMethod } from '../link/account';
+import { LINK_STATE_TEXT, linkState, pairButtonText, readTokens, unpairForgetsAll, usesBrowserLink, type LinkState, type LoginMethod } from '../link/account';
 import { isLoggedIn, type Provider } from '../login';
 import type AIChatBridge from '../main';
 import type { GeminiAccount } from '../settings';
 import { lastRunLine, runKey } from '../last-run';
+import { ConfirmModal } from './modals';
 import { LINK_OPEN_PATH } from '../link/sites';
 import { bindSyncButton, type PanelContext } from './fields';
 import { forgetLogin } from '../login-check';
@@ -137,18 +138,24 @@ export function linkLoginRow(ctx: PanelContext, el: HTMLElement, provider: Provi
 	row.settingEl.dataset.linkState = state;
 	lastRunLine(row.infoEl, plugin.settings.lastRuns[runKey(surface, provider, account.id)]);
 	if (state !== 'not-paired') {
+		const unpair = (): void => {
+			const server = plugin.browserLink.server;
+			// Only this account's browser; without one chosen, every paired browser.
+			if (server) server.unpair(own);
+			else if (own) {
+				const tokens = readTokens(plugin.linkTokens().get());
+				delete tokens[own];
+				plugin.linkTokens().set(Object.keys(tokens).length ? JSON.stringify(tokens) : null);
+			} else plugin.linkTokens().set(null);
+			new Notice(own ? `Browser link: ${ownName ?? 'this browser'} unpaired.` : 'Browser link: unpaired. Syncs through your browser stop until you pair again.');
+			ctx.refresh();
+		};
+		const all = unpairForgetsAll(own, pairedBrowsers(plugin).length);
 		row.addButton((b) =>
-			b.setButtonText('Unpair').onClick(() => {
-				const server = plugin.browserLink.server;
-				// Only this account's browser; without one chosen, every paired browser.
-				if (server) server.unpair(own);
-				else if (own) {
-					const tokens = readTokens(plugin.linkTokens().get());
-					delete tokens[own];
-					plugin.linkTokens().set(Object.keys(tokens).length ? JSON.stringify(tokens) : null);
-				} else plugin.linkTokens().set(null);
-				new Notice(own ? `Browser link: ${ownName ?? 'this browser'} unpaired.` : 'Browser link: unpaired. Syncs through your browser stop until you pair again.');
-				ctx.refresh();
+			b.setButtonText(all ? 'Unpair all browsers' : 'Unpair').onClick(() => {
+				// Without a browser picked, Unpair forgets every paired browser: say so first when there are several.
+				if (!all) return unpair();
+				new ConfirmModal(ctx.app, 'Unpair all browsers?', `This account has no browser of its own ("Any connected browser"), so every paired browser (${pairedBrowsers(plugin).map((x) => x.name).join(', ')}) is forgotten and all Browser link accounts stop until you pair again. To add a browser, use "Pair another browser…" instead.`, 'Unpair all', unpair).open();
 			}),
 		);
 	}
@@ -157,12 +164,11 @@ export function linkLoginRow(ctx: PanelContext, el: HTMLElement, provider: Provi
 			.setTooltip("Opens the extension's page in your default browser, which also starts the browser")
 			.onClick(() => void openInBrowser(plugin)),
 	);
-	if (state !== 'linked') {
-		row.addButton((b) => {
-			b.setButtonText(state === 'not-paired' ? 'Pair browser…' : 'Pair again…').onClick(() => new PairBrowserModal(ctx.app, plugin, ctx.refresh, account as GeminiAccount).open());
-			if (state === 'not-paired') b.setCta();
-		});
-	}
+	// Always offered: a second browser (a work profile, say) is paired from here without unpairing the first.
+	row.addButton((b) => {
+		b.setButtonText(pairButtonText(state)).onClick(() => new PairBrowserModal(ctx.app, plugin, ctx.refresh, account as GeminiAccount).open());
+		if (state === 'not-paired') b.setCta();
+	});
 	if (state !== 'not-paired') {
 		row.addButton((b) => {
 			b.setButtonText('Sync now');

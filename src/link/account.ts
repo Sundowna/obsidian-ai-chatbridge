@@ -77,3 +77,11 @@ export function pickBrowser(own: string | undefined, claimedByOthers: readonly s
 	if (own) return own;
 	return linked.find((b) => !claimedByOthers.includes(b));
 }
+
+/** The pair button of an account's login row: always there, so a second browser never needs an unpair first. */
+export function pairButtonText(state: LinkState): string {
+	return state === 'not-paired' ? 'Pair browser…' : state === 'linked' ? 'Pair another browser…' : 'Pair again…';
+}
+
+/** Unpair from an account without a browser of its own forgets every paired browser: with several, it asks first. */
+export const unpairForgetsAll = (own: string | undefined, paired: number): boolean => !own && paired > 1;
