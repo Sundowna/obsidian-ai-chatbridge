@@ -127,7 +127,9 @@ async function run(): Promise<void> {
 	const port = await server.start();
 	await startFirefox(profile);
 
-	const inst = await send('webExtension.install', { extensionData: { type: 'path', path: extDir } });
+	// FIREFOX_EXTENSION_ZIP=<zip> installs a release zip instead of the built folder.
+	const zip = process.env.FIREFOX_EXTENSION_ZIP;
+	const inst = await send('webExtension.install', { extensionData: zip ? { type: 'archivePath', path: zip } : { type: 'path', path: extDir } });
 	expect('install: the Firefox build installs as a temporary add-on', !inst.error && (inst.result as { extension?: string } | undefined)?.extension === ADDON_ID, inst.message ?? '');
 	if (inst.error) return;
 
