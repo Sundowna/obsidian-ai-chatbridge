@@ -1341,6 +1341,71 @@ async function testRefusedDownloadAndGoneFile() {
 	console.log('Refused download and gone file passed: a 415/500 on a download skips only that file (401 and a chat 500 still stop), file_not_found = download unavailable, the sync goes on.');
 }
 
+/**
+ * Seen 2026-11-27: chatgpt.com serves some older photos only as a resized copy (3172335 bytes
+ * stated, 823189 served), so they waited with "size mismatch" for ever. Now a photo whose answer
+ * is a real image is saved at the served size; a "photo" that is not an image, and any other
+ * file of the wrong size, are still skipped as "size mismatch".
+ */
+async function testResizedPhotoSaved() {
+	const h = harness();
+	const g = h.settings.chatgpt[0]!.web;
+	g.downloadFiles = true;
+	const PHOTO = 'file_00000000cccc8210ad8d881a71cbbd2c';
+	const FAKE = 'file_00000000dddd8210ad8d881a71cbbd2c';
+	const DOC = 'file_00000000eeee8210ad8d881a71cbbd2c';
+	const link = (f: string) => `https://chatgpt.com/backend-api/estuary/content?id=${f}&ts=1&p=fs&cid=1&sig=abc&v=0`;
+	const resized = 'GIF89a resized copy';
+	const chat = {
+		conversation_id: id, title: 'Photos', create_time: 1793955600, update_time: 1793955600, gizmo_id: null,
+		messages: [{
+			id: 'message-user', author: { role: 'user' }, content: { content_type: 'text', parts: ['Three files.'] },
+			metadata: { attachments: [
+				{ id: PHOTO, name: 'photo.gif', size: 3172335, mime_type: 'image/gif' },
+				{ id: FAKE, name: 'fake.png', size: 3172335, mime_type: 'image/png' },
+				{ id: DOC, name: 'notes.pdf', size: 3172335, mime_type: 'application/pdf' },
+			] },
+		}, message('message-answer', 'Seen.')],
+		page_info: { has_previous_page: false },
+	};
+	testHooks.requestUrl = async (r) => {
+		const url = new URL(r.url);
+		for (const f of [PHOTO, FAKE, DOC]) {
+			if (url.pathname === `/backend-api/files/download/${f}`) return answerOf(200, { 'content-type': 'application/json' }, JSON.stringify({ status: 'success', download_url: link(f), file_size_bytes: 3172335 }));
+			if (r.url === link(f)) return answerOf(200, { 'content-type': 'application/octet-stream' }, f === PHOTO ? resized : 'not an image at all');
+		}
+		throw new Error('Unexpected request ' + r.url);
+	};
+	const connect = GptApi.connect;
+	GptApi.connect = async () => Object.assign(signedInApi(), {
+		inventoryKey: 'account:resized-photo-test',
+		listPath: (offset: number, tpp: boolean, archived: boolean, pinned = false) => 'list:' + [offset, tpp, archived].join(':') + (pinned ? ':pinned' : ''),
+		projectPagePath: (cursor?: string) => 'projects:' + (cursor ?? ''),
+		chatPath: () => 'chat',
+		get: async (path: string) => {
+			if (path === 'list:0:false:true') return raw({ items: [{ id, title: 'Photos', create_time: date, update_time: date, gizmo_id: null }], offset: 0, total: 1 });
+			if (path.startsWith('list:')) return raw({ items: [], offset: 0, total: 0 });
+			if (path.startsWith('projects:')) return raw({ items: [] });
+			if (path === 'chat') return raw(chat);
+			throw new Error('Unexpected request ' + path);
+		},
+	});
+	try {
+		const r = await runGptSync(h.plugin, h.settings.chatgpt[0]!);
+		assert.equal(r.stopped, undefined);
+		assert.equal(r.filesSaved, 1, 'only the real (resized) photo is saved');
+		assert.match(g.fileIndex[PHOTO] ?? '', /photo\.gif$/, 'the resized photo is saved under its name');
+		assert.equal(h.read(g.fileIndex[PHOTO]!), resized, 'with exactly the bytes chatgpt.com sent');
+		assert.equal(g.assetRetries?.[PHOTO], undefined, 'it no longer waits');
+		assert.equal(g.assetRetries?.[FAKE]?.reason, 'size mismatch', 'a "photo" that is not an image still waits');
+		assert.equal(g.assetRetries?.[DOC]?.reason, 'size mismatch', 'any other file of the wrong size still waits');
+	} finally {
+		testHooks.requestUrl = null;
+		GptApi.connect = connect;
+	}
+	console.log('Resized photo passed: a real image of another size is saved; a fake image and other files of the wrong size still wait.');
+}
+
 async function main() {
 	await testFileForbiddenSkipsFile();
 	await testNetworkErrorRetried();
@@ -1357,6 +1422,7 @@ async function main() {
 	await testVoiceReimport();
 	await testLibraryFileSync();
 	await testRefusedDownloadAndGoneFile();
+	await testResizedPhotoSaved();
 	await testJsonFolder();
 	await testQuickCheck();
 	await testQuickCheckSameResult();
