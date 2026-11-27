@@ -28,6 +28,7 @@ import { pageCall, pageRead, readyCheck } from '../extension/src/page';
 import { GeminiApi, geminiBase } from '../src/gemini/api';
 import { checkLogin, forgetLogin } from '../src/login-check';
 import { StopError } from '../src/api';
+import { ShapeError } from '../src/schema';
 import { StudioApi } from '../src/studio/api';
 import { runGeminiSync } from '../src/gemini/sync';
 import { runStudioSync } from '../src/studio/sync';
@@ -363,6 +364,11 @@ async function testClaudeAndGpt() {
 		const who = await rejection(api.get(ACCOUNT));
 		expect('Claude: the login check may ask who is signed in', !who && String(b.seen.filter((m) => m.op === 'fetch').pop()!.url) === 'https://claude.ai/api/account', who?.message);
 		expect('Claude: other account addresses stay blocked', !!(await rejection(api.get('/api/account/settings'))) && !!(await rejection(api.get(`${ACCOUNT}?x=1`))));
+		// Audit 2026-11-27: the guard's origin check had no test (removing it passed every suite).
+		const fetchesBefore = b.seen.filter((m) => m.op === 'fetch').length;
+		const offSite = await rejection(api.get(`https://example.com/api/organizations/${ORG}/chat_conversations`));
+		const offSiteAccount = await rejection(api.get('https://example.com/api/account'));
+		expect('Claude request guard: the same path on another site is blocked, nothing sent', offSite instanceof StopError && offSite.message.startsWith('Blocked a request') && offSiteAccount instanceof StopError && b.seen.filter((m) => m.op === 'fetch').length === fetchesBefore, offSite?.message);
 		claudeOrg = '';
 		const c2 = fake('claude', {});
 		const r2 = await runSync(c2.plugin, c2.account as never);
@@ -621,8 +627,71 @@ function testLoginCheck() {
 	expect('Google account number: Gemini uses /u/N/ for the Nth account, nothing for the default one', geminiBase(undefined) === 'https://gemini.google.com' && geminiBase(2) === 'https://gemini.google.com/u/2');
 }
 
+// ---- Added by audit 2026-11-27: the plugin's own wiring (main.ts), not only the pure helpers ----
+
+/** Gemini's login check and the Google account switcher, through the real runGeminiSync. */
+async function testGeminiLoginCheck() {
+	const settings = normalizeSettings({ claude: [{}], gemini: [{ id: 'g1', label: 'Home', web: { folder: 'AI chats/Gemini' } }] }).settings;
+	settings.delaySeconds = 0;
+	const account = settings.gemini[0]!;
+	let saves = 0;
+	const plugin = { app: { secretStorage: { getSecret: () => null }, vault: { adapter: {}, getAbstractFileByPath: () => null } }, settings, saveSettings: async () => { saves++; } } as unknown as AIChatBridge;
+	/** Which Google account the browser shows at /u/N/ (N = index); the first one when no N is given. */
+	let accounts = ['111'];
+	const opened: (number | undefined)[] = [];
+	const connect = GeminiApi.connect;
+	GeminiApi.connect = async (_l: unknown, _f: unknown, n?: number) => {
+		opened.push(n);
+		if ((n ?? 0) >= accounts.length) throw new Error('no such account');
+		const id = accounts[n ?? 0]!;
+		return { accountId: async () => id, listChats: async () => [], close: () => undefined } as unknown as GeminiApi;
+	};
+	const realError = console.error;
+	console.error = () => undefined;
+	try {
+		const first = await runGeminiSync(plugin, account);
+		expect('Gemini login check: the first Google account is remembered', !first.stopped && !first.linkSkipped && account.web.userId === '111', first.stopped ?? first.linkSkipped);
+		accounts = ['222'];
+		const other = await runGeminiSync(plugin, account);
+		expect('Gemini login check: another Google login in the login window stops the sync', (other.stopped ?? '').includes('but this account belongs to') && account.web.userId === '111', other.stopped);
+
+		account.web.loginMethod = 'browser';
+		setBrowserLink((l) => l.provider === 'gemini', () => null);
+		accounts = ['222', '111'];
+		opened.length = 0;
+		const found = await runGeminiSync(plugin, account);
+		expect('Google account switcher: the account is found at /u/1/ and remembered', !found.stopped && !found.linkSkipped && account.web.googleUser === 1 && opened.includes(1), found.stopped ?? found.linkSkipped);
+		accounts = ['333', '222'];
+		account.web.googleUser = undefined;
+		const missing = await runGeminiSync(plugin, account);
+		expect('Gemini login check: through the Browser link another Google login is skipped, not stopped', !missing.stopped && (missing.linkSkipped ?? '').includes('but this account belongs to') && account.web.userId === '111', missing.stopped ?? missing.linkSkipped);
+
+		// One chat Google sends in an odd shape is skipped and named; the third in one run stops (odd-chats.ts).
+		const item = (n: number) => ({ uuid: `c_odd${n}`, name: `Odd ${n}`, created_at: '2026-11-27T08:00:00.000Z', updated_at: `2026-11-27T08:0${n}:00.000Z`, pinned: false });
+		let chats = [item(1)];
+		accounts = ['111'];
+		GeminiApi.connect = async () => ({
+			accountId: async () => '111',
+			listChats: async (_w: unknown, _p: unknown, settled?: (page: unknown[], pinned: boolean) => boolean) => { settled?.([], true); settled?.(chats, false); return chats; },
+			chatTurns: async () => { throw new ShapeError('odd turn'); },
+			close: () => undefined,
+		} as unknown as GeminiApi);
+		const odd = await runGeminiSync(plugin, account);
+		expect('Gemini odd chat: one odd chat is skipped and named, the sync goes on', !odd.stopped && !odd.linkSkipped && odd.failed.includes('Odd 1') && odd.newCount === 0, odd.stopped ?? odd.linkSkipped ?? odd.failed.join());
+		chats = [item(1), item(2), item(3)];
+		account.web.listCatalog = undefined;
+		const many = await runGeminiSync(plugin, account);
+		expect('Gemini odd chat: the third odd chat in one run stops the sync', (many.stopped ?? '').includes('could not be verified'), many.stopped);
+	} finally {
+		GeminiApi.connect = connect;
+		console.error = realError;
+		setBrowserLink(() => false, () => null);
+	}
+}
+
 async function main() {
 	testSwitch();
+	await testGeminiLoginCheck();
 	await testTransport();
 	await testSamePage();
 	await testSkip();

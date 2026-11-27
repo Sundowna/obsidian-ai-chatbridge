@@ -14,7 +14,7 @@ import { customProjectFolder, DEFAULT_RECENT, filterByProjects, nothingSelected,
 import { baseName, dailyNoteName, safeTitle, tagAccount, untagAccount } from '../naming';
 import { createNew, ensureFolder, findFile, freeFileName, freeStem } from '../vaultio';
 import { appendLog } from '../log';
-import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
+import { addVersion, editsLog, keepVersion, noEdits, recordEdit, setNoteFlag, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from '../settings';
 import { KIND_FOLDER, numbered, safeFileName } from '../files';
 import type { IndexEntry, ListItem } from '../types';
@@ -513,6 +513,8 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			const view = withVersionInfo(transcript(chat, item, entry), entry.versions, dirOf(entry.md));
 			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, unedited: await asWritten(before), keep: before?.updated_at === item.updated_at ? ['unread'] : [] });
 			recordEdit(result.edits, note, entry.md);
+			// An unpin since the last version must not stay in the note as if you had added it (as Claude's starred).
+			await setNoteFlag(app, entry.md, 'pinned', isPinned(item.uuid));
 			g.index[item.uuid] = { ...entry, view: entry.md, viewHash: await viewHash(view), noteHash: note.hash, archiveObservation };
 			if (!before && catalogIds.has(item.uuid)) counts.saved++;
 			delete pending[item.uuid];
@@ -539,6 +541,7 @@ export async function runGptSync(plugin: AIChatBridge, account: ChatgptAccount, 
 			}
 			const note = await writeNote(app, entry.md, view, { policy: s.editedNotes, lastHash: entry.noteHash, lastSynced: entry.synced, unedited: await asWritten(entry), keep: ['unread'] });
 			recordEdit(result.edits, note, entry.md);
+			await setNoteFlag(app, entry.md, 'pinned', isPinned(item.uuid));
 			if (note.outcome === 'created') result.restored.push(stemOf(entry.md));
 			else if (note.outcome === 'updated') result.refreshedViews++;
 			// A note left as you edited it is not tried again until the chat changes.

@@ -25,7 +25,7 @@ import { findFile } from './vaultio';
 import { followRename } from './follow';
 import { moveChatFolder, type ChatFolderMoveResult } from './chat-folder-move';
 import { chatFolderStorage, type ChatFolderTarget } from './chat-folder-target';
-import { closeLoginWindows, isLoggedIn, type Provider } from './login';
+import { closeLoginWindows, isLoggedIn, type LoginRef, type Provider } from './login';
 import { StopError } from './api';
 import { runGptSync } from './chatgpt/sync';
 import { registerLayoutIcons } from './chatgpt/layout-view';
@@ -129,6 +129,18 @@ export default class AIChatBridge extends Plugin {
 		this.pendingBrowserName = null;
 	}
 
+	/** The paired browser an account's Browser link requests go to: its own pick, else a connected one no other account picked (pickBrowser). */
+	linkBrowserFor(login: LoginRef): string | undefined {
+		const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
+		const own = (account as GeminiAccount | undefined)?.web.linkBrowser || undefined;
+		if (own) return own;
+		const claimed = LINK_PROVIDERS.flatMap((p) => accountsOf(this.settings, p)
+			.filter((a) => a !== account)
+			.map((a) => (a as GeminiAccount).web.linkBrowser)
+			.filter((b): b is string => !!b));
+		return pickBrowser(undefined, claimed, this.browserLink.server?.linkedBrowsers() ?? []);
+	}
+
 	/** A browser still under a made-up name ("Browser 2") is named after what it is: "Chrome", "Edge 2"… */
 	private nameByKind(browser: string, kind: string | undefined): void {
 		const names = this.browserNames();
@@ -177,16 +189,7 @@ export default class AIChatBridge extends Plugin {
 		setBrowserLink((login) => {
 			const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
 			return !!account && usesBrowserLink(login.provider, account as GeminiAccount);
-		}, () => this.browserLink.server, (login) => {
-			const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
-			const own = (account as GeminiAccount | undefined)?.web.linkBrowser || undefined;
-			if (own) return own;
-			const claimed = LINK_PROVIDERS.flatMap((p) => accountsOf(this.settings, p)
-				.filter((a) => a !== account)
-				.map((a) => (a as GeminiAccount).web.linkBrowser)
-				.filter((b): b is string => !!b));
-			return pickBrowser(undefined, claimed, this.browserLink.server?.linkedBrowsers() ?? []);
-		});
+		}, () => this.browserLink.server, (login) => this.linkBrowserFor(login));
 		void this.updateBrowserLink();
 		registerLayoutIcons(this);
 		this.statusEl = this.addStatusBarItem();
