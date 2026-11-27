@@ -108,8 +108,10 @@ async function run(l) {
 			try { j = JSON.parse(text(s)); } catch { /* not JSON */ }
 			note('ChatGPT', 'fetch /api/auth/session', s.ok && s.status === 200 && j ? 'OK' : 'FAIL', s.ok ? `status ${s.status}, accessToken: ${j && typeof j.accessToken === 'string' ? 'yes' : 'no'}` : err(s));
 			await cookies(l, 'ChatGPT', p, ['oai-did', '_account']);
-			const fav = await l.call('fetch', { page: p, url: 'https://chatgpt.com/favicon.ico', method: 'GET' });
-			await binaryCheck('ChatGPT', fav, 'https://chatgpt.com/favicon.ico');
+			// chatgpt.com has no /favicon.ico; its icons have hashed names, so take one from the page.
+			const icon = 'https://chatgpt.com' + ((text(home).match(/\/cdn\/assets\/favicon-[\w.-]+\.png/) || [])[0] || '/favicon.ico');
+			const fav = await l.call('fetch', { page: p, url: icon, method: 'GET' });
+			await binaryCheck('ChatGPT', fav, icon);
 			await l.call('close', { page: p });
 		}
 	}

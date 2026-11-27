@@ -15,6 +15,7 @@ export default defineConfig(
 		'tsconfig.json',
 		'scripts',
 		'samples',
+		'extension/spike',
 	]),
 	{
 		languageOptions: {

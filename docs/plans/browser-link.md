@@ -143,6 +143,31 @@ The owner stopped work on the Linux PC; the Windows PC takes over from this bran
 2. Stage 0 next steps: in `extension/spike`, `npm install`, then either run `drive-headless.mjs` (needs Chrome for Testing; `--load-extension` does not work in branded Chrome 137+) or have the owner follow `extension/spike/README.md` in their signed-in Chrome.
 3. Fill the per-site table (fetch OK / signed call OK / cookies readable) into this section, then Stage 1.
 
+### Stage 0 on Windows (27 Nov 2026, third session)
+
+Baseline here: `test:ci` 1036 PASS, 0 FAIL. Lint 0 errors, 14 warnings (after adding `extension/spike` to the ESLint ignores; the spike files gave 5 parse errors). `test:offline` not run (no `samples/` in the worktree).
+
+Chrome for Testing 158 would not start on this PC ("side-by-side configuration is incorrect"). `drive-headless.mjs` now uses the installed Chrome with a throwaway profile and loads the spike over `--remote-debugging-pipe` with `Extensions.loadUnpacked` (works in branded Chrome 137+). Run: `CHROME="C:\Program Files\Google\Chrome\Application\chrome.exe" node drive-headless.mjs`.
+
+Headless run, logged-out profile, Chrome 158:
+
+| Check | Result |
+|---|---|
+| Pairing through the options page | OK |
+| Web page (origin `null`) opens the port | Refused, close 1008 |
+| Extension refuses `example.com` | OK |
+| Same connection after 300 s idle | OK, 19 pings |
+| Background tab opened and closed (claude.ai, chatgpt.com) | OK |
+| Packaged fetch, binary, base64 round trip (Claude, ChatGPT) | OK, identical to a direct download |
+| ChatGPT `/` and `/api/auth/session` | 200, no token (logged out, expected) |
+| Claude `/api/organizations` | 403 (logged out, expected) |
+| Gemini, AI Studio ready checks | Not ready (logged out, expected) |
+| Cookies readable by the page | `oai-did` yes; `_account`, `lastActiveOrg`, `sessionKey` no (logged out; `sessionKey` is HttpOnly) |
+
+Spike fix: chatgpt.com has no `/favicon.ico`; the binary check now takes the hashed favicon from the page.
+
+**Still open:** the signed-in rows (Claude orgs, ChatGPT token, Gemini and AI Studio signed calls, `_account`, `lastActiveOrg`, `SAPISID`). Needs either Claude in Chrome connected to the owner's Chrome (not connected in this session), or the owner running `extension/spike/README.md` once.
+
 ---
 
 ## 5. Research results (27 Nov 2026)
