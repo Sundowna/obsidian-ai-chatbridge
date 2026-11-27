@@ -6,11 +6,13 @@
 
 import { RateLimitError, StopError } from '../api';
 import { googleCookies } from '../cookies';
-import { GEMINI_SIGNED_IN, isLoggedIn, openReadyPage, type LoginRef, type PastedCookies, type ReadyPage } from '../login';
+import type { LoginRef, PastedCookies } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
+import { transportFor, type PageAnswer, type SitePage } from '../transport';
 import { googleAccountId } from './save';
 import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
 import { retryDeadline } from '../rate-limit';
+import { BrowserLinkUnavailable } from '../link/errors';
 import { batchPayload, checkChatId, readChatPage, readListPage } from './wire';
 import type { GeminiListItem } from './types';
 
@@ -28,7 +30,7 @@ const MAX_PAGES = 300; // a guard against an endless paging loop
  * cookies to use. Stops if there are neither, or the pasted text is not a Google login.
  */
 export async function googleLogin(login: LoginRef, fallback: string | null): Promise<PastedCookies | undefined> {
-	if (await isLoggedIn(login)) return undefined;
+	if (await transportFor(login).isLoggedIn()) return undefined;
 	if (!fallback) throw new StopError('Not logged in to Google. Select "Log in" for this account in the plugin settings.');
 	const pairs = googleCookies(fallback);
 	if (!pairs) throw new StopError('The Google cookies in the plugin settings do not look right. Paste the whole Cookie header of a gemini.google.com request (it must include __Secure-1PSID and SAPISID), or log in instead.');
@@ -39,12 +41,12 @@ export async function googleLogin(login: LoginRef, fallback: string | null): Pro
 const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class GeminiApi {
-	private constructor(private readonly page: ReadyPage, private readonly source: ErrorSource) {}
+	private constructor(private readonly page: SitePage, private readonly source: ErrorSource) {}
 
 	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
 	static async connect(login: LoginRef, fallback: string | null = null): Promise<GeminiApi> {
 		const pasted = await googleLogin(login, fallback);
-		const page = await openReadyPage(login, START, GEMINI_SIGNED_IN, OPEN_TIMEOUT_MS, pasted);
+		const page = await transportFor(login).openPage(START, 'gemini-signed-in', OPEN_TIMEOUT_MS, pasted);
 		if (!page) {
 			recordError({ provider: 'gemini', accountId: login.id }, { service: 'Gemini', method: 'OPEN', url: START, status: null, message: 'the Gemini page did not open signed in' });
 			throw new StopError(pasted
@@ -61,7 +63,7 @@ export class GeminiApi {
 	/** Google's number for the signed-in account (not secret), or '' when the page does not say. Seen 2026-11-27. */
 	async accountId(): Promise<string> {
 		try {
-			return googleAccountId(await this.page.run(`String((window.WIZ_global_data || {}).S06Grb || '')`));
+			return googleAccountId(await this.page.read('google-account-id'));
 		} catch {
 			return '';
 		}
@@ -106,18 +108,21 @@ export class GeminiApi {
 	/** The single request used by everything above, sent by the page itself. */
 	private async call(rpcId: string, args: unknown[]): Promise<unknown> {
 		if (!ALLOWED.has(rpcId)) throw new StopError('Blocked a Gemini call the plugin does not use.');
-		const code = `(async () => {
-			const w = window.WIZ_global_data || {};
-			if (typeof w.SNlM0e !== 'string') return JSON.stringify({ status: 401, text: '' });
-			const q = new URLSearchParams({ rpcids: ${JSON.stringify(rpcId)}, 'source-path': '/app', bl: w.cfb2h || '', 'f.sid': w.FdrFJe || '', hl: 'en', _reqid: String(100000 + Math.floor(Math.random() * 900000)), rt: 'c' });
-			const body = new URLSearchParams({ 'f.req': JSON.stringify([[[${JSON.stringify(rpcId)}, ${JSON.stringify(JSON.stringify(args))}, null, 'generic']]]), at: w.SNlM0e });
-			const r = await fetch('/_/BardChatUi/data/batchexecute?' + q, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'X-Same-Domain': '1' }, body });
-			return JSON.stringify({ status: r.status, text: await r.text(), headers: Object.fromEntries(r.headers) });
-		})()`;
-		let res: { status: number; text: string; headers?: Record<string, string> };
+		// The page adds its own request token (`at`) and build values (`bl`, `f.sid`).
+		const q = new URLSearchParams({ rpcids: rpcId, 'source-path': '/app', hl: 'en', _reqid: String(100000 + Math.floor(Math.random() * 900000)), rt: 'c' });
+		const body = new URLSearchParams({ 'f.req': JSON.stringify([[[rpcId, JSON.stringify(args), null, 'generic']]]) }).toString();
+		let res: PageAnswer;
 		try {
-			res = await sendWithRetry(async () => JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> });
+			res = await sendWithRetry(() => this.page.call({
+				url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?${q.toString()}`,
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'X-Same-Domain': '1' },
+				body,
+				sign: 'wiz-at',
+			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const tried = e instanceof NetworkFailure ? triedText(e.tries) : '';
 			recordError(this.source, { service: 'Gemini', method: 'POST', url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=${rpcId}`, status: null, message: `Network error while talking to Gemini${tried}.` });
 			throw new StopError(`Network error while talking to Gemini${tried}.`);

@@ -10,6 +10,7 @@ import type { IndexEntry } from './types';
 import type { AssetRetry, Capture } from './chatgpt/recovery';
 import type { Inventories } from './chatgpt/inventory';
 import type { ChatCounts } from './progress';
+import type { LoginMethod } from './link/account';
 import type { DesktopAppSettings, DesktopSettings } from './desktop/types';
 import type { ProjectCatalog } from './project-catalog';
 import type { HermesSettings } from './hermes/types';
@@ -29,6 +30,8 @@ export function cleanFolder(v: string): string | null {
 
 /** One claude.ai login: where its chats go and what has been synced. */
 export interface ClaudeWebSettings {
+	/** Login window (missing) or the Browser link (your own browser, through the extension). */
+	loginMethod?: LoginMethod;
 	orgId: string;
 	/** The organization the login window reported last, to notice a different login. Not secret. */
 	loginOrg?: string;
@@ -93,6 +96,8 @@ export interface CloudIndexEntry extends NoteState {
 
 /** One ChatGPT login: its own folders, index and cooldown. */
 export interface GptSettings {
+	/** Login window (missing) or the Browser link (your own browser, through the extension). */
+	loginMethod?: LoginMethod;
 	folder: string;
 	/** Folder for the raw .json files. Empty = next to the transcripts. */
 	rawFolder?: string;
@@ -182,6 +187,8 @@ export interface GeminiSettings {
 	index: Record<string, IndexEntry>;
 	/** The Google account behind this login (its email, not secret), to notice the same login twice. */
 	userId?: string;
+	/** Login window (missing) or the Browser link (your own browser, through the extension). */
+	loginMethod?: LoginMethod;
 }
 
 /** The same login's Google AI Studio prompts, which AI Studio keeps in Google Drive. */
@@ -261,6 +268,8 @@ export interface Settings {
 	lastRuns: Record<string, LastRun>;
 	/** The last "Sync all". */
 	lastAll?: LastAll;
+	/** The Browser link's port on 127.0.0.1, kept so a paired extension finds it again (not a secret). */
+	browserLinkPort?: number;
 	/** System file renames done in this vault (see system-names.ts). */
 	systemNames?: number;
 }

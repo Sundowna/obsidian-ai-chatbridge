@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"module": "ESNext",
+		"target": "ES2021",
+		"strict": true,
+		"noImplicitReturns": true,
+		"noUncheckedIndexedAccess": false,
+		"moduleResolution": "node",
+		"isolatedModules": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"lib": ["ES2021", "DOM"],
+		"types": ["chrome"]
+	},
+	"include": ["src/**/*.ts", "../src/link/sites.ts", "../src/link/protocol.ts", "../src/transport/types.ts"]
+}

@@ -1,12 +1,13 @@
 // The first thing you see: every account at a glance, and one button to sync it all.
 
 import { setIcon } from 'obsidian';
-import { accountsOf, loginRef, PROVIDER_LABEL, type AnyAccount } from '../accounts';
-import { isLoggedIn, type Provider } from '../login';
+import { accountsOf, PROVIDER_LABEL, type AnyAccount } from '../accounts';
+import type { Provider } from '../login';
 import { profileGone } from '../hermes/profiles';
 import { bindSyncButton, count, type PanelContext } from './fields';
 import { hermesIcon, providerIcon } from './icons';
 import { addAccountButton } from './provider-tab';
+import { accountReady } from './browser-link-section';
 import { remoteStatusLine } from './remote-section';
 import { allText, desktopRun, HERMES, lastRunLine, runKey, type LastRun } from '../last-run';
 
@@ -43,9 +44,9 @@ function accountCard(ctx: PanelContext, parent: HTMLElement, provider: Provider,
 	accountLastRun(ctx, card, provider, account);
 
 	const sync = head.createEl('button', { text: 'Sync', cls: 'ccs-card-sync' });
-	void isLoggedIn(loginRef(provider, account)).then((ok) => {
+	void accountReady(ctx.plugin, provider, account).then(({ ok, text }) => {
 		web.dot.toggleClass('is-on', ok);
-		web.text.setText(ok ? count(chats, 'chat') : 'Not logged in');
+		web.text.setText(ok ? count(chats, 'chat') : text);
 	});
 	// One run for the whole account, so Stop ends all of it.
 	bindSyncButton(ctx, sync, () => ctx.plugin.isSyncing(provider, account.id), () => void ctx.plugin.syncWholeAccount(provider, account).then(ctx.refresh));

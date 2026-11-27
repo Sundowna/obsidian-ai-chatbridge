@@ -15,6 +15,7 @@ import { renderStudioTranscript } from '../gemini/transcript';
 import { pastedSession } from '../cookies';
 import { MassMissingError } from '../missing-guard';
 import { StudioApi } from './api';
+import { BrowserLinkUnavailable } from '../link/errors';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
@@ -48,6 +49,8 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 		}, progress, result, { label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label) });
 	} catch (e) {
 		if (pausedBy(e, st, result)) await plugin.saveSettings();
+		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
+		else if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
 		else if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `AI Studio's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else result.stopped = `Something went wrong while reading AI Studio (${failureText(e)}).`;
