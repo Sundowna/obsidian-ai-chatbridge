@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.48.1 - 2026-11-27
+
+### Added
+- **Browser link in Firefox** - `npm run build:extension` now also builds `extension/dist-firefox`; load it in Firefox with **about:debugging** → **This Firefox** → **Load Temporary Add-on…**.
+- **Easier pairing** - the extension opens its page by itself right after you install it; the code field is ready, and **Enter** pairs. If a browser has not given the extension access to the chat sites yet, the page shows **Allow site access**.
+
 ## 0.48.0 - 2026-11-27
 
 ### Added

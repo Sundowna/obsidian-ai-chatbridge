@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-ai-chatbridge",
-	"version": "0.48.0",
+	"version": "0.48.1",
 	"description": "Obsidian plugin: sync claude.ai, ChatGPT, Proton Lumo, Gemini, AI Studio and Hermes Agent chats into the vault as raw JSON plus a Markdown transcript",
 	"private": true,
 	"main": "main.js",
@@ -36,7 +36,8 @@
 		"test:transport": "esbuild scripts/test-transport.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-transport.cjs && node scripts/.test-transport.cjs",
 		"test:error-log": "esbuild scripts/test-error-log.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-error-log.cjs && node scripts/.test-error-log.cjs",
 		"test:extension": "npm run build:extension && esbuild scripts/test-extension.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-extension.cjs && node scripts/.test-extension.cjs",
-		"live:browser-link": "esbuild scripts/live-browser-link.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.live-browser-link.cjs && node scripts/.live-browser-link.cjs"
+		"live:browser-link": "esbuild scripts/live-browser-link.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.live-browser-link.cjs && node scripts/.live-browser-link.cjs",
+		"test:extension-firefox": "npm run build:extension && esbuild scripts/test-extension-firefox.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-extension-firefox.cjs && node scripts/.test-extension-firefox.cjs"
 	},
 	"keywords": [
 		"obsidian",
