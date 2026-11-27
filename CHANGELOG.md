@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.44.0 - 2026-11-27
+
+### Added
+- **Claude: starred chats are marked in the note** - a `starred` property, as Lumo notes have. Where claude.ai's chat list says so, a later star or unstar is followed without fetching the chat again.
+- **Claude: optional reasoning in the note** - a new switch per account, **Show reasoning in the note**, off by default. When on, Claude's reasoning sits folded above each answer, for chats saved from then on. It is in the raw file either way.
+
+### Fixed
+- **Gemini and Lumo: an unpinned or unstarred chat no longer keeps its old mark** - when a chat changed and lost its pin or star at the same time, the note kept the old property. It is now removed.
+
 ## 0.43.0 - 2026-11-27
 
 ### Added

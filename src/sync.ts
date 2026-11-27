@@ -7,6 +7,7 @@ import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
 import { OddChats, readOrSkip } from './odd-chats';
+import { keepFlags } from './gemini/save';
 import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, targetFor } from './select';
 import { baseName, dailyNoteName, tagAccount } from './naming';
 import { renderTranscript } from './transcript';
@@ -14,7 +15,7 @@ import { chatFolders, dirOf, masterRaw, rawLink } from './raw-folders';
 import type { Chat } from './types';
 import { createNew, ensureFolder, findFile, freeFileName, freeStem } from './vaultio';
 import { appendLog } from './log';
-import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
+import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, setNoteFlag, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
 import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
 import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, safeFileName, visibleFiles } from './files';
@@ -50,6 +51,8 @@ export interface SyncResult {
 	viewNotRead: string[];
 	/** Chats whose data had an unexpected shape: skipped, tried again next run. */
 	oddChats: string[];
+	/** Notes whose starred mark was brought up to date without fetching the chat. */
+	flagChanges: number;
 	/** claude.ai does not offer the chat view (ReadConversation) for this account's plan. */
 	viewUnavailable?: boolean;
 	/** Chats whose Claude-made files were looked up by path instead (chat view not offered). */
@@ -161,7 +164,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const s = account.web;
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, plugin.settings.delaySeconds) * 1000;
-	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], oddChats: [], restored: [], edits: noEdits() };
+	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], oddChats: [], flagChanges: 0, restored: [], edits: noEdits() };
 	const odd = new OddChats();
 	if (nothingSelected(s)) return { ...result, nothingSelected: true };
 	const auth = await claudeAuth(plugin, account);
@@ -208,7 +211,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			linked.add(p);
 			extraFiles.push({ name: f.name, path: p });
 		}
-		return tagAccount(renderTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(mdFolder, json), filePaths, extraFiles }), account.label);
+		return tagAccount(renderTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(mdFolder, json), filePaths, extraFiles, showReasoning: s.showReasoning === true }), account.label);
 	};
 
 	/** Chat-view files via ReadConversation, or null if claude.ai would not say. */
@@ -319,6 +322,8 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		const ready = todoAll.filter(({ item, isUpdate }) => !s.index[item.uuid]?.archiveMove && (isUpdate || !result.archive || targetFor(item) !== 'chat' || observations?.get(item.uuid) !== null));
 		const todo = maxChats > 0 ? ready.slice(0, maxChats) : ready;
 		result.leftForLater = todoAll.length - todo.length;
+		// Starred or unstarred since: where the chat list says so, only that property changes in the note.
+		result.flagChanges = await keepFlags(plugin, kept.filter((it) => typeof it.is_starred === 'boolean'), s.index, new Set(todoAll.map((t) => t.item.uuid)), { key: 'starred', of: (it) => it.is_starred === true });
 		/** Transcript and raw folders for a chat, as the settings say today. */
 		const foldersOf = (item: ListItem) => {
 			const target = targetFor(item);
@@ -386,12 +391,14 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			await saveFiles(fetched, folder, stem);
 			const note = await writeNote(app, mdPath, withVersionInfo(transcriptFor(chat, item, jsonPath, folder, visible), versions, folder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced });
 			recordEdit(result.edits, note, mdPath);
+			// A star taken away since the last version must not stay in the note as if you had added it.
+			await setNoteFlag(app, mdPath, 'starred', chat.is_starred === true);
 
 			// Remember it right away, so a later stop doesn't lose progress.
 			const archive = before ? before.archive : archived(item) ? { root, active: filing(item).active } : undefined;
 			const observed = observations?.get(item.uuid);
 			const archiveObservation = observed !== undefined ? observed : typeof chat.is_archived === 'boolean' ? chat.is_archived : before?.archiveObservation;
-			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash, archiveObservation, ...(archive ? { archive } : {}) };
+			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash, flagged: chat.is_starred === true, archiveObservation, ...(archive ? { archive } : {}) };
 			await plugin.saveSettings();
 			result.written.push(stemOf(mdPath));
 			if (isUpdate) result.changedCount++;
@@ -587,6 +594,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 			? `chat-view files: claude.ai does not offer them for this account, Claude-made files looked up by path instead (${r.outputsRead} chats)`
 			: 'chat-view files: claude.ai does not offer them for this account, chats saved without them');
 	}
+	if (r.flagChanges) parts.push(`starred updated on ${r.flagChanges} note${r.flagChanges === 1 ? '' : 's'}`);
 	if (r.oddChats.length) parts.push(`could not read (will retry): ${r.oddChats.join(', ')}`);
 	if (r.viewNotRead.length) parts.push(`chat-view files not readable (will retry): ${r.viewNotRead.join(', ')}`);
 	if (r.filesSkipped.length) parts.push(`files not saved: ${r.filesSkipped.join(', ')}`);

@@ -154,6 +154,8 @@ export async function saveChats(
 		await writeRaw(app, json, saved.json);
 		const note = await writeNote(app, md, withVersionInfo(saved.md(rawLink(noteFolder, json)), versions, noteFolder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery ? ['unread'] : [] });
 		recordEdit(result.edits, note, md);
+		// A pin taken away since the last version must not stay in the note as if you had added it.
+		if (o.flag) await setNoteFlag(app, md, o.flag.key, o.flag.of(item));
 		index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash, ...(o.flag ? { flagged: o.flag.of(item) } : {}) };
 		await plugin.saveSettings();
 		if (isRecovery) result.restored.push(stem);

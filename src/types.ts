@@ -20,6 +20,8 @@ export interface ListItem {
 	project_uuid?: string;
 	/** "CLAUDE_AI" for every chat seen so far (2026-11-05). */
 	platform?: string;
+	/** claude.ai: starred. Only compared when the list really carries it. */
+	is_starred?: boolean | null;
 }
 
 export interface ListPage {
@@ -64,6 +66,8 @@ export interface Chat {
 	updated_at: string;
 	project_uuid?: string;
 	is_archived?: boolean;
+	/** Starred on claude.ai (in the chat's own data, seen 2026-11-27). */
+	is_starred?: boolean | null;
 	current_leaf_message_uuid?: string;
 	chat_messages: ChatMessage[];
 }

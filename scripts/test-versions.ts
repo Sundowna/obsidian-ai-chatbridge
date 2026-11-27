@@ -7,6 +7,7 @@ import { followRename } from '../src/follow';
 import { normalizeSettings } from '../src/migrate';
 import { localStamp, modelProperty } from '../src/naming';
 import { renderGptTranscript } from '../src/chatgpt/transcript';
+import { renderTranscript } from '../src/transcript';
 import { hermesRawMoves, googleRawMoves } from '../src/raw-move';
 import { allEntries, refreshEntries } from '../src/reindex';
 import type { IndexEntry, ListItem } from '../src/types';
@@ -151,6 +152,20 @@ const note = (body: string, extra = '') => `---\nuuid: abc\nupdated: 2026-11-07T
 		files.set('C/S.md', note('same').replace('unread: true', 'unread: false'));
 		const same = await writeNote(app, 'C/S.md', note('same'), { policy: 'copy', lastHash: 'something else', keep: ['unread'], now });
 		expect('same text: no copy, your "unread" stays', same.outcome === 'updated' && !same.copy && files.get('C/S.md')!.includes('unread: false'));
+	}
+
+	// --- Claude's reasoning in the note: only with the account's switch on ---------------------------
+	{
+		const chat = { uuid: 'c1', name: 'T', created_at: '2026-11-06T09:00:00Z', updated_at: '2026-11-06T10:00:00Z', chat_messages: [
+			{ uuid: 'm0', sender: 'human', text: 'Why?', content: [{ type: 'text', text: 'Why?' }], created_at: '2026-11-06T09:00:00Z' },
+			{ uuid: 'm1', sender: 'assistant', text: '', created_at: '2026-11-06T09:00:05Z', content: [
+				{ type: 'thinking', thinking: 'First line.\nSecond line.' }, { type: 'redacted_thinking', data: 'hidden-data' }, { type: 'thinking', thinking: '  ' }, { type: 'text', text: 'Because.' }] },
+		] };
+		const off = renderTranscript(chat as never, { jsonFileName: 'c.json' });
+		const on = renderTranscript(chat as never, { jsonFileName: 'c.json', showReasoning: true });
+		expect('reasoning: left out of the note by default', !off.includes('First line') && !off.includes('[!note]') && off.includes('Because.'));
+		expect('reasoning: with the switch on it is folded above the answer', on.includes('> [!note]- Reasoning\n> First line.\n> Second line.\n\nBecause.'), on);
+		expect('reasoning: hidden and empty reasoning is never shown', !on.includes('hidden-data') && on.split('[!note]').length === 2);
 	}
 
 	// --- a yes/no property flipped in place (pinned, starred) ---------------------------------------

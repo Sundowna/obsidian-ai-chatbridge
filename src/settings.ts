@@ -54,6 +54,8 @@ export interface ClaudeWebSettings {
 	recentFolderName: string;
 	/** Also download the files listed in a chat (Artifacts/ and Attachments/ next to the chat). */
 	downloadFiles: boolean;
+	/** Put Claude's reasoning into the note, folded. Missing = off; it is always in the raw file. */
+	showReasoning?: boolean;
 	/** Also read claude.ai's archived chats (a list of their own). Missing = off. */
 	includeArchived?: boolean;
 	separateArchived?: boolean;

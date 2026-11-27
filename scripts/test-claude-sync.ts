@@ -92,8 +92,9 @@ let turns = ['First question', 'First answer'];
 const FILE = '55555555-5555-4555-8555-555555555555';
 let attach = false;
 let oddShape = false;
+let star: boolean | undefined;
 const chat = () => ({
-	uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, model: 'claude-opus-5-5',
+	uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, model: 'claude-opus-5-5', ...(star === undefined ? {} : { is_starred: star }),
 	chat_messages: oddShape ? 'not a list' as never : turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z',
 		...(attach && i === 0 ? { attachments: [{ file_uuid: FILE, file_name: 'notes.txt', size_bytes: 5 }] } : {}) })),
 });
@@ -112,7 +113,7 @@ const listed: string[] = [];
 let currentMembership: 'active' | 'archived' | 'both' = 'both';
 let bodyRequests = 0;
 ClaudeApi.prototype.get = async function (path: string) {
-	const current = { uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, project };
+	const current = { uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, project, ...(star === undefined ? {} : { is_starred: star }) };
 	if (path.includes('chat_conversations_v2')) listed.push(path);
 	else bodyRequests++;
 	const json = path.includes('chat_conversations_v2')
@@ -399,6 +400,33 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 		const got = await readOrSkip(new OddChats(), 'n', () => { throw shape; });
 		const thrown = await readOrSkip(odd, 'n', () => { throw shape; }).then(() => 'no', () => 'thrown');
 		expect('odd chat: the shared reader gives nothing for a skipped chat and throws once the limit is reached', got === null && thrown === 'thrown' && (await readOrSkip(odd, 'ok', () => 5)) === 5);
+	}
+
+	// Starred on claude.ai: a property of the note, kept up to date from the chat list.
+	{
+		testHooks.requestUrl = async () => ({ status: 404, headers: { 'content-type': 'application/json' }, text: '{}', arrayBuffer: new ArrayBuffer(0) });
+		const path = account.web.index[CHAT]!.md;
+		const props = () => files.get(path)!.split('---')[1]!;
+		updated = '2026-11-21T08:00:00Z';
+		star = true;
+		const starred = await runSync(plugin, account);
+		expect('starred: a starred chat says so in its properties, before the model', !starred.stopped && props().includes('\nstarred: true\nmodel: "claude-opus-5-5"\n'), starred.stopped ?? props());
+		const bodyBefore = files.get(path)!.split('---').slice(2).join('---');
+		star = false;
+		bodyRequests = 0;
+		const unstarred = await runSync(plugin, account);
+		expect('starred: an unstar seen in the chat list takes the property out, without fetching the chat', !unstarred.stopped && unstarred.flagChanges === 1 && bodyRequests === 0 && !props().includes('starred') && files.get(path)!.split('---').slice(2).join('---') === bodyBefore, `${unstarred.stopped ?? ''} ${unstarred.flagChanges} ${bodyRequests}`);
+		star = true;
+		const again = await runSync(plugin, account);
+		expect('starred: a new star is written the same way', again.flagChanges === 1 && props().includes('\nstarred: true\n'));
+		updated = '2026-11-22T08:00:00Z';
+		star = false;
+		const changed = await runSync(plugin, account);
+		expect('starred: a chat that changed and lost its star does not keep the old property', !changed.stopped && changed.changedCount === 1 && !props().includes('starred'), props());
+		star = undefined;
+		const silent = await runSync(plugin, account);
+		expect('starred: a chat list that does not say is never compared', silent.flagChanges === 0);
+		testHooks.requestUrl = null;
 	}
 
 	// A request that gets no answer at all is tried again, up to 3 times (as ChatGPT since 0.41.3).

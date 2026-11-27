@@ -20,7 +20,7 @@ import type { ListItem } from '../types';
 import { createNew, ensureFolder, findFile, freeFileName, freeStem } from '../vaultio';
 import { KIND_FOLDER, numbered, safeFileName } from '../files';
 import { chatFolders, dirOf, masterRaw, rawLink } from '../raw-folders';
-import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
+import { addVersion, editsLog, keepVersion, noEdits, recordEdit, setNoteFlag, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 import { loginRef } from '../accounts';
 import { LumoApi } from './api';
 import { decryptChat, decryptListing, shallowMessages, type LumoEntry } from './chat';
@@ -235,6 +235,8 @@ export async function saveLumoChats(
 		await writeRaw(app, json, raw);
 		const note = await writeNote(app, md, withVersionInfo(noteOf(chat, rawLink(folder, json)), versions, folder), { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery || isBackfill ? ['unread'] : [] });
 		recordEdit(result.edits, note, md);
+		// A star taken away since the last version must not stay in the note as if you had added it.
+		if (starred) await setNoteFlag(app, md, 'starred', starred(item));
 		g.index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash, ...(filesChecked ? { outputsChecked: filesChecked } : {}), ...(starred ? { flagged: starred(item) } : {}) };
 		await plugin.saveSettings();
 		if (isBackfill) {

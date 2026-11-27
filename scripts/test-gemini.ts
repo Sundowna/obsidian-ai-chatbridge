@@ -188,6 +188,16 @@ async function saveLoop() {
 	const p3 = await pRun();
 	expect('pinned: an unpin takes the property out again', p3.flagChanges === 1 && !reads.length && files.get(pMd) === unpinned, files.get(pMd)!.slice(0, 200));
 
+	// A chat that goes on and was unpinned meanwhile must not keep the old property.
+	pins.add('c_pin');
+	await pRun();
+	const laterPin = { ...pItem, updated_at: day(8) };
+	pins.clear();
+	reads = [];
+	const pr = emptyResult();
+	await saveChats(plugin, [laterPin], pIndex, 'G/Chat', 'Raw/G', read, () => undefined, pr, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main'), flag: { key: 'pinned', of: (it) => pins.has(it.uuid) } });
+	expect('pinned: a chat that changed and was unpinned loses the property', pr.changedCount === 1 && !files.get(pMd)!.split('---')[1]!.includes('pinned'), files.get(pMd)!.split('---')[1]);
+
 	// Safety stop: many saved chats missing stops before anything is read or written.
 	settings.maxChatsPerRun = 0;
 	const many: ListItem[] = Array.from({ length: 12 }, (_, i) => ({ uuid: `m_${i}`, name: `Many ${i}`, created_at: day(i + 1), updated_at: day(i + 1) }));

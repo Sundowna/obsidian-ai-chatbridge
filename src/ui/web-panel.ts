@@ -75,6 +75,15 @@ export function claudeWebPanel(ctx: PanelContext, el: HTMLElement, account: Clau
 
 	new Setting(el).setName('Content').setHeading();
 	contentOptions(ctx, el, 'claude', account, s);
+	new Setting(el)
+		.setName('Show reasoning in the note')
+		.setDesc('Adds Claude\'s reasoning to each answer, folded. Off: the note holds only the conversation. The reasoning is in the raw file either way. Applies to chats saved from now on.')
+		.addToggle((t) =>
+			t.setValue(s.showReasoning === true).onChange(async (v) => {
+				s.showReasoning = v;
+				await save();
+			}),
+		);
 	archiveSettings(ctx, el, 'claude', account);
 	new Setting(el)
 		.setName('Claude Code cloud sessions')
