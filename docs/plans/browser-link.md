@@ -179,7 +179,8 @@ Signed-in run, owner's own Chrome 158 (through Claude in Chrome, page context, s
 
 Notes for later stages:
 - AI Studio redirected the tab to `/onboarding` on the first try (account barely used there). The call still worked; Stage 4's ready check must not insist on `/library`.
-- AI Studio second try: tab stayed on `/library`; `ListPrompts` 200 but `[]` (2 bytes). The page's own list call is also `ListPrompts`, and its only `/prompts/` links are "new chat" buttons, so the library is empty, not a wrong call. Real rows are still unproven: save one prompt in AI Studio and rerun before Stage 4.
+- AI Studio second try: tab stayed on `/library`; `ListPrompts` 200 but `[]` (2 bytes). The page's own list call is also `ListPrompts`, and its only `/prompts/` links are "new chat" buttons, so the library is empty, not a wrong call.
+- AI Studio third try, with one test chat made for it ("ChatBridge test - delete me"): `ListPrompts` 200, 1 row, name format OK, test chat listed; `ResolveDriveResource` for it 200, 1911 bytes, test text present. Test chat then moved to Drive trash; list empty again. **AI Studio proven with real data.**
 - Gemini list rows are at `payload[2]` (as `wire.ts` reads them), not `[0]`.
 - Claude in Chrome hides any result whose key mentions "token" or "session"; use neutral keys when testing this way.
 
