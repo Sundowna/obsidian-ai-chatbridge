@@ -15,7 +15,7 @@ export const COMPUTER_FILE_VERSION = 1;
 
 /** Fields of one web account that a sync writes: they stay with the computer. */
 export const WEB_LOCAL = {
-	claude: ['index', 'fileIndex', 'cloudIndex', 'cooldownUntil', 'resumeAfter429', 'projectCatalog', 'archiveCleanup'],
+	claude: ['index', 'fileIndex', 'cloudIndex', 'cooldownUntil', 'resumeAfter429', 'projectCatalog', 'archiveCleanup', 'listCatalog'],
 	chatgpt: ['index', 'fileIndex', 'codexCloudIndex', 'cooldownUntil', 'resumeAfter429', 'assetRetries', 'pendingCaptures', 'inventories', 'chatProgress', 'projectCatalog', 'archiveCleanup'],
 	lumo: ['index', 'fileIndex', 'cooldownUntil', 'resumeAfter429', 'projectCatalog'],
 	gemini: ['index', 'cooldownUntil', 'resumeAfter429'],

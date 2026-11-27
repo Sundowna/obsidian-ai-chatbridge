@@ -1,9 +1,13 @@
 # Changelog
 
-## 0.46.1 - 2026-11-27
+## 0.47.1 - 2026-11-27
 
 ### Fixed
 - **"Continue with Google" in the claude.ai and ChatGPT login windows** - Google's sign-in pages now see these windows as Firefox, as the Gemini window already did, while claude.ai and chatgpt.com keep seeing the usual browser name. If Google still refuses, use the [Browser link](README.md#browser-link-google-logins).
+## 0.47.0 - 2026-11-27
+
+### Added
+- **Claude: quick list** - a sync no longer reads your whole chat list every time. It reads the newest chats and stops at the first page with nothing new, as ChatGPT's sync already did. With hundreds of chats that saves most of the list requests of every sync. The whole list is still read once a week, after a failed run, and whenever a saved note is missing, so deleted notes come back as before. One thing changes: a star or an archive change on an old chat, or a chat deleted on claude.ai, can take up to a week to show, unless the chat itself changes.
 
 ## 0.46.0 - 2026-11-27
 

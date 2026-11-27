@@ -19,6 +19,7 @@ import type { LastAll, LastRun } from './last-run';
 import type { EditedPolicy } from './versions';
 import type { PasteMode } from './files';
 import type { NoteState } from './types';
+import type { ListCatalog } from './quick-list';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
 export function cleanFolder(v: string): string | null {
@@ -67,6 +68,8 @@ export interface ClaudeWebSettings {
 	separateArchived?: boolean;
 	/** Archive folders awaiting empty-folder cleanup on this computer. */
 	archiveCleanup?: string[];
+	/** The chat list as last read on this computer, so a sync reads only its recent part (quick-list.ts). */
+	listCatalog?: ListCatalog;
 	/** Rate-limit pause (rate-limit.ts): when claude.ai allows requests again, and the waiting retry. */
 	cooldownUntil?: number;
 	resumeAfter429?: { consecutive: number } | null;
