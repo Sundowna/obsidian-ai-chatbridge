@@ -4,13 +4,14 @@
 // its own cookies and request token; the plugin never sees or stores them. Without a login
 // there, the cookies pasted in the settings go into a separate in-memory window instead.
 
-import { StopError } from '../api';
+import { RateLimitError, StopError } from '../api';
 import { googleCookies } from '../cookies';
 import type { LoginRef, PastedCookies } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
 import { transportFor, type PageAnswer, type SitePage } from '../transport';
 import { googleAccountId } from './save';
 import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
+import { retryDeadline } from '../rate-limit';
 import { BrowserLinkUnavailable } from '../link/errors';
 import { batchPayload, checkChatId, readChatPage, readListPage } from './wire';
 import type { GeminiListItem } from './types';
@@ -35,6 +36,9 @@ export async function googleLogin(login: LoginRef, fallback: string | null): Pro
 	if (!pairs) throw new StopError('The Google cookies in the plugin settings do not look right. Paste the whole Cookie header of a gemini.google.com request (it must include __Secure-1PSID and SAPISID), or log in instead.');
 	return { pairs, domain: '.google.com' };
 }
+
+/** The answer's Retry-After header (a page's fetch gives header names in lower case), or ''. */
+const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class GeminiApi {
 	private constructor(private readonly page: SitePage, private readonly source: ErrorSource) {}
@@ -125,7 +129,7 @@ export class GeminiApi {
 		}
 		if (res.status !== 200) recordError(this.source, { service: 'Gemini', method: 'POST', url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=${rpcId}`, status: res.status, headers: res.headers, body: res.text, message: `Gemini answered ${res.status}` });
 		if (res.status === 401 || res.status === 403) throw new StopError(`Gemini answered ${res.status} (not logged in). Log in to Google again in the plugin settings.`);
-		if (res.status === 429) throw new StopError('Gemini is rate limiting this account. Try again later.');
+		if (res.status === 429) throw new RateLimitError('Gemini', retryDeadline(retryAfter(res.headers)));
 		if (res.status !== 200) throw new StopError(`Gemini answered ${res.status}, so the sync stopped.`);
 		return batchPayload(res.text, rpcId);
 	}

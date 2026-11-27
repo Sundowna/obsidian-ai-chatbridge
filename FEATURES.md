@@ -23,7 +23,7 @@ Command IDs are stable API. Never rename.
 - [ ] `sync-desktop-app-chats`, `sync-hermes-chats`
 - [ ] `sync-ai-memory` Sync AI memory (not part of Sync all)
 - [ ] `reconcile-chatgpt-chats` (full check, not only recent changes)
-- [ ] `cancel-chatgpt-retry`: only offered while a retry waits and nothing runs
+- [ ] `cancel-chatgpt-retry` "Cancel pending chat sync retry": only offered while a retry waits (for any provider) and nothing runs; cancels every waiting retry, the pause itself still applies
 - [ ] `stop-sync`: only offered while a sync runs and no stop was asked yet; the only way to stop a running merge (section 6b)
 - [ ] `refresh-index`, `move-to-app-layout`, `diagnose-chat-downloads`
 - [ ] `merge-chat-copies`: opens the preview; refused with a notice while a sync runs, while a merge waits or while a merge runs
@@ -45,8 +45,9 @@ Command IDs are stable API. Never rename.
 - [ ] Provider-wide sync with one account always runs it, so "not logged in" is shown
 - [ ] Automatic sync: off at 0, minimum 30 min; a source that stopped with an error is left out of the automatic sync until it syncs without an error again (by hand or otherwise); all other sources keep syncing
 - [ ] Sync on startup: once, 10 s after layout ready, quiet like the automatic sync
-- [ ] Automatic and resume runs skip ChatGPT accounts in cooldown; other accounts still run
+- [ ] Automatic, start-up, requested and resume runs skip accounts in cooldown (any provider); other accounts still run; a manual sync of a paused account says until when it waits
 - [ ] ChatGPT 429: cooldown per account, automatic retry, countdown in status bar, survives restart (cooldown adopted on load)
+- [ ] Claude, Gemini, AI Studio and Lumo 429: the same pause [code: rate-limit.ts, cooldown-run.ts]: that one account waits ("<service> answered 429 … Automatic retry scheduled.", a waiting run, not an error, so the source is not paused "until you sync by hand"); the wait is the server's Retry-After where it gives one, at least 30 s, doubling for each 429 in a row up to 10 min; nothing is asked of the service while it lasts ("<service> is cooling down until …"); the retry runs by itself, a run that gets through ends the pause; the state (`cooldownUntil`, `resumeAfter429`) is kept in this computer's file and survives a restart; AI Studio has its own pause, apart from Gemini's — `npm run test:claude` (429, pause rules), `npm run test:sync` (Other-provider 429 retry)
 - [ ] Max chats per run (default 3, 0 = no limit), newest first; rest counted as "left for next run"
 - [ ] Delay between requests (default 1.5 s, minimum 1 s)
 - [ ] Only new or changed chats are fetched
@@ -82,7 +83,7 @@ Command IDs are stable API. Never rename.
 
 - [ ] Manual sync: sticky notice with text, progress bar (indeterminate until counts are known) and a Stop button; Stop turns to disabled "Stopping…"
 - [ ] Status bar while syncing: label, short step, percentage; ChatGPT shows "N of M chats saved"
-- [ ] Status bar idle: "next sync HH:MM" while automatic sync is on, plus " · waiting for you: <sources>" for sources paused after an error; "syncing in 10 s" before a startup sync; "retry in MM:SS" during a ChatGPT cooldown
+- [ ] Status bar idle: "next sync HH:MM" while automatic sync is on, plus " · waiting for you: <sources>" for sources paused after an error; "syncing in 10 s" before a startup sync; "<source> retry in MM:SS" during a cooldown (ChatGPT also shows its chat count); the soonest retry is shown when several wait
 - [ ] Result notice after manual runs, and after automatic runs that saved or restored something: new, changed, unchanged, restored, left for next run, still active, Hermes profiles not found
 - [ ] Stopped, waiting (cooldown) and failed runs each have their own notice text
 - [ ] Last run stored per account surface in this computer's file (section 11; counts and reason only, never chat text; note cut at 300 chars); a run another computer did shows its name ("today 10:02 on Tower")
@@ -312,7 +313,7 @@ Every item here must hold on all three. Path logic takes the platform or a fake 
 - [ ] Requester: one notice when the status for its own request says running, one when it is done or refused (which ends the wait); a status for another request is shown in the status line but not announced
 - [ ] Writer: looks on vault `create`/`modify` of the two files, at start-up, every 60 s, when the window becomes visible and when a sync ends; a Requester waiting for an answer looks every 20 s
 - [ ] Writer: each request ID runs once, also across restarts; a request older than the limit is refused once with a `too-old` status; while a sync or project-list fetch runs the request waits for its end (never interrupts); at most one requested run per 2 minutes (a later one waits for the rest of the time)
-- [ ] Writer: a requested run is "Sync all" as the automatic sync does it (quiet, ChatGPT cooldowns respected, sources paused after an error stay paused); a notice names the asking device; the status is written before the run (running) and after it (done), with the runs recorded since its start; paused sources are named in the message ("Skipped until synced by hand on <device>: …") and make the result `problems`
+- [ ] Writer: a requested run is "Sync all" as the automatic sync does it (quiet, cooldowns respected, sources paused after an error stay paused); a notice names the asking device; the status is written before the run (running) and after it (done), with the runs recorded since its start; paused sources are named in the message ("Skipped until synced by hand on <device>: …") and make the result `problems`
 - [ ] A status left at running by a closed Obsidian is closed as `failed` on the next look, so the asking device stops waiting
 - [ ] Half-written or foreign JSON is ignored until the next look; nothing in the folder is ever deleted
 - [ ] A file whose reported size is 0 right after it was written is written once more (Android reports a newly created file as empty, and Syncthing then delivers it empty)
@@ -325,7 +326,7 @@ Every item here must hold on all three. Path logic takes the platform or a fake 
 The vault (with `.obsidian`) may be synced between computers by a tool with no ignore list (Proton Drive). No file may be written by two computers.
 
 - [ ] `data.json` holds only what you set (marked `storage: 2`) and is rewritten only when a setting changes, never after a chat
-- [ ] `computers/<computer name>.json` in the plugin folder holds that computer's history: the web indexes (`index`, `fileIndex`, `cloudIndex`, `codexCloudIndex`, AI Studio `index`), ChatGPT cooldown, retry, captures, asset retries, inventories and progress, the project lists, each desktop app's extra folders, index, ignored files and group cache, the Hermes profiles and Python path, AI memory states, the last runs and the last Sync all. Only that computer writes it, and only when it changed. A phone writes none
+- [ ] `computers/<computer name>.json` in the plugin folder holds that computer's history: the web indexes (`index`, `fileIndex`, `cloudIndex`, `codexCloudIndex`, AI Studio `index`), every web account's cooldown and waiting retry, ChatGPT's captures, asset retries, inventories and progress, the project lists, each desktop app's extra folders, index, ignored files and group cache, the Hermes profiles and Python path, AI memory states, the last runs and the last Sync all. Only that computer writes it, and only when it changed. A phone writes none
 - [ ] Before every sync and once after start-up, the other computers' files are read (a sync tool's clash copies too; half-written or foreign files ignored) and their web history combined into this one: chats, cloud sessions, downloaded files, the newer project list, web AI memory states, the newest last run per source. The same chat remembered differently: the one whose note is in the vault wins, then the newer, then ours. Combining only adds. Desktop apps, Hermes and cooldowns are never combined
 - [ ] First start after the update: the old `data.json` is kept as `data.before-computers.json`, then split once. Desktop and Hermes history whose paths exist nowhere on this computer is put aside in `computers/_unclaimed.json` (with a notice) and taken back by the computer where they exist; the file is then emptied, never deleted
 - [ ] History in `data.json` (an older build wrote it) never wins over the computer file

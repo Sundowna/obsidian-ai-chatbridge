@@ -7,7 +7,8 @@ import { sandboxKey } from '../src/chatgpt/files';
 import { checkGptChat, checkGptOlderPage } from '../src/chatgpt/schema';
 import { DEFAULT_SETTINGS, DEFAULT_GPT } from '../src/settings';
 import AIChatBridge, { formatClock } from '../src/main';
-import { StopError } from '../src/api';
+import { RateLimitError, StopError } from '../src/api';
+import { LumoApi } from '../src/lumo/api';
 import { DESKTOP_ALL } from '../src/last-run';
 import { planArchiveLinks, rebaseArchiveLinks } from '../src/archive-links';
 import { hasArchiveToRestore, restoreSavedChats, separateSavedChats } from '../src/archive-local';
@@ -210,6 +211,107 @@ async function testAutomaticResume() {
 	} finally {
 		Date.now = realNow;
 		GptApi.connect = connect;
+		Object.assign(globalThis, { window: originalWindow });
+	}
+}
+
+/** The same pause and automatic retry for another provider (Lumo here): countdown, backoff, success, and cancel for any provider. */
+async function testOtherProviderRetry() {
+	const originalWindow = globalThis.window;
+	const realNow = Date.now;
+	const connect = LumoApi.connect;
+	let now = realNow();
+	let calls = 0;
+	let outcome: 'limit' | 'success' = 'limit';
+	let serial = 0;
+	let status = '';
+	const timers = new Map<number, { due: number; callback: () => void }>();
+	const h = harness();
+	let persisted = structuredClone(h.settings);
+	persisted.lumo[0]!.web.cooldownUntil = now + 5000;
+	persisted.lumo[0]!.web.resumeAfter429 = { consecutive: 1 };
+	const commands = new Map<string, { checkCallback?: (checking: boolean) => boolean }>();
+	const flush = async (done: () => boolean) => {
+		for (let n = 0; n < 200; n++) {
+			if (done()) return;
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		}
+		throw new Error('Timed out waiting for the automatic retry of another provider');
+	};
+	const load = async () => {
+		const p = Object.assign(new AIChatBridge(), {
+			app: { ...h.plugin.app, workspace: { onLayoutReady: (fn: () => void) => fn(), on: () => ({}) },
+				loadLocalStorage: () => null, saveLocalStorage: () => {},
+				vault: { ...h.plugin.app.vault, on: () => ({}) } },
+			loadData: async () => structuredClone(persisted),
+			saveData: async (settings: typeof persisted) => { persisted = structuredClone(settings); },
+			addStatusBarItem: () => ({ setText: (text: string) => { status = text; }, toggleClass: () => {}, setAttr: () => {}, removeAttribute: () => {} }),
+			addRibbonIcon: () => ({ addClass: () => {}, toggleClass: () => {}, setAttr: () => {} }),
+			registerDomEvent: () => {},
+			addCommand: (command: { id: string; checkCallback?: (checking: boolean) => boolean }) => commands.set(command.id, command),
+			addSettingTab: () => {},
+			registerInterval: () => 0,
+			registerEvent: () => {},
+			registerMarkdownPostProcessor: () => {},
+		});
+		await p.onload();
+		return p;
+	};
+	Date.now = () => now;
+	Object.assign(globalThis, { window: {
+		setTimeout: (callback: () => void, delay: number) => {
+			if (delay === h.settings.delaySeconds * 1000) return setTimeout(callback, 0);
+			timers.set(++serial, { due: now + delay, callback });
+			return serial;
+		},
+		clearTimeout: (id: number) => { timers.delete(id); },
+		setInterval: () => 999,
+		clearInterval: () => {},
+	}, document: { visibilityState: 'visible' } });
+	LumoApi.connect = async () => {
+		calls++;
+		if (outcome === 'limit') throw new RateLimitError('Lumo', now + 1000);
+		return { userId: 'proton-user', masterKeys: [], spaces: async () => [], close: () => {} } as unknown as LumoApi;
+	};
+	const fire = (due: number) => {
+		const [entry] = timers.entries();
+		assert(entry);
+		assert(entry[1].due <= due);
+		now = due;
+		timers.delete(entry[0]);
+		entry[1].callback();
+	};
+	const lumo = () => persisted.lumo[0]!.web;
+	try {
+		const p = await load();
+		assert.equal(status, 'Lumo retry in 00:05', 'a paused Lumo account counts down in the status bar after a restart');
+		assert.equal(calls, 0, 'nothing is asked of Lumo while it is paused');
+		const due = lumo().cooldownUntil!;
+		fire(now + 1000);
+		assert.equal(status, 'Lumo retry in 00:04');
+		fire(due);
+		await flush(() => timers.size === 1 && lumo().resumeAfter429?.consecutive === 2);
+		assert.equal(calls, 1, 'the retry runs by itself when the pause ends');
+		assert.equal(lumo().cooldownUntil, due + 60_000, 'a second 429 in a row waits longer');
+		assert.equal(status, 'Lumo retry in 01:00');
+		outcome = 'success';
+		fire(lumo().cooldownUntil!);
+		await flush(() => calls === 2 && !lumo().resumeAfter429 && lumo().cooldownUntil === undefined && status === '');
+		assert.equal(timers.size, 0, 'a run that gets through ends the pause');
+
+		// "Cancel pending chat sync retry" cancels whichever provider is waiting.
+		p.settings.claude[0]!.web.cooldownUntil = now + 9000;
+		p.settings.claude[0]!.web.resumeAfter429 = { consecutive: 1 };
+		assert(commands.get('cancel-chatgpt-retry')?.checkCallback?.(true), 'offered while a Claude retry waits');
+		assert(commands.get('cancel-chatgpt-retry')?.checkCallback?.(false));
+		await flush(() => p.settings.claude[0]!.web.resumeAfter429 === null);
+		assert(p.settings.claude[0]!.web.cooldownUntil! > now, 'the pause itself still applies');
+		assert.equal(timers.size, 0);
+		p.onunload();
+		console.log('Other-provider 429 retry passed: Lumo counts down, retries by itself, backs off, clears on success; cancel works for any provider.');
+	} finally {
+		Date.now = realNow;
+		LumoApi.connect = connect;
 		Object.assign(globalThis, { window: originalWindow });
 	}
 }
@@ -1478,6 +1580,7 @@ async function main() {
 	assert.throws(() => checkGptChat({ ...top, page_info: undefined }, id));
 	assert.throws(() => checkGptOlderPage({ messages: [], page_info: {} }));
 	await testAutomaticResume();
+	await testOtherProviderRetry();
 	await testArchiveSettingTiming();
 	Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout(fn, 0) } });
 	await testVoiceReimport();

@@ -23,17 +23,7 @@ export function retryAsset(previous: AssetRetry | undefined, reason: string, now
 	return { attempts, nextAttempt: now + delay, reason };
 }
 
-export function retryDeadline(value: string, now = Date.now()): number {
-	const trimmed = value.trim();
-	const time = /^\d+$/.test(trimmed) ? now + Number(trimmed) * 1000 : Date.parse(trimmed);
-	return Number.isFinite(time) && time <= 8.64e15 ? Math.max(now + 1000, time) : now + 10 * 60_000;
-}
-
-/** Respect the server deadline and slow down further if consecutive attempts are throttled. */
-export function automaticRetryDeadline(serverUntil: number, consecutive: number, now = Date.now()): number {
-	const delay = Math.min(10 * 60_000, 30_000 * 2 ** Math.min(Math.max(0, consecutive - 1), 5));
-	return Math.max(serverUntil, now + delay);
-}
+export { automaticRetryDeadline, retryDeadline } from '../rate-limit';
 
 export class GptRateLimitError extends StopError {
 	constructor(readonly until: number) {
