@@ -16,10 +16,7 @@ import { appendLog } from './log';
 import { addVersion, editsLog, keepVersion, noEdits, noteHash, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from './versions';
 import { cleanFolder, MIN_DELAY_SECONDS } from './settings';
 import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-check';
-import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, pastedFiles, safeFileName, visibleFiles } from './files';
-
-/** The chat's own files: downloadable ones, and long pasted texts kept in its JSON (issue #64). */
-const ownFiles = (chat: Chat): FileTask[] => [...chatFiles(chat), ...pastedFiles(chat)];
+import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, hasPastedText, pastedFiles, safeFileName, visibleFiles, type PasteMode } from './files';
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
 import type { ProgressFn } from './progress';
@@ -29,6 +26,9 @@ import { emptyCloudResult, syncClaudeCloud, type CloudSyncResult } from './cloud
 import { archiveRoot } from './archive-folders';
 import { ArchiveObservations } from './archive-state';
 import { archiveLog, emptyArchiveReport, newArchiveFolders, reconcileArchived, rememberArchiveObservations, type ArchiveReport } from './archive-move';
+
+/** The chat's own files: downloadable ones, and long pasted texts kept in its JSON (issue #64). */
+const ownFiles = (chat: Chat, mode?: PasteMode): FileTask[] => [...chatFiles(chat), ...pastedFiles(chat, mode)];
 
 const MAX_PAGES = 200; // 6000 chats; a guard against an endless paging loop
 
@@ -56,6 +56,8 @@ export interface SyncResult {
 	outputsRead?: number;
 	/** Chats whose deleted .json/.md were written again. */
 	restored: string[];
+	/** Notes drawn before pasted text was shown, redrawn from their saved .json (issue #64). */
+	redrawn: string[];
 	/** Notes you had edited whose chat continued. */
 	edits: EditedReport;
 	stopped?: string;
@@ -166,7 +168,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const s = account.web;
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, plugin.settings.delaySeconds) * 1000;
-	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], restored: [], edits: noEdits() };
+	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], restored: [], redrawn: [], edits: noEdits() };
 	if (nothingSelected(s)) return { ...result, nothingSelected: true };
 	const auth = await claudeAuth(plugin, account);
 	const getKey = auth.getKey;
@@ -188,6 +190,15 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		return Object.values(s.fileIndex).some((p) => !p.startsWith(SKIPPED) && dirs.some((d) => p.startsWith(d)) && !exists(p));
 	};
 
+	/** Files already saved for this chat (its Artifacts/Attachments folders), for a redraw without the chat view. */
+	const savedFilesOf = (folder: string, stem: string): FileTask[] => {
+		const dirs = Object.values(KIND_FOLDER).map((k) => `${folder}/${k}/${stem}/`);
+		return Object.entries(s.fileIndex)
+			// Pasted text is drawn from the chat itself, never listed as a chat-view file.
+			.filter(([id, p]) => !id.startsWith('pasted:') && !p.startsWith(SKIPPED) && dirs.some((d) => p.startsWith(d)) && exists(p))
+			.map(([id, p]) => ({ fileUuid: id, name: p.slice(p.lastIndexOf('/') + 1), kind: 'artifact' as const, isImage: false }));
+	};
+
 	const savedPath = (id: string): string | undefined => {
 		const p = s.fileIndex[id];
 		return p && !p.startsWith(SKIPPED) && exists(p) ? p : undefined;
@@ -197,7 +208,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const transcriptFor = (chat: Chat, item: ListItem, json: string, mdFolder: string, visible: FileTask[]): string => {
 		const filePaths = new Map<string, string>();
 		const inline = new Set<string>();
-		for (const f of ownFiles(chat)) {
+		for (const f of ownFiles(chat, s.pastedText)) {
 			inline.add(f.fileUuid);
 			const p = savedPath(f.fileUuid);
 			if (p) filePaths.set(f.fileUuid, p);
@@ -212,7 +223,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			linked.add(p);
 			extraFiles.push({ name: f.name, path: p });
 		}
-		return tagAccount(renderTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(mdFolder, json), filePaths, extraFiles }), account.label);
+		return tagAccount(renderTranscript(chat, { projectName: item.project?.name, jsonFileName: rawLink(mdFolder, json), filePaths, extraFiles, pasteMode: s.pastedText }), account.label);
 	};
 
 	/** Chat-view files via ReadConversation, or null if claude.ai would not say. */
@@ -373,7 +384,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			}
 
 			// Fetch all new files BEFORE writing anything, so a stop leaves no half-written chat.
-			const allFiles = mergeFiles(ownFiles(chat), visible);
+			const allFiles = mergeFiles(ownFiles(chat, s.pastedText), visible);
 			const fetched = s.downloadFiles ? await fetchFiles(api, allFiles.filter(isMissing), delayMs, result, s.fileIndex) : [];
 
 			const stem = before ? stemOf(before.json) : freeStem(app, folder, baseName(chat.created_at, chat.name || item.name), item.uuid, rawFolder);
@@ -390,7 +401,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			const archive = before ? before.archive : archived(item) ? { root, active: filing(item).active } : undefined;
 			const observed = observations?.get(item.uuid);
 			const archiveObservation = observed !== undefined ? observed : typeof chat.is_archived === 'boolean' ? chat.is_archived : before?.archiveObservation;
-			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash, archiveObservation, ...(archive ? { archive } : {}) };
+			s.index[item.uuid] = { updated_at: item.updated_at, json: jsonPath, md: mdPath, synced: new Date().toISOString(), outputsChecked, versions, noteHash: note.hash, archiveObservation, pastes: 1, ...(archive ? { archive } : {}) };
 			await plugin.saveSettings();
 			result.written.push(stemOf(mdPath));
 			if (isUpdate) result.changedCount++;
@@ -454,20 +465,22 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 					outputsChecked = item.updated_at;
 				}
 			}
-			const fetched = s.downloadFiles ? await fetchFiles(api, mergeFiles(ownFiles(chat), visible).filter(isMissing), delayMs, result, s.fileIndex) : [];
+			const fetched = s.downloadFiles ? await fetchFiles(api, mergeFiles(ownFiles(chat, s.pastedText), visible).filter(isMissing), delayMs, result, s.fileIndex) : [];
 
 			const jsonPath = jsonOk ? entry.json : `${rawFolder}/${stem}.json`;
 			const mdPath = jsonOk || mdOk ? entry.md : `${folder}/${stem}.md`;
 			if (rawBytes && !exists(jsonPath)) await createNew(app, jsonPath, rawBytes);
 			await saveFiles(fetched, folder, stem);
 			let restoredHash = entry.noteHash;
+			let drawn = entry.pastes;
 			if (!exists(mdPath)) {
 				const md = withVersionInfo(transcriptFor(chat, item, jsonPath, folder, visible), entry.versions, folder);
 				await createNew(app, mdPath, md);
 				restoredHash = noteHash(md);
+				drawn = 1;
 			}
 
-			s.index[item.uuid] = { ...entry, json: jsonPath, md: mdPath, outputsChecked, noteHash: restoredHash };
+			s.index[item.uuid] = { ...entry, json: jsonPath, md: mdPath, outputsChecked, noteHash: restoredHash, ...(drawn ? { pastes: drawn } : {}) };
 			await plugin.saveSettings();
 			result.restored.push(stem);
 			done.add(item.uuid);
@@ -505,13 +518,13 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 						viewRead = true;
 					}
 				}
-				const tasks = mergeFiles(ownFiles(chat), visible).filter(isMissing);
+				const tasks = mergeFiles(ownFiles(chat, s.pastedText), visible).filter(isMissing);
 				if (tasks.length) {
 					const fetched = await fetchFiles(api, tasks, delayMs, result, s.fileIndex);
 					await saveFiles(fetched, folder, stem);
 					result.backfilledChats++;
 				}
-				const files = ownFiles(chat).map((f) => f.fileUuid);
+				const files = ownFiles(chat, s.pastedText).map((f) => f.fileUuid);
 				const quick = key ? { files, key } : undefined;
 				if (viewRead) entry.outputsChecked = item.updated_at;
 				const keyChanged = JSON.stringify(entry.quick) !== JSON.stringify(quick);
@@ -527,6 +540,39 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			}
 			if (quickUnsaved) await plugin.saveSettings();
 		}
+
+		// 7b. Notes drawn before pasted text was shown (issue #64): each saved .json is read once
+		//     (no request to claude.ai); a chat with pasted text gets its note redrawn. Your edits
+		//     follow "When an edited note gets an update". Then the chat is marked and never read again for this.
+		let unmarked = 0;
+		for (const item of kept) {
+			const entry = s.index[item.uuid];
+			if (!entry || entry.pastes || entry.archiveMove || done.has(item.uuid) || !exists(entry.json) || !exists(entry.md)) continue;
+			let chat: Chat;
+			try {
+				chat = checkChat(JSON.parse(await app.vault.adapter.read(entry.json)), item.uuid);
+			} catch {
+				continue; // unreadable saved JSON: skip, never touch it
+			}
+			entry.pastes = 1;
+			if (!hasPastedText(chat)) {
+				if (++unmarked >= QUICK_SAVE_EVERY) {
+					unmarked = 0;
+					await plugin.saveSettings();
+				}
+				continue;
+			}
+			progress(`adding pasted text: ${chat.name || item.name}`);
+			const folder = dirOf(entry.md);
+			const md = withVersionInfo(transcriptFor(chat, item, entry.json, folder, savedFilesOf(folder, stemOf(entry.json))), entry.versions, folder);
+			const note = await writeNote(app, entry.md, md, { policy: plugin.settings.editedNotes, lastHash: entry.noteHash, lastSynced: entry.synced, keep: ['unread'] });
+			recordEdit(result.edits, note, entry.md);
+			entry.noteHash = note.hash;
+			if (note.outcome === 'updated') result.redrawn.push(stemOf(entry.md));
+			unmarked = 0;
+			await plugin.saveSettings(); // right away: the new fingerprint must not be lost
+		}
+		if (unmarked) await plugin.saveSettings();
 
 		// 8. Claude Code sessions run in the cloud (claude.ai/code), into the Code Cloud folder.
 		if (s.cloudSessions) {
@@ -573,6 +619,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 	if (r.filteredOut) parts.push(`${r.filteredOut} skipped (other projects)`);
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion: ${r.restored.map((w) => `[[${w}]]`).join(', ')}`);
+	if (r.redrawn.length) parts.push(`${r.redrawn.length} older notes redrawn with their pasted text: ${r.redrawn.map((w) => `[[${w}]]`).join(', ')}`);
 	parts.push(...editsLog(r.edits));
 	if (r.filesSaved) parts.push(`${r.filesSaved} files saved${r.backfilledChats ? ` (incl. files for ${r.backfilledChats} older chats)` : ''}`);
 	if (r.filesDeduped) parts.push(`${r.filesDeduped} files already there under another ID (not copied)`);

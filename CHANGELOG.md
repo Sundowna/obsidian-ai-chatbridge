@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.41.7 - 2026-11-27
+
+### Added
+- **Claude: setting "Long pasted text"** - choose how pastes longer than 5 lines are saved: **File, with a 5-line preview** (the default) or **All of it in the note**. Changing it updates your saved notes on the next sync (issue #64)
+
+### Changed
+- **Claude: pasted text in the note is shorter** - only pastes of up to 5 lines go into the note in full (was about two pages). A longer paste is saved as a file, and the note shows its first 5 lines with a link to it
+
+### Fixed
+- **Claude: chats synced before 0.41.6 get their pasted text too** - on the next sync, each saved chat is checked once from its saved file (nothing is asked of claude.ai). Notes with pasted text are redrawn; your edits are handled as set under "When an edited note gets an update"
+
 ## 0.41.6 - 2026-11-27
 
 ### Fixed

@@ -110,4 +110,6 @@ export interface IndexEntry extends NoteState {
 	archiveMove?: ArchiveMove;
 	/** A move changed the links. Remember the new rendering without replacing the note. */
 	archiveViewMoved?: boolean;
+	/** Claude: the note was drawn by a plugin that shows pasted text (issue #64); older notes are redrawn once. */
+	pastes?: 1;
 }

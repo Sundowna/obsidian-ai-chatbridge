@@ -4,6 +4,7 @@ import { Notice, setIcon, Setting, type App, type TextComponent } from 'obsidian
 import type AIChatBridge from '../main';
 import type { Provider } from '../login';
 import type { AnyAccount } from '../accounts';
+import type { ClaudeAccount } from '../settings';
 import { BROWSE_MESSAGES, browseForVaultFolder } from '../folder-dialog';
 import { FolderSuggest } from '../folder-suggest';
 import type { ProjectCatalog } from '../project-catalog';
@@ -377,6 +378,25 @@ export function contentOptions(ctx: PanelContext, el: HTMLElement, provider: Pro
 				await save();
 			}),
 		);
+	if (provider === 'claude') {
+		const web = (account as ClaudeAccount).web;
+		new Setting(el)
+			.setName('Long pasted text')
+			.setDesc('Text you pasted into claude.ai ("Pasted" cards) and text files you added. Up to 5 lines always go into the note. Longer ones: a file in Attachments/, linked with its first 5 lines (all of it in the note while Download files is off), or all of it in the note. Notes already saved change on the next sync.')
+			.addDropdown((dd) =>
+				dd
+					.addOption('file', 'File, with a 5-line preview')
+					.addOption('note', 'All of it in the note')
+					.setValue(web.pastedText ?? 'file')
+					.onChange(async (v) => {
+						if (v === 'note') web.pastedText = 'note';
+						else delete web.pastedText;
+						// Redrawn once on the next sync, from the saved .json (sync.ts, step 7b).
+						for (const entry of Object.values(web.index)) delete entry.pastes;
+						await save();
+					}),
+			);
+	}
 	projectFilterOptions(ctx, el, provider, account, o);
 }
 
