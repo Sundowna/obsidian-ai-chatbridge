@@ -297,7 +297,7 @@ Merge with main: `accountId()` (parity) now reads a named page value (`google-ac
 
 | Part | Result |
 |---|---|
-| Google mode in every partition | Done in `src/login.ts`: a header rule for Google's sign-in hosts in the claude.ai and ChatGPT storages (Firefox name, no client hints) plus the page's own browser name switched on main-frame navigation to Google and back. Gemini's window unchanged. Tested against a stand-in Electron (8 checks, proven to bite); a real "Continue with Google" in the login window still needs the owner |
+| Google mode in every partition | Done in `src/login.ts`: a header rule for Google's sign-in hosts in the claude.ai and ChatGPT storages (Firefox name, no client hints) plus the page's own browser name switched on main-frame navigation to Google and back. Gemini's window unchanged. Tested against a stand-in Electron (8 checks, proven to bite). **Real "Continue with Google" in the claude.ai login window, tried by the owner 27 Nov: still refused by Google.** The login window is no fallback for Google-made accounts; the Browser link is the way |
 | Popups as real child windows with a live `window.opener` | **Not possible from a plugin**: Obsidian's main process decides through `setWindowOpenHandler`, which must answer at once, and a plugin's handler only runs later through `electron.remote` (seen in 0.4x, see the comment in `openLogin`). Today's behaviour stays: the popup's address opens in the same window. Accounts that need a popup sign-in use the Browser link instead |
 
 ### Stage 7 status (27 Nov 2026)
@@ -315,6 +315,8 @@ Known limitations (for the handoff):
 - The extension is not in a store: built from the repository and loaded unpacked (Firefox: temporary, removed when Firefox closes).
 - Edge and Brave use the Chrome build but were not tried by hand.
 - Login-window popups with `window.opener` are not possible from a plugin (Stage 6).
+- "Continue with Google" in a login window is still refused by Google despite the Firefox name (owner's test, 27 Nov).
+- Owner's acceptance check, 27 Nov: all four parts passed (pair, sync through the browser, closed-browser skip, unpair).
 - A closed browser shows one notice for Gemini and one for AI Studio.
 - The status bar has no lasting link state, only notices.
 
