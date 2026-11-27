@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.41.6 - 2026-11-27
+
+### Fixed
+- **Claude: pasted text is no longer missing** - when you paste a long text into claude.ai it shows a "Pasted" card, and these cards were left out of synced chats. Short pastes (up to about two pages) now appear in the note as a quote. Longer ones are saved as "Pasted text.md" in the chat's Attachments folder and linked from the note, or folded into the note when Download files is off. Text files you added to a chat are handled the same way. Chats synced before get their pasted text the next time they change (issue #64)
+
 ## 0.41.5 - 2026-11-27
 
 ### Fixed
