@@ -182,6 +182,27 @@ async function fetchFiles(
 	return out;
 }
 
+/**
+ * The other Claude account that saved chats of this account's list first, with how many: then
+ * this login is that account's. The account that had the chats first keeps syncing; only the
+ * later one stops (so copies saved by mistake never block the real account). Null when none.
+ */
+export function sameClaudeLogin(accounts: readonly ClaudeAccount[], account: ClaudeAccount, items: readonly ListItem[]): { label: string; shared: number } | null {
+	const mine = account.web.index;
+	const when = (synced: string | undefined) => Date.parse(synced ?? '') || 0;
+	for (const other of accounts) {
+		if (other === account) continue;
+		const shared = items.filter((it) => {
+			const theirs = other.web.index[it.uuid];
+			if (!theirs) return false;
+			const own = mine[it.uuid];
+			return !own || when(theirs.synced) < when(own.synced);
+		}).length;
+		if (shared) return { label: other.label, shared };
+	}
+	return null;
+}
+
 /** `progress` gets short status texts (and how far along) while the sync runs. */
 export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, progress: ProgressFn = () => undefined): Promise<SyncResult> {
 	const s = account.web;
@@ -330,6 +351,12 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 		await listAllChats(api, delayMs, progress, s.includeArchived === true, undefined, !!result.archive, (page, listArchived) => read.page(page, listArchived));
 		const list = read.done();
 		const items = list.rows.map((row) => row.item);
+		// A chat belongs to one person: chats another account already saved mean this is that
+		// account's login (e.g. the browser of the Browser link is logged in to another claude.ai
+		// account). Stop before anything is written. (Two people in one Team share an organization
+		// but never a chat, so this tells them apart where the organization cannot.)
+		const twin = sameClaudeLogin(plugin.settings.claude, account, items);
+		if (twin) throw new StopError(`These are the chats of "${twin.label}" (${twin.shared} already saved there): this login is the same claude.ai account. Nothing was saved. Log this account in to the claude.ai account it is meant for${auth.source === 'browser link' ? ' (with the Browser link: in your browser)' : ''}, or remove it.`);
 		// A remembered row counts as seen where it was last seen (null = in both lists).
 		for (const row of list.rows) for (const where of row.archived === null ? [false, true] : [row.archived]) observations?.add(row.item.uuid, where);
 		s.listCatalog = list.catalog;

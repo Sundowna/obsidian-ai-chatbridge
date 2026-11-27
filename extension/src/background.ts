@@ -4,8 +4,8 @@
 // a signed call from a background tab it opened itself. It never parses, stores or logs what
 // the sites answer, and talks to nothing but those sites and 127.0.0.1.
 
-import { fetchFrames, fromBase64, type LinkRequest } from '../../src/link/protocol';
-import { isLinkImage, isLinkOpenPage, isLinkPage, isLinkTarget, LINK_IMAGE_PAGE } from '../../src/link/sites';
+import { fetchFrames, fromBase64, MAX_BODY_BYTES, type LinkRequest } from '../../src/link/protocol';
+import { isLinkImage, isLinkOpenPage, isLinkPage, isLinkTarget } from '../../src/link/sites';
 import { pageCall, pageFetch, pageRead, readyCheck } from './page';
 
 // Timers go through self: this is a service worker, which has no window.
@@ -118,14 +118,28 @@ async function fetchTab(origin: string): Promise<number> {
 async function handle(msg: LinkRequest & { id: number }): Promise<unknown[]> {
 	switch (msg.op) {
 		case 'fetch': {
-			// A picture Gemini made: fetched from a Gemini tab with your login, as Gemini's own page does. GET only.
+			// A picture Gemini made. Seen 2026-11-27: a fetch from a Gemini page and the extension's
+			// own fetch both fail ("Failed to fetch"), while opening the address in a tab shows the
+			// picture with your Google login. So it is opened in a background tab of its own and read
+			// there (same site, so the browser allows it), then the tab is closed. GET only; only a
+			// picture comes back.
 			if (isLinkImage(msg.url)) {
 				if (msg.method !== 'GET' || msg.body64 !== undefined) throw new LinkFail('not-allowed', 'method not allowed');
-				const tabId = await fetchTab(LINK_IMAGE_PAGE);
-				const r = await inPage(tabId, pageFetch, [{ url: msg.url, method: 'GET', headers: {}, redirect: 'follow' as const }]);
-				// Only a picture comes back; anything else (a sign-in page) goes back as an empty answer.
-				const type = Object.entries(r.headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '';
-				return fetchFrames(msg.id, r.status, r.headers, type.toLowerCase().startsWith('image/') ? fromBase64(r.body64) : new Uint8Array(0));
+				const tabId = await openTab(msg.url, 'loaded', 45_000);
+				try {
+					const here = (await chrome.tabs.get(tabId)).url ?? '';
+					if (!isLinkImage(here)) throw new LinkFail('not-logged-in', 'the picture opened somewhere else');
+					const r = await inPage(tabId, pageFetch, [{ url: here, method: 'GET', headers: {}, redirect: 'follow' as const }]);
+					const type = (Object.entries(r.headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '').toLowerCase();
+					const bytes = type.startsWith('image/') ? fromBase64(r.body64) : new Uint8Array(0);
+					if (bytes.byteLength > MAX_BODY_BYTES) throw new LinkFail('blocked', 'picture too large');
+					return fetchFrames(msg.id, r.status, r.headers, bytes);
+				} catch (e) {
+					if (e instanceof LinkFail) throw e;
+					throw new LinkFail('failed', `picture tab (extension ${chrome.runtime.getManifest().version}): ${e instanceof Error ? e.message : 'failed'}`);
+				} finally {
+					await chrome.tabs.remove(tabId).catch(() => undefined);
+				}
 			}
 			if (!isLinkTarget(msg.url) || !isLinkPage(msg.url)) throw new LinkFail('not-allowed', 'site not allowed');
 			if (msg.method !== 'GET' && msg.method !== 'POST') throw new LinkFail('not-allowed', 'method not allowed');

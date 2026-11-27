@@ -375,6 +375,7 @@ function toError(f: LinkFailure): Error {
 		case 'no-tab':
 		case 'timeout': return new BrowserLinkUnavailable('tab-failed');
 		case 'not-allowed': return new BrowserLinkError('The browser refused this request: not on its list of allowed sites.');
-		default: return new BrowserLinkError(`The browser could not do this request (${f.error?.kind === 'blocked' ? 'blocked' : 'failed'}).`);
+		// The browser's own short reason (e.g. "Failed to fetch"); it never carries an address or a login.
+		default: return new BrowserLinkError(`The browser could not do this request (${f.error?.kind === 'blocked' ? 'blocked' : 'failed'}${typeof f.error?.message === 'string' && f.error.message ? `: ${f.error.message.replace(/https?:\/\/\S+/g, '(address)').slice(0, 120)}` : ''}).`);
 	}
 }
