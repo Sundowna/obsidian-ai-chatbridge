@@ -5,11 +5,12 @@ import { Platform, TFile, TFolder } from 'obsidian';
 import { emptyResult, geminiFromRaw, saveChats, type Saved } from '../src/gemini/save';
 import { followRename } from '../src/follow';
 import { normalizeSettings } from '../src/migrate';
-import { localStamp } from '../src/naming';
+import { localStamp, modelProperty } from '../src/naming';
+import { renderGptTranscript } from '../src/chatgpt/transcript';
 import { hermesRawMoves, googleRawMoves } from '../src/raw-move';
 import { allEntries, refreshEntries } from '../src/reindex';
 import type { IndexEntry, ListItem } from '../src/types';
-import { addVersion, bodyOf, carryProperties, continues, keepNoteAsVersion, keepVersion, noteHash, splitNote, versionPath, wasEdited, withVersionInfo, writeNote } from '../src/versions';
+import { addVersion, bodyOf, carryProperties, continues, withFlag, keepNoteAsVersion, keepVersion, noteHash, splitNote, versionPath, wasEdited, withVersionInfo, writeNote } from '../src/versions';
 import { findFile, freeFileName } from '../src/vaultio';
 import { readWrite } from './fake-vault';
 
@@ -150,6 +151,28 @@ const note = (body: string, extra = '') => `---\nuuid: abc\nupdated: 2026-11-07T
 		files.set('C/S.md', note('same').replace('unread: true', 'unread: false'));
 		const same = await writeNote(app, 'C/S.md', note('same'), { policy: 'copy', lastHash: 'something else', keep: ['unread'], now });
 		expect('same text: no copy, your "unread" stays', same.outcome === 'updated' && !same.copy && files.get('C/S.md')!.includes('unread: false'));
+	}
+
+	// --- a yes/no property flipped in place (pinned, starred) ---------------------------------------
+	{
+		const note = '---\nuuid: x\ntags:\n  - mine\nmodel: "m"\nraw: "[[x.json]]"\nunread: false\n---\nbody --- with dashes\n';
+		const on = withFlag(note, 'pinned', true);
+		expect('flag: set before model and raw, everything else untouched', on === '---\nuuid: x\ntags:\n  - mine\npinned: true\nmodel: "m"\nraw: "[[x.json]]"\nunread: false\n---\nbody --- with dashes\n', on);
+		expect('flag: setting it twice changes nothing; removing it gives the note back', withFlag(on, 'pinned', true) === on && withFlag(on, 'pinned', false) === note && withFlag(note, 'pinned', false) === note);
+		expect('flag: a note without properties is left alone', withFlag('just text', 'pinned', true) === 'just text');
+	}
+
+	// --- the model property of a chat note ---------------------------------------------------------
+	{
+		expect('model: none known gives no line', modelProperty([undefined, '', '  ', 5]).length === 0);
+		expect('model: one model is a plain value', modelProperty(['gpt-6', 'gpt-6']).join('|') === 'model: "gpt-6"');
+		expect('model: several are a list, each once, in the order used', modelProperty(['a', 'b', 'a']).join('|') === 'model:|  - "a"|  - "b"');
+		const msg = (role: string, model?: string) => ({ id: role + String(model), author: { role }, create_time: 1795000000, content: { content_type: 'text', parts: ['Hi'] }, metadata: model ? { model_slug: model } : {} });
+		const gpt = (messages: unknown[], extra: object = {}) => renderGptTranscript({ conversation_id: 'c1', title: 'T', create_time: 1795000000, update_time: 1795000000, gizmo_id: null, messages, ...extra } as never, { jsonFileName: 'c.json' }).split('---')[1]!;
+		expect('model: a ChatGPT note names the models that answered', gpt([msg('user'), msg('assistant', 'gpt-6-thinking'), msg('user'), msg('assistant', 'gpt-6')]).includes('\nmodel:\n  - "gpt-6-thinking"\n  - "gpt-6"\nraw:'));
+		expect('model: without one on the answers the chat default is used; without that, nothing', gpt([msg('user'), msg('assistant')], { default_model_slug: 'gpt-6' }).includes('\nmodel: "gpt-6"\n') && !gpt([msg('user'), msg('assistant')]).includes('model:'));
+		const carried = carryProperties('---\nuuid: x\nmodel: "old"\ntags:\n  - mine\nunread: false\n---\nbody\n', '---\nuuid: x\nmodel:\n  - "a"\n  - "b"\nunread: true\n---\nbody\n');
+		expect('model: a rewrite takes the new models and keeps your own properties', carried.includes('model:\n  - "a"\n  - "b"') && !carried.includes('"old"') && carried.includes('tags:\n  - mine'), carried);
 	}
 
 	// --- the shared save of Gemini and AI Studio: new, continued, recovered --------------------------

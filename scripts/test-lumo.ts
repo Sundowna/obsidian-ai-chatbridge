@@ -93,7 +93,7 @@ async function saveLoop() {
 			],
 		};
 	};
-	const empty = (): LumoSyncResult => ({ listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, filesSkipped: [], backfilledChats: 0, failed: [], edits: { copies: [], kept: [] } });
+	const empty = (): LumoSyncResult => ({ listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, filesSkipped: [], backfilledChats: 0, flagChanges: 0, failed: [], edits: { copies: [], kept: [] } });
 	const run = async (list = items, acc = account) => {
 		reads = [];
 		const r = empty();
@@ -311,6 +311,14 @@ async function fileTests(enc: CryptoKey, entry: LumoEntry) {
 	expect('note: saved picture shown, saved artifact linked by its title', md.includes('![[L/Attachments/c/angry cat.png]]') && md.includes('📎 [[L/Artifacts/c/sample-csv.csv|Sample data]]'), md);
 	expect('note: files not saved are still counted as such', md.includes('*(2 attachments, not saved)*'));
 	expect('note: files no message names are listed at the end', md.trimEnd().endsWith('## Files\n\n![[L/Artifacts/c/drawing.png]]'));
+	const oneModel: LumoChat = { ...chat, messages: chat.messages.map((m) => (m.role === 'assistant' ? { ...m, private: { ...m.private, modelID: 'lumo-large' } } : m)) };
+	expect('note: the model that answered is a property', renderLumoTranscript(oneModel, 'c.json').split('---')[1]!.includes('\nmodel: "lumo-large"\n') && !renderLumoTranscript(chat, 'c.json').split('---')[1]!.includes('model:'));
+	const twoModels: LumoChat = { ...oneModel, messages: [...oneModel.messages,
+		{ id: 'm3', parentId: 'm2', role: 'user', createdAt: '2026-03-01T10:01:00.000Z', private: { content: 'More' } },
+		{ id: 'm4', parentId: 'm3', role: 'assistant', createdAt: '2026-03-01T10:01:05.000Z', private: { content: 'Sure', modelID: 'lumo-fast' } },
+		{ id: 'm5', parentId: 'm4', role: 'user', createdAt: '2026-03-01T10:02:00.000Z', private: { content: 'Again' } },
+		{ id: 'm6', parentId: 'm5', role: 'assistant', createdAt: '2026-03-01T10:02:05.000Z', private: { content: 'Yes', modelID: 'lumo-large' } }] };
+	expect('note: several models are listed once each, in the order used', renderLumoTranscript(twoModels, 'c.json').includes('\nmodel:\n  - "lumo-large"\n  - "lumo-fast"\nraw:'), renderLumoTranscript(twoModels, 'c.json').split('---')[1]);
 	expect('note: without saved files it reads as before', renderLumoTranscript(chat, 'c.json').includes('*(3 attachments, not saved)*') && !renderLumoTranscript(chat, 'c.json').includes('## Files'));
 
 	// --- the whole sync loop, files included ---------------------------------------------
@@ -332,7 +340,7 @@ async function fileTests(enc: CryptoKey, entry: LumoEntry) {
 	const account = settings.lumo[0]!;
 	const g = account.web;
 	const item: ListItem = { ...entry.item, name: 'Cat chat', created_at: chat.createdAt, updated_at: chat.updatedAt };
-	const fresh = (): LumoSyncResult => ({ listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, filesSkipped: [], backfilledChats: 0, failed: [], edits: { copies: [], kept: [] } });
+	const fresh = (): LumoSyncResult => ({ listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, filesSkipped: [], backfilledChats: 0, flagChanges: 0, failed: [], edits: { copies: [], kept: [] } });
 	let reads = 0;
 	const source = (ids: string[], spaceChats = 1): LumoFileSource => ({
 		generated: () => ids.some((id) => wire[id]!.AssetType !== 0),
@@ -394,6 +402,25 @@ async function fileTests(enc: CryptoKey, entry: LumoEntry) {
 	g.downloadFiles = true;
 	const quiet = await run(source([]), [plain], plainChat);
 	expect('older chat without files: marked as checked from its raw file, not fetched again', quiet.unchanged === 1 && reads === 0 && g.index['C-plain']!.outputsChecked === plain.updated_at);
+
+	// Starred at Lumo later, then unstarred: only that property changes in the note, no request.
+	let star = false;
+	const starRun = async () => {
+		reads = 0;
+		const r = fresh();
+		await saveLumoChats(plugin, account, 'L/Chat', [plain], async () => { reads++; return plainChat; }, () => undefined, r, source([]), () => star);
+		return r;
+	};
+	await starRun();
+	const plainMd = g.index['C-plain']!.md;
+	const unstarred = String(files.get(plainMd));
+	star = true;
+	const st1 = await starRun();
+	expect('starred: a later star is written into the note without a request', st1.flagChanges === 1 && reads === 0 && String(files.get(plainMd)).includes('\nstarred: true\nraw:'), String(files.get(plainMd)).slice(0, 200));
+	star = false;
+	const st2 = await starRun();
+	expect('starred: an unstar takes the property out again', st2.flagChanges === 1 && reads === 0 && String(files.get(plainMd)) === unstarred);
+	expect('starred: nothing to do when it did not change', (await starRun()).flagChanges === 0);
 
 	// Renames and moves in Obsidian are followed for the saved files too.
 	const moved = followRename(settings, dir, 'Moved/Lumo');

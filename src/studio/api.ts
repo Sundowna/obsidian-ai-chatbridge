@@ -7,6 +7,7 @@
 import { StopError } from '../api';
 import { openReadyPage, type LoginRef, type ReadyPage } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
+import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
 import { googleLogin } from '../gemini/api';
 import { ShapeError } from '../schema';
 import type { StudioPrompt } from '../gemini/types';
@@ -83,10 +84,11 @@ export class StudioApi {
 		})()`;
 		let res: { status: number; text: string; headers?: Record<string, string> };
 		try {
-			res = JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> };
-		} catch {
-			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: null, message: 'Network error while talking to AI Studio.' });
-			throw new StopError('Network error while talking to AI Studio.');
+			res = await sendWithRetry(async () => JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> });
+		} catch (e) {
+			const tried = e instanceof NetworkFailure ? triedText(e.tries) : '';
+			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: null, message: `Network error while talking to AI Studio${tried}.` });
+			throw new StopError(`Network error while talking to AI Studio${tried}.`);
 		}
 		if (res.status !== 200 && !(res.status === 404 && method === 'ResolveDriveResource')) {
 			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: res.status, headers: res.headers, body: res.text, message: `AI Studio answered ${res.status}` });

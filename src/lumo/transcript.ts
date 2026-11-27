@@ -1,6 +1,6 @@
 // A Lumo chat as a Markdown transcript. Pure code, no AI.
 
-import { localDateTime } from '../naming';
+import { localDateTime, modelProperty } from '../naming';
 import { messageArtifacts, messageAttachments } from './assets';
 import type { LumoChat, LumoMessage } from './types';
 
@@ -68,6 +68,7 @@ export function renderLumoTranscript(chat: LumoChat, jsonFileName: string, links
 	const fm = ['---', `uuid: ${chat.id}`, `created: ${chat.createdAt}`, `updated: ${chat.updatedAt}`];
 	if (chat.project) fm.push(`project: ${y(chat.project)}`);
 	if (chat.starred) fm.push('starred: true');
+	fm.push(...modelProperty(shownBranch(chat.messages).filter((m) => m.role === 'assistant').map((m) => m.private.modelID)));
 	fm.push(`raw: ${y(`[[${jsonFileName}]]`)}`, 'unread: true', '---', '');
 	const body = shownBranch(chat.messages).flatMap((m) =>
 		[`## ${m.role === 'user' ? 'You' : 'Lumo'} · ${localDateTime(m.createdAt)}`, '', messageBody(m, links), '']);

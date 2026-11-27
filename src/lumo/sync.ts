@@ -8,10 +8,12 @@ import { StopError } from '../api';
 import { appendLog } from '../log';
 import { guardMissing, MassMissingError } from '../missing-guard';
 import { restoreNote, savedChat, type FromRaw } from '../restore';
+import { keepFlags } from '../gemini/save';
 import type AIChatBridge from '../main';
 import { baseName, dailyNoteName, tagAccount } from '../naming';
 import type { ProgressFn } from '../progress';
 import { ShapeError } from '../schema';
+import { OddChats } from '../odd-chats';
 import { DEFAULT_RECENT, filterByProjects, newestFirst, nothingSelected, pickTodo, type Todo } from '../select';
 import { cleanFolder, MIN_DELAY_SECONDS, type LumoAccount } from '../settings';
 import type { ListItem } from '../types';
@@ -43,6 +45,8 @@ export interface LumoSyncResult {
 	filesSkipped: string[];
 	/** Chats saved earlier that now got their files. */
 	backfilledChats: number;
+	/** Notes whose starred mark was brought up to date without fetching the chat. */
+	flagChanges: number;
 	/** Chats that could not be decrypted and were left out. */
 	failed: string[];
 	/** Notes you had edited whose chat continued. */
@@ -105,6 +109,8 @@ export async function saveLumoChats(
 	progress: ProgressFn,
 	result: LumoSyncResult,
 	files?: LumoFileSource,
+	/** Says whether a chat is starred at Lumo; the note's property is kept up to date from it. */
+	starred?: (item: ListItem) => boolean,
 ): Promise<void> {
 	const s = plugin.settings;
 	const g = account.web;
@@ -184,6 +190,7 @@ export async function saveLumoChats(
 	const jobs = newestFirst([...todo, ...recoveries, ...backfills]);
 	const batch = s.maxChatsPerRun > 0 ? jobs.slice(0, s.maxChatsPerRun) : jobs;
 	result.leftForLater = jobs.length - batch.length;
+	if (starred) result.flagChanges = await keepFlags(plugin, items, g.index, new Set(jobs.map((j) => j.item.uuid)), { key: 'starred', of: starred });
 
 	for (const [i, { item, isUpdate }] of batch.entries()) {
 		progress(`${i + 1} of ${batch.length}: ${item.name}`, i, batch.length);
@@ -228,7 +235,7 @@ export async function saveLumoChats(
 		await writeRaw(app, json, raw);
 		const note = await writeNote(app, md, withVersionInfo(noteOf(chat, rawLink(folder, json)), versions, folder), { policy: s.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery || isBackfill ? ['unread'] : [] });
 		recordEdit(result.edits, note, md);
-		g.index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash, ...(filesChecked ? { outputsChecked: filesChecked } : {}) };
+		g.index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash, ...(filesChecked ? { outputsChecked: filesChecked } : {}), ...(starred ? { flagged: starred(item) } : {}) };
 		await plugin.saveSettings();
 		if (isBackfill) {
 			if (gotFiles) result.backfilledChats++;
@@ -247,7 +254,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, s.delaySeconds) * 1000;
 	const wait = async (): Promise<void> => { await sleep(delayMs); };
-	const result: LumoSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, filesSkipped: [], backfilledChats: 0, failed: [], edits: noEdits() };
+	const result: LumoSyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], filesSaved: 0, filesSkipped: [], backfilledChats: 0, flagChanges: 0, failed: [], edits: noEdits() };
 	if (nothingSelected(g)) return { ...result, nothingSelected: true };
 	let api: LumoApi | null = null;
 
@@ -274,6 +281,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 		const entryOf = new Map<string, LumoEntry>(listing.entries.map((e) => [e.item.uuid, e]));
 		// A project's files belong to its space, so chats of one project share what was read.
 		const assetCache = new Map<string, LumoAssetContent | null>();
+		const odd = new OddChats();
 		result.listed = all.length;
 		result.filteredOut = all.length - items.length;
 
@@ -282,7 +290,8 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 			try {
 				return await decryptChat(entryOf.get(item.uuid)!, conversation);
 			} catch (e) {
-				if (e instanceof ShapeError) throw e;
+				// An odd shape: skipped like a chat that cannot be decrypted, but the third one stops the sync.
+				if (e instanceof ShapeError && !odd.skip(e, item.name)) throw e;
 				return null;
 			}
 		}, progress, result, {
@@ -295,7 +304,7 @@ export async function runLumoSync(plugin: AIChatBridge, account: LumoAccount, pr
 					return a.asset(id);
 				},
 			}),
-		});
+		}, (item) => entryOf.get(item.uuid)?.starred === true);
 	} catch (e) {
 		if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `Lumo's answer could not be verified (${e.message}).`;
@@ -322,6 +331,7 @@ async function writeLog(plugin: AIChatBridge, account: LumoAccount, r: LumoSyncR
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion`);
 	if (r.filesSaved) parts.push(`${r.filesSaved} file${r.filesSaved === 1 ? '' : 's'} saved`);
 	if (r.backfilledChats) parts.push(`files added to ${r.backfilledChats} chat${r.backfilledChats === 1 ? '' : 's'} saved earlier`);
+	if (r.flagChanges) parts.push(`starred updated on ${r.flagChanges} note${r.flagChanges === 1 ? '' : 's'}`);
 	if (r.filesSkipped.length) parts.push(`files skipped: ${r.filesSkipped.slice(0, 10).join('; ')}${r.filesSkipped.length > 10 ? ` +${r.filesSkipped.length - 10} more` : ''}`);
 	parts.push(...editsLog(r.edits));
 	if (r.failed.length) parts.push(`could not decrypt: ${r.failed.slice(0, 10).join(', ')}`);

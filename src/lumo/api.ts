@@ -7,6 +7,7 @@
 import { StopError } from '../api';
 import { isLoggedIn, openHiddenPage, type HiddenPage, type LoginRef } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
+import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
 import { sessionKeyPassword, openMasterKeys, unlockUserKeys } from './keys';
 import { checkAsset, checkClientKey, checkConversation, checkFullMessage, checkMasterKeys, checkSpaces, checkUser, parseStoredSession } from './schema';
 import type { LumoWireAsset, LumoWireConversation, LumoWireMessage, LumoWireSpace } from './types';
@@ -109,10 +110,11 @@ export class LumoApi {
 		const code = `(async () => { const r = await fetch(${JSON.stringify(url.pathname + url.search)}, { credentials: 'same-origin', headers: ${JSON.stringify(headers)} }); return JSON.stringify({ status: r.status, text: await r.text(), headers: Object.fromEntries(r.headers) }); })()`;
 		let res: { status: number; text: string; headers?: Record<string, string> };
 		try {
-			res = JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> };
-		} catch {
-			recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: null, message: 'Network error while talking to Lumo.' });
-			throw new StopError('Network error while talking to Lumo.');
+			res = await sendWithRetry(async () => JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> });
+		} catch (e) {
+			const tried = e instanceof NetworkFailure ? triedText(e.tries) : '';
+			recordError(this.source, { service: 'Lumo', method: 'GET', url: url.toString(), status: null, message: `Network error while talking to Lumo${tried}.` });
+			throw new StopError(`Network error while talking to Lumo${tried}.`);
 		}
 		// A file Lumo no longer has (deleted meanwhile): not an error, and not recorded.
 		if (goneOk && (res.status === 404 || res.status === 422)) return null;

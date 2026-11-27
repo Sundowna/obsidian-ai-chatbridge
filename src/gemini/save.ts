@@ -17,7 +17,7 @@ import type { GeminiChat, StudioPrompt } from './types';
 import type { IndexEntry, ListItem } from '../types';
 import { ensureFolder, findFile, freeStem } from '../vaultio';
 import { dirOf, rawLink } from '../raw-folders';
-import { addVersion, editsLog, keepVersion, noEdits, recordEdit, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
+import { addVersion, editsLog, keepVersion, noEdits, recordEdit, setNoteFlag, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 
 export interface GoogleSyncResult {
 	listed: number;
@@ -27,6 +27,8 @@ export interface GoogleSyncResult {
 	leftForLater: number;
 	written: string[];
 	restored: string[];
+	/** Notes whose pinned mark was brought up to date without fetching the chat. */
+	flagChanges: number;
 	/** Chats that could not be read and were left out. */
 	failed: string[];
 	/** Notes you had edited whose chat continued. */
@@ -36,7 +38,7 @@ export interface GoogleSyncResult {
 
 const stemOf = (p: string): string => (p.split('/').pop() ?? '').replace(/\.md$/, '');
 
-export const emptyResult = (): GoogleSyncResult => ({ listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], failed: [], edits: noEdits() });
+export const emptyResult = (): GoogleSyncResult => ({ listed: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], restored: [], flagChanges: 0, failed: [], edits: noEdits() });
 
 /** What one chat becomes: its file name's date, and the two files' contents. */
 export interface Saved {
@@ -46,10 +48,48 @@ export interface Saved {
 	md: (jsonLink: string) => string;
 }
 
+/** Google's number for the signed-in account as the Gemini page gives it, or '' when it is not one. */
+export const googleAccountId = (v: unknown): string => (typeof v === 'string' && /^\d{10,30}$/.test(v) ? v : '');
+
+/**
+ * Another account of the plugin that is signed in with the same Google account, or undefined.
+ * Two such accounts would save every chat twice. An unknown account (`who` empty) matches nobody.
+ */
+export function sameGoogleLogin(accounts: readonly GeminiAccount[], account: GeminiAccount, who: string | undefined): GeminiAccount | undefined {
+	return who ? accounts.find((other) => other !== account && other.web.userId === who) : undefined;
+}
+
+export const SAME_GOOGLE_LOGIN = (label: string): string => `This login is the same Google account as "${label}". Log in with a different account, or remove this one.`;
+
 /** A Gemini chat's note from its saved raw file. */
 export const geminiFromRaw = (label: string): FromRaw => (raw, link, uuid) => tagAccount(renderGeminiTranscript(savedChat<GeminiChat>(raw, uuid, 'turns'), link), label);
 /** An AI Studio prompt's note from its saved raw file. */
 export const studioFromRaw = (label: string): FromRaw => (raw, link, uuid) => tagAccount(renderStudioTranscript(savedChat<StudioPrompt>(raw, uuid, 'messages'), link), label);
+
+/** A yes/no mark the provider's chat list carries for every chat (Gemini: pinned), kept up to date in the note. */
+export interface ChatFlag {
+	key: string;
+	of: (item: ListItem) => boolean;
+}
+
+/**
+ * Chats that are not fetched in this run: when the mark flipped at the provider, only that
+ * property is changed in the note. Returns how many notes were changed.
+ */
+export async function keepFlags(plugin: AIChatBridge, items: readonly ListItem[], index: Record<string, IndexEntry>, skip: ReadonlySet<string>, flag: ChatFlag): Promise<number> {
+	let changed = 0;
+	let dirty = false;
+	for (const item of items) {
+		const known = index[item.uuid];
+		const now = flag.of(item);
+		if (!known || skip.has(item.uuid) || known.flagged === now) continue;
+		if (await setNoteFlag(plugin.app, known.md, flag.key, now)) changed++;
+		known.flagged = now;
+		dirty = true;
+	}
+	if (dirty) await plugin.saveSettings();
+	return changed;
+}
 
 export async function saveChats(
 	plugin: AIChatBridge,
@@ -62,7 +102,7 @@ export async function saveChats(
 	progress: ProgressFn,
 	result: GoogleSyncResult,
 	/** `label`: what the chats are called in the safety stop; `fromRaw`: the note from its saved raw file. */
-	o: { label: string; fromRaw: FromRaw },
+	o: { label: string; fromRaw: FromRaw; flag?: ChatFlag },
 ): Promise<void> {
 	const app = plugin.app;
 	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
@@ -92,6 +132,7 @@ export async function saveChats(
 	const max = plugin.settings.maxChatsPerRun;
 	const batch = max > 0 ? jobs.slice(0, max) : jobs;
 	result.leftForLater = jobs.length - batch.length;
+	if (o.flag) result.flagChanges = await keepFlags(plugin, items, index, new Set(jobs.map((j) => j.item.uuid)), o.flag);
 
 	for (const [i, { item, isUpdate }] of batch.entries()) {
 		progress(`${i + 1} of ${batch.length}: ${item.name}`, i, batch.length);
@@ -113,7 +154,7 @@ export async function saveChats(
 		await writeRaw(app, json, saved.json);
 		const note = await writeNote(app, md, withVersionInfo(saved.md(rawLink(noteFolder, json)), versions, noteFolder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery ? ['unread'] : [] });
 		recordEdit(result.edits, note, md);
-		index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash };
+		index[item.uuid] = { updated_at: item.updated_at, json, md, synced: new Date().toISOString(), versions, noteHash: note.hash, ...(o.flag ? { flagged: o.flag.of(item) } : {}) };
 		await plugin.saveSettings();
 		if (isRecovery) result.restored.push(stem);
 		else {
@@ -136,6 +177,7 @@ export async function writeLog(plugin: AIChatBridge, site: string, account: Gemi
 	const parts = [`${r.newCount} new`, `${r.changedCount} changed`, `${r.unchanged} unchanged`];
 	if (r.leftForLater) parts.push(`${r.leftForLater} left for next run`);
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion`);
+	if (r.flagChanges) parts.push(`pinned updated on ${r.flagChanges} note${r.flagChanges === 1 ? '' : 's'}`);
 	parts.push(...editsLog(r.edits));
 	if (r.failed.length) parts.push(`could not read: ${r.failed.slice(0, 10).join(', ')}`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount(site, plugin.settings.gemini, account)}:** ${parts.join(', ')}`;

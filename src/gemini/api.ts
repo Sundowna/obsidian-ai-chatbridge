@@ -8,6 +8,8 @@ import { StopError } from '../api';
 import { googleCookies } from '../cookies';
 import { GEMINI_SIGNED_IN, isLoggedIn, openReadyPage, type LoginRef, type PastedCookies, type ReadyPage } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
+import { googleAccountId } from './save';
+import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
 import { batchPayload, checkChatId, readChatPage, readListPage } from './wire';
 import type { GeminiListItem } from './types';
 
@@ -50,6 +52,15 @@ export class GeminiApi {
 
 	close(): void {
 		this.page.close();
+	}
+
+	/** Google's number for the signed-in account (not secret), or '' when the page does not say. Seen 2026-11-27. */
+	async accountId(): Promise<string> {
+		try {
+			return googleAccountId(await this.page.run(`String((window.WIZ_global_data || {}).S06Grb || '')`));
+		} catch {
+			return '';
+		}
 	}
 
 	/** Every chat: the pinned ones and the rest. */
@@ -101,10 +112,11 @@ export class GeminiApi {
 		})()`;
 		let res: { status: number; text: string; headers?: Record<string, string> };
 		try {
-			res = JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> };
-		} catch {
-			recordError(this.source, { service: 'Gemini', method: 'POST', url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=${rpcId}`, status: null, message: 'Network error while talking to Gemini.' });
-			throw new StopError('Network error while talking to Gemini.');
+			res = await sendWithRetry(async () => JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> });
+		} catch (e) {
+			const tried = e instanceof NetworkFailure ? triedText(e.tries) : '';
+			recordError(this.source, { service: 'Gemini', method: 'POST', url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=${rpcId}`, status: null, message: `Network error while talking to Gemini${tried}.` });
+			throw new StopError(`Network error while talking to Gemini${tried}.`);
 		}
 		if (res.status !== 200) recordError(this.source, { service: 'Gemini', method: 'POST', url: `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=${rpcId}`, status: res.status, headers: res.headers, body: res.text, message: `Gemini answered ${res.status}` });
 		if (res.status === 401 || res.status === 403) throw new StopError(`Gemini answered ${res.status} (not logged in). Log in to Google again in the plugin settings.`);

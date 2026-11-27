@@ -10,6 +10,9 @@ import { normalizeSettings } from '../src/migrate';
 import { localStamp } from '../src/naming';
 import { runSync } from '../src/sync';
 import { followRename } from '../src/follow';
+import { netRetry, NetworkFailure, sendWithRetry, triedText } from '../src/net-retry';
+import { OddChats, readOrSkip } from '../src/odd-chats';
+import { ShapeError } from '../src/schema';
 import { readWrite } from './fake-vault';
 import { restoreSavedChats, separateSavedChats } from '../src/archive-local';
 
@@ -88,9 +91,10 @@ let project: typeof PROJECT | null = PROJECT;
 let turns = ['First question', 'First answer'];
 const FILE = '55555555-5555-4555-8555-555555555555';
 let attach = false;
+let oddShape = false;
 const chat = () => ({
-	uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated,
-	chat_messages: turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z',
+	uuid: CHAT, name: 'Plan the vault', created_at: '2026-11-06T09:00:00Z', updated_at: updated, model: 'claude-opus-5-5',
+	chat_messages: oddShape ? 'not a list' as never : turns.map((text, i) => ({ uuid: `m${i}`, sender: i % 2 ? 'assistant' : 'human', text, content: [{ type: 'text', text }], created_at: '2026-11-06T09:00:00Z',
 		...(attach && i === 0 ? { attachments: [{ file_uuid: FILE, file_name: 'notes.txt', size_bytes: 5 }] } : {}) })),
 });
 let fileFetches = 0;
@@ -128,6 +132,7 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 	const r1 = await runSync(plugin, account);
 	expect('sync 1: new chat saved', !r1.stopped && r1.newCount === 1 && files.has(md) && files.has(json), r1.stopped ?? [...files.keys()].join(' | '));
 	const first = files.get(json)!;
+	expect('sync 1: the note names the model in its properties', files.get(md)!.split('---')[1]!.includes('\nmodel: "claude-opus-5-5"\n'), files.get(md)!.split('---')[1]);
 
 	const r2 = await runSync(plugin, account);
 	expect('sync 2: unchanged', r2.unchanged === 1 && r2.newCount + r2.changedCount === 0);
@@ -374,6 +379,48 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 
 	Reflect.deleteProperty(vault.adapter, 'stat');
 	expect('quick: a vault that cannot tell file times always reads it', (await rawReads()).read === 1 && (await rawReads()).read === 1);
+
+	// One chat in an odd shape is skipped, named in the log and tried again; it never stops the sync alone.
+	{
+		const noteBefore = files.get(account.web.index[CHAT]!.md)!;
+		testHooks.requestUrl = async () => ({ status: 404, headers: { 'content-type': 'application/json' }, text: '{}', arrayBuffer: new ArrayBuffer(0) });
+		updated = '2026-11-20T08:00:00Z';
+		oddShape = true;
+		const skipped = await runSync(plugin, account);
+		expect('odd chat: skipped and named, the sync is not stopped, its note is untouched', !skipped.stopped && skipped.oddChats.join() === 'Plan the vault' && skipped.changedCount === 0 && files.get(account.web.index[CHAT]!.md) === noteBefore, skipped.stopped ?? JSON.stringify(skipped.oddChats));
+		expect('odd chat: the log says it could not be read and will be retried', files.get('log.md')!.includes('could not read (will retry): Plan the vault'));
+		oddShape = false;
+		const again = await runSync(plugin, account);
+		expect('odd chat: tried again on the next run and saved', !again.stopped && again.changedCount === 1 && !again.oddChats.length, again.stopped ?? '');
+		testHooks.requestUrl = null;
+		const odd = new OddChats();
+		const shape = new ShapeError('x');
+		expect('odd chat: two are skipped, the third stops; other errors are never skipped', odd.skip(shape, 'a') && odd.skip(shape, 'b') && !odd.skip(shape, 'c') && !new OddChats().skip(new Error('y'), 'd') && odd.names.join() === 'a,b');
+		const got = await readOrSkip(new OddChats(), 'n', () => { throw shape; });
+		const thrown = await readOrSkip(odd, 'n', () => { throw shape; }).then(() => 'no', () => 'thrown');
+		expect('odd chat: the shared reader gives nothing for a skipped chat and throws once the limit is reached', got === null && thrown === 'thrown' && (await readOrSkip(odd, 'ok', () => 5)) === 5);
+	}
+
+	// A request that gets no answer at all is tried again, up to 3 times (as ChatGPT since 0.41.3).
+	const waited: number[] = [];
+	netRetry.pause = async (ms) => void waited.push(ms);
+	let sends = 0;
+	testHooks.requestUrl = async () => {
+		if (++sends < 3) throw new Error('net::ERR_SSL_BAD_RECORD_MAC_ALERT');
+		return { status: 200, headers: { 'content-type': 'application/octet-stream' }, text: 'ok', arrayBuffer: new TextEncoder().encode('ok').buffer };
+	};
+	const third = await new ClaudeApi(ORG, () => 'k').getOutputFile(CHAT, '/mnt/user-data/outputs/a.md');
+	expect('retry: a broken connection is tried again, the third try answers', third.status === 200 && sends === 3 && waited.join() === '2000,5000', `${sends} sends, waits ${waited.join()}`);
+	sends = 0;
+	testHooks.requestUrl = async () => { sends++; throw new Error('net::ERR_CONNECTION_RESET k'); };
+	const gaveUp = await new ClaudeApi(ORG, () => 'k').getOutputFile(CHAT, '/mnt/user-data/outputs/a.md').then(() => 'no stop', (e: unknown) => (e instanceof StopError ? e.message : `other: ${String(e)}`));
+	expect('retry: three failed tries stop the sync and say so', sends === 3 && gaveUp.startsWith('Network error: ') && gaveUp.endsWith('(tried 3 times)'), gaveUp);
+	testHooks.requestUrl = null;
+	let runs = 0;
+	const once = await sendWithRetry(async () => { runs++; return 'fine'; });
+	expect('retry: a request that answers is sent once', once === 'fine' && runs === 1);
+	const failure = await sendWithRetry(async () => { throw new Error('x'); }).then(() => null, (e: unknown) => e);
+	expect('retry: giving up names the tries and keeps the cause', failure instanceof NetworkFailure && failure.tries === 3 && (failure.cause as Error).message === 'x' && triedText(1) === '' && triedText(3) === ' (tried 3 times)');
 
 	console.log(failures ? `\n${failures} FAILED` : '\nAll Claude sync tests passed.');
 	process.exit(failures ? 1 : 0);

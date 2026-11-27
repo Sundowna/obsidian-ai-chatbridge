@@ -90,6 +90,8 @@ export interface IndexEntry extends NoteState {
 	json: string;
 	md: string;
 	synced: string;
+	/** Pinned (Gemini) or starred (Lumo) at the provider, as the note last said. Missing = not compared yet. */
+	flagged?: boolean;
 	/** updated_at for which the chat-view files (ReadConversation) were last checked. */
 	outputsChecked?: string;
 	/** ChatGPT long chats: the older parts, each saved unchanged ("… (older 1).json" = just before the main file). */

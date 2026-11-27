@@ -8,7 +8,7 @@ import { promptFileId, readPrompt, readPromptList } from '../src/studio/wire';
 import { normalizeSettings } from '../src/migrate';
 import { ShapeError } from '../src/schema';
 import { TFile } from 'obsidian';
-import { emptyResult, geminiFromRaw, saveChats, studioFromRaw, type Saved } from '../src/gemini/save';
+import { emptyResult, geminiFromRaw, googleAccountId, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, type Saved } from '../src/gemini/save';
 import type { GeminiChat, StudioPrompt } from '../src/gemini/types';
 import { MassMissingError } from '../src/missing-guard';
 import { tagAccount } from '../src/naming';
@@ -166,6 +166,28 @@ async function saveLoop() {
 	const s2 = await sRun();
 	expect('AI Studio: saved, then a deleted note rebuilt from the raw file without a request', s1.newCount === 1 && s2.restored.length === 1 && !reads.length && files.get(sPath) === sNote && sNote.includes('Studio answer.'), JSON.stringify({ s1, s2, reads }));
 
+	// Pinned at Google later, then unpinned: only that property changes in the note, no request.
+	const pIndex: Record<string, IndexEntry> = {};
+	const pins = new Set<string>();
+	const pItem: ListItem = { uuid: 'c_pin', name: 'Pin me', created_at: day(6), updated_at: day(6) };
+	const pRun = async () => {
+		reads = [];
+		const r = emptyResult();
+		await saveChats(plugin, [pItem], pIndex, 'G/Chat', 'Raw/G', read, () => undefined, r, { label: 'Gemini chats', fromRaw: geminiFromRaw('Main'), flag: { key: 'pinned', of: (it) => pins.has(it.uuid) } });
+		return r;
+	};
+	await pRun();
+	const pMd = pIndex.c_pin!.md;
+	const unpinned = files.get(pMd)!;
+	pins.add('c_pin');
+	const p1 = await pRun();
+	expect('pinned: a later pin is written into the note without a request', p1.flagChanges === 1 && !reads.length && p1.unchanged === 1 && files.get(pMd)!.includes('\npinned: true\nraw:') && files.get(pMd)!.split('---').slice(2).join('---') === unpinned.split('---').slice(2).join('---'), files.get(pMd)!.slice(0, 200));
+	const p2 = await pRun();
+	expect('pinned: nothing more to do while it stays pinned', p2.flagChanges === 0 && !reads.length);
+	pins.clear();
+	const p3 = await pRun();
+	expect('pinned: an unpin takes the property out again', p3.flagChanges === 1 && !reads.length && files.get(pMd) === unpinned, files.get(pMd)!.slice(0, 200));
+
 	// Safety stop: many saved chats missing stops before anything is read or written.
 	settings.maxChatsPerRun = 0;
 	const many: ListItem[] = Array.from({ length: 12 }, (_, i) => ({ uuid: `m_${i}`, name: `Many ${i}`, created_at: day(i + 1), updated_at: day(i + 1) }));
@@ -287,6 +309,15 @@ async function main() {
 	expect('vault without Gemini gets it beside the others', fresh.gemini[0]!.web.folder === '30 Sources/AI Chats/Gemini/Chat' && fresh.gemini[0]!.studio.folder === '30 Sources/AI Chats/Gemini/AI Studio');
 	const kept = normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: {} }], gemini: [{ id: 'default', label: 'Main', web: { folder: 'G', index: { c_1: { updated_at: 'x', json: 'a', md: 'b', synced: 'y' } } } }] }).settings;
 	expect('saved Gemini settings kept, AI Studio filled in', kept.gemini[0]!.web.folder === 'G' && !!kept.gemini[0]!.web.index.c_1 && kept.gemini[0]!.studio.enabled);
+
+	// --- the same Google login under two accounts -------------------------------------
+	{
+		const two = normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: {} }], gemini: [{ id: 'a', label: 'Private', web: { folder: 'G', userId: '123456789012345678901' } }, { id: 'b', label: 'Work', web: { folder: 'G' } }] }).settings.gemini;
+		expect('same login: the Google account number is kept, anything else is not one', googleAccountId('123456789012345678901') === '123456789012345678901' && googleAccountId('me@example.com') === '' && googleAccountId(undefined) === '' && googleAccountId('12') === '');
+		expect('same login: a second account on the same Google login is found', sameGoogleLogin(two, two[1]!, '123456789012345678901') === two[0]);
+		expect('same login: the account itself, another login and an unknown login match nobody', !sameGoogleLogin(two, two[0]!, '123456789012345678901') && !sameGoogleLogin(two, two[1]!, '999999999999999999999') && !sameGoogleLogin(two, two[1]!, '') && !sameGoogleLogin(two, two[1]!, undefined));
+		expect('same login: the stop message names the other account', SAME_GOOGLE_LOGIN('Private') === 'This login is the same Google account as "Private". Log in with a different account, or remove this one.');
+	}
 
 	// --- the save loop of Gemini and AI Studio, on a fake vault ---------------------------
 	await saveLoop();

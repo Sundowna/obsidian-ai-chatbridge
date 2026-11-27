@@ -1,7 +1,7 @@
 // Turns a chat's JSON into a plain Markdown transcript. Pure code, no AI.
 
 import type { Chat, ChatMessage, ContentBlock, FileRef } from './types';
-import { localDateTime } from './naming';
+import { localDateTime, modelProperty } from './naming';
 
 const ROOT_PARENT = '00000000-0000-4000-8000-000000000000';
 
@@ -127,6 +127,8 @@ export function renderTranscript(chat: Chat, meta: TranscriptMeta): string {
 		`updated: ${chat.updated_at}`,
 	];
 	if (meta.projectName) fm.push(`project: ${y(meta.projectName)}`);
+	// claude.ai names the chat's model at the top of its data (seen 2026-11-27).
+	fm.push(...modelProperty([(chat as unknown as { model?: unknown }).model]));
 	fm.push(`raw: ${y(`[[${meta.jsonFileName}]]`)}`, 'unread: true', '---', '');
 
 	const { messages, hasOtherBranches } = activeBranch(chat);

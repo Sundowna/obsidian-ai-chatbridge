@@ -2,7 +2,7 @@
 // One section per turn: your message, then everything ChatGPT did until your next
 // message (tool steps collapsed to one line, generated images embedded).
 
-import { localDateTime } from '../naming';
+import { localDateTime, modelProperty } from '../naming';
 import { fallbackMarkdown, imageParts, pointerId, sandboxKey, sandboxLinks } from './files';
 import type { GptChat, GptMessage, GptPart } from './types';
 import { citeSources, formatCites, type CiteSources } from './cites';
@@ -174,6 +174,10 @@ export function renderGptTranscript(chat: GptChat, meta: GptTranscriptMeta): str
 		`updated: ${isoFromUnix(chat.update_time)}`,
 	];
 	if (meta.projectName) fm.push(`project: ${y(meta.projectName)}`);
+	// The models that answered, as each answer names it; without any, the chat's own default.
+	const answered = chat.messages.filter((m) => m.author.role === 'assistant').map((m) => m.metadata?.model_slug);
+	const models = modelProperty(answered);
+	fm.push(...(models.length ? models : modelProperty([(chat as unknown as { default_model_slug?: unknown }).default_model_slug])));
 	fm.push(`raw: ${y(`[[${meta.jsonFileName}]]`)}`, 'unread: true', '---', '');
 
 	const filePaths = meta.filePaths ?? new Map<string, string>();

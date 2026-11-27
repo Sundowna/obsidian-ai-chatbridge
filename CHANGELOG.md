@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.43.0 - 2026-11-27
+
+### Added
+- **The model is named in every chat note** - Claude, ChatGPT and Lumo notes get a `model` property, as Gemini and AI Studio notes already had. A chat that used several models lists each once. Existing notes get it on their next sync.
+- **Pinned and starred stay up to date** - when you pin or unpin a Gemini chat, or star or unstar a Lumo chat, the note's property follows on the next sync, without fetching the chat again.
+
+### Fixed
+- **A brief network hiccup no longer stops Claude, Gemini, AI Studio and Lumo syncs** - a request that gets no answer is tried again after a few seconds, up to three times, as ChatGPT has done since 0.41.3.
+- **One odd chat no longer stops the sync** - for Claude, AI Studio and Lumo, a chat that arrives in an unexpected shape is skipped, named in the log and tried again next time, as Gemini already did. A third one in the same run still stops the sync.
+- **Gemini and AI Studio: the same Google login used twice is noticed** - two accounts in the plugin signed in with one Google login would have saved every chat twice. The sync now stops and says so.
+
 ## 0.42.0 - 2026-11-27
 
 ### Added

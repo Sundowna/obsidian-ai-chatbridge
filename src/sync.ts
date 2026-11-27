@@ -6,6 +6,7 @@ import { withAccount } from './accounts';
 import type { ClaudeAccount } from './settings';
 import { ClaudeApi, redact, StopError } from './api';
 import { checkChat, checkListPage, ShapeError } from './schema';
+import { OddChats, readOrSkip } from './odd-chats';
 import { customProjectFolder, DEFAULT_RECENT, dedupe, filterByProjects, nothingSelected, pickTodo, projectFolderNames, targetFor } from './select';
 import { baseName, dailyNoteName, tagAccount } from './naming';
 import { renderTranscript } from './transcript';
@@ -47,6 +48,8 @@ export interface SyncResult {
 	backfilledChats: number;
 	/** Chats whose chat-view files could not be read (ReadConversation not 200 JSON). */
 	viewNotRead: string[];
+	/** Chats whose data had an unexpected shape: skipped, tried again next run. */
+	oddChats: string[];
 	/** claude.ai does not offer the chat view (ReadConversation) for this account's plan. */
 	viewUnavailable?: boolean;
 	/** Chats whose Claude-made files were looked up by path instead (chat view not offered). */
@@ -158,7 +161,8 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	const s = account.web;
 	const app = plugin.app;
 	const delayMs = Math.max(MIN_DELAY_SECONDS, plugin.settings.delaySeconds) * 1000;
-	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], restored: [], edits: noEdits() };
+	const result: SyncResult = { listed: 0, filteredOut: 0, unchanged: 0, newCount: 0, changedCount: 0, leftForLater: 0, written: [], otherPlatforms: new Set(), foldersCreated: [], filesSaved: 0, filesDeduped: 0, filesSkipped: [], backfilledChats: 0, viewNotRead: [], oddChats: [], restored: [], edits: noEdits() };
+	const odd = new OddChats();
 	if (nothingSelected(s)) return { ...result, nothingSelected: true };
 	const auth = await claudeAuth(plugin, account);
 	const getKey = auth.getKey;
@@ -351,7 +355,12 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			await ensureFolder(app, rawFolder);
 			await sleep(delayMs);
 			const raw = await api.get(api.chatPath(item.uuid));
-			const chat = checkChat(raw.json, item.uuid);
+			// One chat in an odd shape is skipped and tried again next run; the third one stops the sync.
+			const chat = await readOrSkip(odd, item.name, () => checkChat(raw.json, item.uuid));
+			if (!chat) {
+				result.oddChats.push(item.name);
+				continue;
+			}
 
 			// The chat-view files (download cards, ZIPs, renders) come from ReadConversation.
 			let visible: FileTask[] = [];
@@ -413,7 +422,12 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 			} else {
 				await sleep(delayMs);
 				const raw = await api.get(api.chatPath(item.uuid));
-				chat = checkChat(raw.json, item.uuid);
+				const read = await readOrSkip(odd, item.name, () => checkChat(raw.json, item.uuid));
+				if (!read) {
+					result.oddChats.push(item.name);
+					continue;
+				}
+				chat = read;
 				rawBytes = raw.bytes;
 			}
 
@@ -573,6 +587,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 			? `chat-view files: claude.ai does not offer them for this account, Claude-made files looked up by path instead (${r.outputsRead} chats)`
 			: 'chat-view files: claude.ai does not offer them for this account, chats saved without them');
 	}
+	if (r.oddChats.length) parts.push(`could not read (will retry): ${r.oddChats.join(', ')}`);
 	if (r.viewNotRead.length) parts.push(`chat-view files not readable (will retry): ${r.viewNotRead.join(', ')}`);
 	if (r.filesSkipped.length) parts.push(`files not saved: ${r.filesSkipped.join(', ')}`);
 	if (r.foldersCreated.length) parts.push(`new folders: ${r.foldersCreated.map((f) => f.split('/').slice(-2).join('/')).join(', ')}`);
