@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.53.1 - 2026-11-27
+
+### Fixed
+- **Gemini pictures through the Browser link** - 0.51.0 asked a Gemini page for the pictures, which the browser does not allow, so every picture stayed a link. The extension now fetches them itself; it asks for one more permission (Gemini's picture server, lh3.googleusercontent.com). Update the extension to 0.2.4.
+
 ## 0.53.0 - 2026-11-27
 
 ### Added
