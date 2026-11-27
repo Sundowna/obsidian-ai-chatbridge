@@ -118,23 +118,28 @@ async function fetchTab(origin: string): Promise<number> {
 async function handle(msg: LinkRequest & { id: number }): Promise<unknown[]> {
 	switch (msg.op) {
 		case 'fetch': {
-			// A picture Gemini made: fetched by the extension itself with your Google login (its host
-			// permission for lh3.googleusercontent.com). A page of the site cannot: the browser blocks
-			// reading it across sites (seen 2026-11-27). GET only; only a picture comes back.
+			// A picture Gemini made. Seen 2026-11-27: a fetch from a Gemini page and the extension's
+			// own fetch both fail ("Failed to fetch"), while opening the address in a tab shows the
+			// picture with your Google login. So it is opened in a background tab of its own and read
+			// there (same site, so the browser allows it), then the tab is closed. GET only; only a
+			// picture comes back.
 			if (isLinkImage(msg.url)) {
 				if (msg.method !== 'GET' || msg.body64 !== undefined) throw new LinkFail('not-allowed', 'method not allowed');
-				let res: Response;
+				const tabId = await openTab(msg.url, 'loaded', 45_000);
 				try {
-					res = await self.fetch(msg.url, { credentials: 'include', redirect: 'follow' });
+					const here = (await chrome.tabs.get(tabId)).url ?? '';
+					if (!isLinkImage(here)) throw new LinkFail('not-logged-in', 'the picture opened somewhere else');
+					const r = await inPage(tabId, pageFetch, [{ url: here, method: 'GET', headers: {}, redirect: 'follow' as const }]);
+					const type = (Object.entries(r.headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '').toLowerCase();
+					const bytes = type.startsWith('image/') ? fromBase64(r.body64) : new Uint8Array(0);
+					if (bytes.byteLength > MAX_BODY_BYTES) throw new LinkFail('blocked', 'picture too large');
+					return fetchFrames(msg.id, r.status, r.headers, bytes);
 				} catch (e) {
-					throw new LinkFail('failed', `picture fetch (extension ${chrome.runtime.getManifest().version}): ${e instanceof Error ? e.message : 'failed'}`);
+					if (e instanceof LinkFail) throw e;
+					throw new LinkFail('failed', `picture tab (extension ${chrome.runtime.getManifest().version}): ${e instanceof Error ? e.message : 'failed'}`);
+				} finally {
+					await chrome.tabs.remove(tabId).catch(() => undefined);
 				}
-				const type = (res.headers.get('content-type') ?? '').toLowerCase();
-				const bytes = type.startsWith('image/') ? new Uint8Array(await res.arrayBuffer()) : new Uint8Array(0);
-				if (bytes.byteLength > MAX_BODY_BYTES) throw new LinkFail('blocked', 'picture too large');
-				const headers: Record<string, string> = {};
-				res.headers.forEach((v, k) => { headers[k] = v; });
-				return fetchFrames(msg.id, res.status, headers, bytes);
 			}
 			if (!isLinkTarget(msg.url) || !isLinkPage(msg.url)) throw new LinkFail('not-allowed', 'site not allowed');
 			if (msg.method !== 'GET' && msg.method !== 'POST') throw new LinkFail('not-allowed', 'method not allowed');

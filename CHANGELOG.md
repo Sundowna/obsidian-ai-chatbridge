@@ -4,7 +4,7 @@
 
 ### Fixed
 - **Claude: an account that reads another account's chats stops** - if a Claude account's login turns out to be the same claude.ai account as another one (for example the browser of the Browser link is logged in to your main account), the sync now stops before saving anything, instead of saving every chat a second time.
-- **Gemini pictures through the Browser link** - 0.51.0 asked a Gemini page for the pictures, which the browser does not allow, so every picture stayed a link. The extension now fetches them itself; it asks for one more permission (Gemini's picture server, lh3.googleusercontent.com). Update the extension to 0.2.4.
+- **Gemini pictures through the Browser link** - 0.51.0 asked a Gemini page for the pictures, which the browser does not allow, so every picture stayed a link. The extension now opens each picture in a background tab and reads it there; it needs one more permission (Gemini's picture server, lh3.googleusercontent.com). Update the extension to 0.2.5. Why a picture was not saved now shows in the Error logs.
 
 ## 0.53.0 - 2026-11-27
 

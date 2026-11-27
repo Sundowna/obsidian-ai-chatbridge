@@ -183,13 +183,21 @@ async function fetchFiles(
 }
 
 /**
- * The other Claude account whose saved chats show up in this account's list, with how many: then
- * both are the same claude.ai login. Null when none is shared.
+ * The other Claude account that saved chats of this account's list first, with how many: then
+ * this login is that account's. The account that had the chats first keeps syncing; only the
+ * later one stops (so copies saved by mistake never block the real account). Null when none.
  */
 export function sameClaudeLogin(accounts: readonly ClaudeAccount[], account: ClaudeAccount, items: readonly ListItem[]): { label: string; shared: number } | null {
+	const mine = account.web.index;
+	const when = (synced: string | undefined) => Date.parse(synced ?? '') || 0;
 	for (const other of accounts) {
 		if (other === account) continue;
-		const shared = items.filter((it) => other.web.index[it.uuid] !== undefined).length;
+		const shared = items.filter((it) => {
+			const theirs = other.web.index[it.uuid];
+			if (!theirs) return false;
+			const own = mine[it.uuid];
+			return !own || when(theirs.synced) < when(own.synced);
+		}).length;
 		if (shared) return { label: other.label, shared };
 	}
 	return null;

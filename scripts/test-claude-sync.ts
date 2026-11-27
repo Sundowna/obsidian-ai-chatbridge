@@ -10,7 +10,7 @@ import { endCooldown, heldByCooldown, pausedBy } from '../src/cooldown-run';
 import { addAccount } from '../src/accounts';
 import { normalizeSettings } from '../src/migrate';
 import { localStamp } from '../src/naming';
-import { runSync } from '../src/sync';
+import { runSync, sameClaudeLogin } from '../src/sync';
 import { followRename } from '../src/follow';
 import { netRetry, NetworkFailure, sendWithRetry, triedText } from '../src/net-retry';
 import { OddChats, readOrSkip } from '../src/odd-chats';
@@ -251,6 +251,14 @@ Object.assign(globalThis, { window: { setTimeout: (fn: () => void) => setTimeout
 		expect('same login: chats another account already saved stop the sync, nothing written', (same.stopped ?? '').startsWith('These are the chats of "Main"') && same.newCount === 0 && files.size === filesBefore && !Object.keys(second.web.index).length, same.stopped ?? '');
 		// The fake claude.ai serves Main's chats to every account, so for the folder checks below
 		// Main's sync history is set aside: the second account then stands for another person.
+		// The rule itself: whoever saved a chat first keeps syncing; the later copy stops.
+		const row = (synced: string) => ({ updated_at: 'x', json: 'j', md: 'm', synced });
+		const early = { label: 'Early', web: { index: { [CHAT]: row('2026-11-01T00:00:00Z') } } } as unknown as typeof account;
+		const late = { label: 'Late', web: { index: { [CHAT]: row('2026-11-27T00:00:00Z') } } } as unknown as typeof account;
+		const fresh = { label: 'Fresh', web: { index: {} } } as unknown as typeof account;
+		const listedRows = [{ uuid: CHAT, name: 'c', created_at: 'x', updated_at: 'x' }];
+		expect('same login rule: the account that saved first keeps syncing, the later copy and a new account stop',
+			sameClaudeLogin([early, late], early, listedRows) === null && sameClaudeLogin([early, late], late, listedRows)?.label === 'Early' && sameClaudeLogin([early, fresh], fresh, listedRows)?.shared === 1);
 		const mainIndex = account.web.index;
 		account.web.index = {};
 		const secondSync = await runSync(plugin, second);
