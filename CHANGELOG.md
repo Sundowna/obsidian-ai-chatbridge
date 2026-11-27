@@ -12,7 +12,7 @@
 ## 0.43.0 - 2026-11-27
 
 ### Added
-- **The model is named in every chat note** - Claude, ChatGPT and Lumo notes get a `model` property, as Gemini and AI Studio notes already had. A chat that used several models lists each once. Existing notes get it on their next sync.
+- **The model is named in every chat note** - Claude, ChatGPT and Lumo notes get a `model` property, as Gemini and AI Studio notes already had. A chat that used several models lists each once. Existing ChatGPT notes get it on the next sync; Claude and Lumo notes get it when the chat next changes.
 - **Pinned and starred stay up to date** - when you pin or unpin a Gemini chat, or star or unstar a Lumo chat, the note's property follows on the next sync, without fetching the chat again.
 
 ### Fixed
