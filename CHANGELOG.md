@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **ChatGPT: a brief network hiccup no longer stops the sync** - when a connection to chatgpt.com broke for a moment (for example "Network error: net::ERR_SSL_BAD_RECORD_MAC_ALERT"), the whole sync stopped. The plugin now tries that request again after a few seconds, up to three times, and only stops if every try fails. The error then says how often it was tried and is listed in the Error logs tab (#48)
+
 ## 0.41.2 - 2026-11-26
 
 ### Fixed
