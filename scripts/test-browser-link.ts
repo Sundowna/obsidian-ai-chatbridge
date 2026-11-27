@@ -18,7 +18,7 @@ import { setBrowserLink, transportFor, type PageCall } from '../src/transport';
 import { pageCallCode, READ_CODE, READY_CODE, SITE_VALUE_COOKIE } from '../src/transport/login-window';
 import type { SiteValue } from '../src/transport';
 import { BROWSER_LINK_KEY, claudeAuth } from '../src/claude-auth';
-import { ClaudeApi } from '../src/api';
+import { ACCOUNT, ClaudeApi } from '../src/api';
 import { GptApi } from '../src/chatgpt/api';
 import { runSync } from '../src/sync';
 import { runGptSync } from '../src/chatgpt/sync';
@@ -359,6 +359,10 @@ async function testClaudeAndGpt() {
 		const h = sent.headers as Record<string, string>;
 		expect('Claude: the chat list goes through the browser', String(sent.url).startsWith(`https://claude.ai/api/organizations/${ORG}/`), String(sent.url));
 		expect('Claude: no Cookie header leaves the plugin', !Object.keys(h).some((k) => k.toLowerCase() === 'cookie') && !JSON.stringify(h).includes(BROWSER_LINK_KEY));
+		// The login check asks who is signed in; the request guard must let that one address through (0.54.0 stopped every Claude account).
+		const who = await rejection(api.get(ACCOUNT));
+		expect('Claude: the login check may ask who is signed in', !who && String(b.seen.filter((m) => m.op === 'fetch').pop()!.url) === 'https://claude.ai/api/account', who?.message);
+		expect('Claude: other account addresses stay blocked', !!(await rejection(api.get('/api/account/settings'))) && !!(await rejection(api.get(`${ACCOUNT}?x=1`))));
 		claudeOrg = '';
 		const c2 = fake('claude', {});
 		const r2 = await runSync(c2.plugin, c2.account as never);
@@ -569,6 +573,15 @@ async function testSeveralBrowsers() {
 		const updated = await namedBrowser(p2, { op: 'hello', token: 'legacy-token-value', browser: 'upgraded-01' }, val('u'));
 		expect('updated extension: keeps the old pairing under its new ID', updated.reply.op === 'welcome' && Object.keys(readTokens(old.value)).join() === 'upgraded-01');
 		updated.ws.close();
+		await sleep(50);
+		// Seen live 27.11.2026: one Chrome made a second ID at start-up and was refused with its own token.
+		const second = await namedBrowser(p2, { op: 'hello', token: 'legacy-token-value', browser: 'second-id-02' }, val('s'));
+		expect('a paired extension that sends a new ID stays the same paired browser', second.reply.op === 'welcome' && s2.linkedBrowsers().join() === 'upgraded-01' && Object.keys(readTokens(old.value)).join() === 'upgraded-01');
+		second.ws.close();
+		await sleep(50);
+		const wrong = await namedBrowser(p2, { op: 'hello', token: 'not-the-token-value', browser: 'upgraded-01' }, val('w'));
+		expect('a known ID with the wrong token is still refused', wrong.reply.op !== 'welcome' && s2.linkedBrowsers().length === 0);
+		wrong.ws.close();
 	} finally {
 		await s2.stop();
 	}
