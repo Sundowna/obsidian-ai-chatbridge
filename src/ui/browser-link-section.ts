@@ -4,7 +4,7 @@
 
 import { Modal, Notice, Platform, Setting, type App } from 'obsidian';
 import { loginRef, type AnyAccount } from '../accounts';
-import { LINK_STATE_TEXT, linkState, pairButtonText, readTokens, unpairForgetsAll, usesBrowserLink, type LinkState, type LoginMethod } from '../link/account';
+import { browserNameProblem, LINK_STATE_TEXT, linkState, pairButtonText, readTokens, unpairForgetsAll, usesBrowserLink, type LinkState, type LoginMethod } from '../link/account';
 import { isLoggedIn, type Provider } from '../login';
 import type AIChatBridge from '../main';
 import type { GeminiAccount } from '../settings';
@@ -134,7 +134,7 @@ export function loginMethodSetting(ctx: PanelContext, el: HTMLElement, provider:
 					hint: 'A name for this paired browser or browser profile, e.g. "Chrome" or "Edge (work)". Kept on this computer only.',
 					action: 'Rename',
 					initial: chosen.name,
-					problem: (n) => (n.trim() ? null : 'Enter a name.'),
+					problem: (n) => browserNameProblem(n, browsers.filter((x) => x.id !== chosen.id).map((x) => x.name)),
 					submit: (n) => {
 						ctx.plugin.setBrowserName(chosen.id, n);
 						ctx.refresh();

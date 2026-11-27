@@ -105,3 +105,15 @@ export function kindName(kind: string, taken: readonly string[]): string {
 	if (!taken.includes(kind)) return kind;
 	for (let n = 2; ; n++) if (!taken.includes(`${kind} ${n}`)) return `${kind} ${n}`;
 }
+
+/**
+ * Why a browser name you type is refused, or null when it is fine: empty, a made-up "Browser 2"
+ * (the next connect would replace it with the browser's own name), or another browser's name.
+ */
+export function browserNameProblem(name: string, otherNames: readonly string[]): string | null {
+	const n = name.trim();
+	if (!n) return 'Enter a name.';
+	if (isMadeUpBrowserName(n)) return `"${n}" would be replaced by the browser's own name when it connects. Choose another, for example "Chrome (work)".`;
+	if (otherNames.some((o) => o.trim().toLowerCase() === n.toLowerCase())) return `Another browser is already called "${n}".`;
+	return null;
+}
