@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ChatBridge Browser link (spike)</title>
+<style>
+	body { font: 15px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
+	label { display: block; font-weight: 600; margin-bottom: .25rem; }
+	input { font: inherit; width: 100%; padding: .5rem; box-sizing: border-box; }
+	button { font: inherit; padding: .5rem 1rem; margin-top: .75rem; cursor: pointer; }
+	#status { margin-top: 1rem; padding: .5rem .75rem; border-radius: 6px; background: #eee; }
+	small { color: #555; }
+</style>
+</head>
+<body>
+<h1>Browser link (Stage 0 test)</h1>
+<p><small>Throwaway test build. Paste the pairing code the test script shows in the terminal.</small></p>
+<label for="code">Pairing code</label>
+<input id="code" placeholder="48213-abcd1234…" autocomplete="off" spellcheck="false">
+<button id="pair">Pair</button>
+<button id="unpair">Unpair</button>
+<div id="status">…</div>
+<script src="options.js"></script>
+</body>
+</html>

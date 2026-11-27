@@ -5,10 +5,12 @@
 // public API key in the page. Both are read in the page and never leave it.
 
 import { RateLimitError, StopError } from '../api';
-import { openReadyPage, type LoginRef, type ReadyPage } from '../login';
+import type { LoginRef } from '../login';
 import { recordError, type ErrorSource } from '../error-log';
+import { transportFor, type PageAnswer, type SitePage } from '../transport';
 import { NetworkFailure, sendWithRetry, triedText } from '../net-retry';
 import { retryDeadline } from '../rate-limit';
+import { BrowserLinkUnavailable } from '../link/errors';
 import { googleLogin } from '../gemini/api';
 import { ShapeError } from '../schema';
 import type { StudioPrompt } from '../gemini/types';
@@ -16,26 +18,22 @@ import type { ListItem } from '../types';
 import { promptFileId, readPrompt, readPromptList } from './wire';
 
 const START = 'https://aistudio.google.com/library';
-const ORIGIN = 'https://aistudio.google.com';
 const SERVICE = 'https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/';
 const ALLOWED = new Set(['ListPrompts', 'ResolveDriveResource']);
 const OPEN_TIMEOUT_MS = 45_000;
 const PAGE_SIZE = 100;
 const MAX_PAGES = 300;
 
-const KEY_IN_PAGE = String.raw`(document.documentElement.innerHTML.match(/"WIu0Nc":"(AIza[\w-]{35})"/) || [])[1]`;
-const READY = `location.origin === ${JSON.stringify(ORIGIN)} && /(?:^|; )SAPISID=/.test(document.cookie) && !!${KEY_IN_PAGE}`;
-
 /** The answer's Retry-After header (a page's fetch gives header names in lower case), or ''. */
 const retryAfter = (headers: Record<string, string> | undefined): string => headers?.['retry-after'] ?? headers?.['Retry-After'] ?? '';
 
 export class StudioApi {
-	private constructor(private readonly page: ReadyPage, private readonly source: ErrorSource) {}
+	private constructor(private readonly page: SitePage, private readonly source: ErrorSource) {}
 
 	/** With no login in the login window, uses the pasted Google cookies (`fallback`) instead. */
 	static async connect(login: LoginRef, fallback: string | null = null): Promise<StudioApi> {
 		const pasted = await googleLogin(login, fallback);
-		const page = await openReadyPage(login, START, READY, OPEN_TIMEOUT_MS, pasted);
+		const page = await transportFor(login).openPage(START, 'studio-ready', OPEN_TIMEOUT_MS, pasted);
 		if (!page) {
 			recordError({ provider: 'gemini', accountId: login.id }, { service: 'AI Studio', method: 'OPEN', url: START, status: null, message: 'the AI Studio page did not open signed in' });
 			throw new StopError(pasted
@@ -73,23 +71,19 @@ export class StudioApi {
 	/** The single request used by everything above, sent by the page itself. */
 	private async call(method: string, body: unknown[]): Promise<unknown> {
 		if (!ALLOWED.has(method)) throw new StopError('Blocked an AI Studio call the plugin does not use.');
-		const code = `(async () => {
-			const key = ${KEY_IN_PAGE};
-			const sid = (document.cookie.match(/(?:^|; )SAPISID=([^;]+)/) || [])[1];
-			if (!key || !sid) return JSON.stringify({ status: 401, text: '' });
-			const ts = Math.floor(Date.now() / 1000);
-			const d = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(ts + ' ' + sid + ' ' + ${JSON.stringify(ORIGIN)}));
-			const h = ts + '_' + Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('');
-			const r = await fetch(${JSON.stringify(SERVICE + method)}, { method: 'POST', credentials: 'include', headers: {
-				'Content-Type': 'application/json+protobuf', 'X-Goog-Api-Key': key, 'X-Goog-AuthUser': '0',
-				Authorization: 'SAPISIDHASH ' + h + ' SAPISID1PHASH ' + h + ' SAPISID3PHASH ' + h,
-			}, body: ${JSON.stringify(JSON.stringify(body))} });
-			return JSON.stringify({ status: r.status, text: await r.text(), headers: Object.fromEntries(r.headers) });
-		})()`;
-		let res: { status: number; text: string; headers?: Record<string, string> };
+		// The page adds the API key and the login hash itself.
+		let res: PageAnswer;
 		try {
-			res = await sendWithRetry(async () => JSON.parse(await this.page.run(code)) as { status: number; text: string; headers?: Record<string, string> });
+			res = await sendWithRetry(() => this.page.call({
+				url: SERVICE + method,
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json+protobuf', 'X-Goog-AuthUser': '0' },
+				body: JSON.stringify(body),
+				sign: 'sapisidhash',
+			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const tried = e instanceof NetworkFailure ? triedText(e.tries) : '';
 			recordError(this.source, { service: 'AI Studio', method: 'POST', url: SERVICE + method, status: null, message: `Network error while talking to AI Studio${tried}.` });
 			throw new StopError(`Network error while talking to AI Studio${tried}.`);

@@ -1,0 +1,21 @@
+{
+	"manifest_version": 3,
+	"name": "AI ChatBridge Browser link",
+	"version": "0.1.0",
+	"description": "Lets the AI ChatBridge Obsidian plugin sync your chats through this browser, where you are logged in. Talks only to the supported sites and 127.0.0.1.",
+	"minimum_chrome_version": "116",
+	"background": { "service_worker": "background.js" },
+	"options_ui": { "page": "options.html", "open_in_tab": true },
+	"action": { "default_title": "AI ChatBridge Browser link" },
+	"permissions": ["scripting", "storage", "alarms"],
+	"host_permissions": [
+		"https://claude.ai/*",
+		"https://chatgpt.com/*",
+		"https://gemini.google.com/*",
+		"https://aistudio.google.com/*",
+		"http://127.0.0.1/*"
+	],
+	"content_security_policy": {
+		"extension_pages": "script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:* http://127.0.0.1:*"
+	}
+}

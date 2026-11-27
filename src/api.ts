@@ -8,9 +8,12 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { NetworkFailure, sendWithRetry, triedText } from './net-retry';
 import { retryDeadline } from './rate-limit';
+import { BrowserLinkUnavailable } from './link/errors';
 import { isUuid } from './schema';
 import { isOutputPath } from './files';
 import { recordAnswer, recordError, type ErrorSource } from './error-log';
+import { loginWindowRequest } from './transport/login-window';
+import type { Transport } from './transport/types';
 
 /** What to say when a request got no answer, with how often it was tried. */
 function networkWhy(e: unknown, key: string): string {
@@ -28,6 +31,8 @@ export class RateLimitError extends StopError {
 }
 
 const ORIGIN = 'https://claude.ai';
+/** The headers that carry the login window's login. */
+const LOGIN_HEADERS = ['Cookie'] as const;
 
 /** Removes the session key from any text before it is shown or logged. */
 export function redact(text: string, key: string | null): string {
@@ -113,6 +118,8 @@ export class ClaudeApi {
 		private readonly getKey: () => string | null,
 		/** The account, so failed answers land in its error log. */
 		private readonly source?: ErrorSource,
+		/** How requests reach claude.ai (the account's transport); the login window's by default. */
+		private readonly transport: Pick<Transport, 'request'> = { request: loginWindowRequest },
 	) {
 		if (!isUuid(orgId)) throw new StopError('Organization ID is missing or not a valid ID. Set it in the plugin settings.');
 	}
@@ -220,7 +227,7 @@ export class ClaudeApi {
 		const payload = isJson ? body : body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
 		let res;
 		try {
-			res = await sendWithRetry(() => requestUrl({
+			res = await sendWithRetry(() => this.transport.request({
 				url: `${ORIGIN}${RPC_BASE}${method}`,
 				method: 'POST',
 				contentType: isJson ? 'application/json' : 'application/proto',
@@ -231,9 +238,11 @@ export class ClaudeApi {
 					'Connect-Protocol-Version': '1',
 					'anthropic-client-platform': 'web_claude_ai',
 				},
-				throw: false,
+				loginOnly: LOGIN_HEADERS,
 			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}${RPC_BASE}${method}`, status: null, message: why, secrets: [key] });
 			throw new StopError(why);
@@ -294,15 +303,17 @@ export class ClaudeApi {
 		if (!key) throw new StopError('Not logged in to claude.ai. Use \'Log in to claude.ai\' in the plugin settings.');
 		let res;
 		try {
-			res = await sendWithRetry(() => requestUrl({
+			res = await sendWithRetry(() => this.transport.request({
 				url: `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`,
 				method: 'POST',
 				contentType: 'application/json',
 				body: JSON.stringify(body),
 				headers: { Cookie: `sessionKey=${key}; lastActiveOrg=${this.orgId}`, Accept: 'application/json', 'anthropic-client-platform': 'web_claude_ai' },
-				throw: false,
+				loginOnly: LOGIN_HEADERS,
 			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'POST', url: `${ORIGIN}/api/organizations/${this.orgId}/melange/${method}`, status: null, message: why, secrets: [key] });
 			throw new StopError(why);
@@ -356,13 +367,15 @@ export class ClaudeApi {
 
 		let res;
 		try {
-			res = await sendWithRetry(() => requestUrl({
+			res = await sendWithRetry(() => this.transport.request({
 				url: url.toString(),
 				method: 'GET',
 				headers,
-				throw: false,
+				loginOnly: LOGIN_HEADERS,
 			}));
 		} catch (e) {
+			// The Browser link went away (browser closed): the sync skips this account.
+			if (e instanceof NetworkFailure && e.cause instanceof BrowserLinkUnavailable) throw e.cause;
 			const why = networkWhy(e, key);
 			recordError(this.source, { service: 'claude.ai', method: 'GET', url: url.toString(), status: null, message: why, secrets: [key] });
 			throw new StopError(why);

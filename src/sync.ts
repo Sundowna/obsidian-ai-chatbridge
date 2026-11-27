@@ -22,6 +22,7 @@ import { buildStamp, checkKey, fileStamps, QUICK_SAVE_EVERY } from './quick-chec
 import { chatFiles, FileTask, KIND_FOLDER, mergeFiles, numbered, outputFiles, hasPastedText, pastedFiles, safeFileName, visibleFiles, type PasteMode } from './files';
 import { TFile, TFolder } from 'obsidian';
 import { claudeAuth } from './claude-auth';
+import { BrowserLinkUnavailable } from './link/errors';
 import type { ProgressFn } from './progress';
 import type { ListItem } from './types';
 import { CloudShapeError } from './cloud/claude-cloud';
@@ -70,6 +71,8 @@ export interface SyncResult {
 	stopped?: string;
 	/** Set when the run waits for a rate-limit pause to end (not an error). */
 	resumeAt?: number;
+	/** The Browser link could not reach the browser (closed, not paired, not logged in there): skipped, not an error. */
+	linkSkipped?: string;
 	/** "Only selected projects" is on with nothing selected, so the sync did not run. */
 	nothingSelected?: boolean;
 	/** Claude Code cloud sessions (claude.ai/code); also counted in the totals above. */
@@ -302,8 +305,9 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	};
 
 	try {
+		if (auth.linkProblem) throw auth.linkProblem;
 		if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Select "Log in" for this account in the plugin settings.');
-		const api = new ClaudeApi(auth.orgId, getKey, { provider: 'claude', accountId: account.id });
+		const api = new ClaudeApi(auth.orgId, getKey, { provider: 'claude', accountId: account.id }, auth.transport);
 
 		// 1. Read the whole chat list, 30 at a time.
 		const observations = s.includeArchived === true ? new ArchiveObservations() : undefined;
@@ -616,6 +620,8 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 	} catch (e) {
 		const key = getKey();
 		if (pausedBy(e, s, result)) await plugin.saveSettings();
+		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
+		else if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
 		else if (e instanceof StopError) result.stopped = e.message;
 		else if (e instanceof CloudShapeError) result.stopped = `Unexpected Claude Code session data (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;
 		else if (e instanceof ShapeError) result.stopped = `Unexpected JSON shape (${e.message}). claude.ai may have changed its internal API – nothing more was written.`;
@@ -674,6 +680,7 @@ async function writeLog(plugin: AIChatBridge, account: ClaudeAccount, r: SyncRes
 		line += `: ${shown}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;
 	}
 	if (r.stopped) line += ` – **stopped:** ${r.stopped}`;
+	if (r.linkSkipped) line += ` – **skipped:** ${r.linkSkipped}`;
 	try {
 		await appendLog(plugin.app, plugin.settings.logPath, line, now);
 	} catch (e) {

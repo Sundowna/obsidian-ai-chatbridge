@@ -43,6 +43,10 @@ import { localDate } from './naming';
 import { DESKTOP_ALL, DESKTOP_EVERY_ACCOUNT, HERMES, MEMORY, runKey, type LastRun, type RunOutcome } from './last-run';
 import { hasArchiveToRestore, restoreSavedChats, separateSavedChats, type ArchiveTarget } from './archive-local';
 import { archiveSummary } from './archive-move';
+import { LinkManager } from './link/manager';
+import type { TokenStore } from './link/server';
+import { secretTokenStore, usesBrowserLink } from './link/account';
+import { setBrowserLink } from './transport';
 
 type SyncTrigger = 'manual' | 'auto' | 'resume';
 
@@ -97,6 +101,29 @@ export default class AIChatBridge extends Plugin {
 	readonly remote = new RemoteSync(this);
 	/** Settings split between data.json (shared) and this computer's own file (see computers/). */
 	readonly computers = new ComputerStore(() => this.app.vault.adapter, () => this.manifest?.dir);
+	/** The Browser link server: runs only while an account uses the link, and only on a computer. */
+	readonly browserLink = new LinkManager(
+		() => ({ store: this.linkTokens(), port: this.settings.browserLinkPort }),
+		() => Platform.isDesktopApp,
+	);
+
+	/** The extension's token, in Obsidian's secret storage on this computer. */
+	linkTokens(): TokenStore {
+		return secretTokenStore(this.app.secretStorage);
+	}
+
+	/** Starts or stops the Browser link server to match the accounts, and keeps its port. */
+	async updateBrowserLink(): Promise<void> {
+		const wanted = this.settings.gemini.some((a) => usesBrowserLink('gemini', a))
+			|| this.settings.claude.some((a) => usesBrowserLink('claude', a))
+			|| this.settings.chatgpt.some((a) => usesBrowserLink('chatgpt', a));
+		await this.browserLink.update(wanted);
+		const port = this.browserLink.server?.port;
+		if (port && port !== this.settings.browserLinkPort) {
+			this.settings.browserLinkPort = port;
+			await this.saveSettings();
+		}
+	}
 	/** data.json changed on disk during a sync: read it once the sync is done. */
 	private externalPending = false;
 	/** The last "Refresh index" result, shown in the settings. */
@@ -116,6 +143,12 @@ export default class AIChatBridge extends Plugin {
 			}
 		}
 		if (adopted) await this.saveSettings();
+		// Browser link: which accounts use it, and its server (started only if one does).
+		setBrowserLink((login) => {
+			const account = (accountsOf(this.settings, login.provider) as AnyAccount[] | undefined)?.find((a) => a.id === login.id);
+			return !!account && usesBrowserLink(login.provider, account as GeminiAccount);
+		}, () => this.browserLink.server);
+		void this.updateBrowserLink();
 		registerLayoutIcons(this);
 		this.statusEl = this.addStatusBarItem();
 		// While a sync runs, selecting the status bar text stops it (a merge only says how to stop it).
@@ -315,6 +348,8 @@ export default class AIChatBridge extends Plugin {
 		this.clearGptResumeTimer();
 		this.statusEl?.setText('');
 		closeLoginWindows();
+		void this.browserLink.stop();
+		setBrowserLink(() => false, () => null); // a reloaded copy sets its own
 		if (this.timer !== null) window.clearInterval(this.timer);
 		if (this.memoryTimer !== null) window.clearInterval(this.memoryTimer);
 	}
@@ -449,6 +484,8 @@ export default class AIChatBridge extends Plugin {
 
 	/** Can this account's website be synced right now? */
 	async canSyncWeb(provider: Provider, account: AnyAccount): Promise<boolean> {
+		// A Browser link account always runs: a closed browser is reported as a skip.
+		if (usesBrowserLink(provider, account as GeminiAccount)) return true;
 		if (await isLoggedIn(loginRef(provider, account))) return true;
 		return hasPastedSession(provider, account);
 	}
@@ -1207,11 +1244,12 @@ export default class AIChatBridge extends Plugin {
 		}
 		await this.recordRun(target, label, trigger,
 			this.stopRequested ? 'stopped'
+				: 'linkSkipped' in r && r.linkSkipped ? 'waiting'
 				: 'nothingSelected' in r && r.nothingSelected ? 'nothing-selected'
 				: r.stopped ? ('resumeAt' in r && typeof r.resumeAt === 'number' ? 'waiting' : 'error')
 				: 'ok',
 			r,
-			this.stopRequested ? undefined : r.stopped ?? ('missing' in r && r.missing.length ? `Skipped, not found: ${r.missing.join(', ')}.` : 'nothing' in r && r.nothing.length ? `Nothing to read for: ${r.nothing.join(', ')}.` : undefined));
+			this.stopRequested ? undefined : ('linkSkipped' in r && r.linkSkipped ? r.linkSkipped : undefined) ?? r.stopped ?? ('missing' in r && r.missing.length ? `Skipped, not found: ${r.missing.join(', ')}.` : 'nothing' in r && r.nothing.length ? `Nothing to read for: ${r.nothing.join(', ')}.` : undefined));
 		if (this.stopRequested) {
 			const saved = r.newCount + r.changedCount;
 			const moved = 'archive' in r && r.archive?.moved ? `, ${r.archive.moved} moved` : '';
@@ -1220,6 +1258,13 @@ export default class AIChatBridge extends Plugin {
 		}
 		if ('nothingSelected' in r && r.nothingSelected) {
 			if (trigger === 'manual') new Notice(`${label}: no projects selected, so nothing was synced. Select some in the plugin settings.`);
+			return true;
+		}
+		// Browser link out of reach: this account is skipped. Not an error, so the automatic sync
+		// keeps trying it and the other accounts carry on.
+		if ('linkSkipped' in r && r.linkSkipped) {
+			this.paused.delete(key);
+			new Notice(`${label} skipped: ${r.linkSkipped}`, 10_000);
 			return true;
 		}
 		if (r.stopped) {

@@ -78,7 +78,8 @@ export function addAccount(s: Settings, provider: Provider, label: string): AnyA
 		const account: GeminiAccount = {
 			id: newId(),
 			label: name,
-			web: { ...DEFAULT_GEMINI, index: {}, folder: first.web.folder, rawFolder: first.web.rawFolder },
+			// A new Google account uses the Browser link: Google blocks sign-in inside apps.
+			web: { ...DEFAULT_GEMINI, index: {}, folder: first.web.folder, rawFolder: first.web.rawFolder, loginMethod: 'browser' },
 			studio: { ...DEFAULT_STUDIO, index: {}, folder: first.studio.folder, rawFolder: first.studio.rawFolder },
 		};
 		s.gemini.push(account);

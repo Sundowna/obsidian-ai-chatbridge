@@ -3,12 +3,13 @@
 import { Notice, setIcon } from 'obsidian';
 import { errorLogAccounts, pruneErrors } from '../error-log';
 import { accountsOf, addAccount, loginRef, nameProblem, PROVIDER_LABEL, removeAccount, SITE_LABEL, type AnyAccount, type DesktopAccount } from '../accounts';
-import { isLoggedIn, logout, type Provider } from '../login';
+import { logout, type Provider } from '../login';
 import type { Surface } from '../main';
 import type { ChatgptAccount, ClaudeAccount, GeminiAccount, LumoAccount } from '../settings';
 import { desktopPanel } from './desktop-panel';
 import type { PanelContext } from './fields';
 import { providerIcon } from './icons';
+import { accountReady } from './browser-link-section';
 import { ConfirmModal, NameModal } from './modals';
 import { chatgptWebPanel, claudeWebPanel, geminiWebPanel, lumoWebPanel, studioPanel } from './web-panel';
 
@@ -27,6 +28,7 @@ function addAccountDialog(ctx: PanelContext, provider: Provider): void {
 		submit: async (name) => {
 			const account = addAccount(ctx.plugin.settings, provider, name);
 			await ctx.plugin.saveSettings();
+			await ctx.plugin.updateBrowserLink(); // a new Google account uses the Browser link
 			ctx.openAccount(provider, account);
 		},
 	}).open();
@@ -73,6 +75,7 @@ function accountHeader(ctx: PanelContext, el: HTMLElement, provider: Provider, a
 				}
 				removeAccount(ctx.plugin.settings, provider, account);
 				await ctx.plugin.saveSettings();
+				await ctx.plugin.updateBrowserLink();
 				await pruneErrors(errorLogAccounts(ctx.plugin.settings).map((a) => a.source));
 				ctx.refresh();
 			},
@@ -90,7 +93,7 @@ export function providerTab(ctx: PanelContext, el: HTMLElement, provider: Provid
 		pill.toggleClass('is-active', a === account);
 		const dot = pill.createSpan({ cls: 'ccs-dot' });
 		pill.createSpan({ text: a.label });
-		void isLoggedIn(loginRef(provider, a)).then((ok) => dot.toggleClass('is-on', ok));
+		void accountReady(ctx.plugin, provider, a).then(({ ok }) => dot.toggleClass('is-on', ok));
 		pill.addEventListener('click', () => {
 			state.accountId = a.id;
 			ctx.refresh();

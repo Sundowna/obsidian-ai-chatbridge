@@ -343,6 +343,8 @@ async function apiChecks() {
 	const page = (status: number, text: string, headers: Record<string, string>) => ({
 		uid: 'LUMOUIDVALUE123', appVersion: 'web-lumo@1', close: () => undefined, goTo: async () => true,
 		run: async () => JSON.stringify({ status, text, headers }),
+		// Gemini and AI Studio send signed calls through their transport's page (Lumo still runs code).
+		call: async () => ({ status, text, headers }),
 	});
 	const none = async () => undefined;
 	const gem: ErrorSource = { provider: 'gemini', accountId: 'm1' };

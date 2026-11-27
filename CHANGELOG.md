@@ -5,6 +5,12 @@
 ### Added
 - **Claude, Gemini, AI Studio and Lumo: a rate limit pauses and retries by itself** - when one of them answers "too many requests", that account now waits, shows a countdown in the status bar and tries again by itself, as ChatGPT already did. Other accounts keep syncing, and the pause survives a restart of Obsidian. Before, the sync stopped and the source stayed out of the automatic sync until you synced it by hand.
 
+## 0.45.1 - 2026-11-27
+
+### Added
+- **Browser link: sync Google logins through your own browser** - Google blocks its sign-in inside apps, so Gemini, AI Studio and Claude or ChatGPT accounts made with "Continue with Google" failed in the login window. Set an account's new **Login method** to **Browser link**, add the small AI ChatBridge Browser link extension to Chrome, Edge or Brave (built from this repository and loaded unpacked for now) and select **Pair browser…**. The sync then uses the login you already have in your browser; ChatBridge still does all the reading and saving. New Google accounts start on it; existing accounts keep the login window until you switch. See [Browser link](README.md#browser-link-google-logins) for what the extension can reach.
+- **A closed browser skips, it doesn't fail** - if the browser is closed, not paired or not logged in to the site, that account is skipped with a message saying which; the other accounts carry on and the automatic sync keeps trying.
+
 ## 0.45.0 - 2026-11-27
 
 ### Added

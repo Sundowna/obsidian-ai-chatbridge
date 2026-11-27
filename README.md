@@ -34,6 +34,7 @@ Older changes are in the [changelog](CHANGELOG.md).
 - [When a chat continues](#when-a-chat-continues)
 - [Choosing what to sync](#choosing-what-to-sync)
 - [Multiple accounts](#multiple-accounts)
+- [Browser link (Google logins)](#browser-link-google-logins)
 - [See how the last sync went](#see-how-the-last-sync-went)
 - [Desktop app sessions](#desktop-app-sessions)
 - [Claude Code cloud sessions](#claude-code-cloud-sessions)
@@ -222,6 +223,27 @@ Two accounts can share one desktop app without anything being saved twice. A ses
 - otherwise to the first account. Claude Code sessions run only from the CLI have no login recorded, so they end up here
 
 A session that's already saved stays with the account that saved it.
+
+## Browser link (Google logins)
+
+Google blocks its sign-in inside apps, so the login window can't sign in to Gemini, AI Studio, or a Claude or ChatGPT account made with "Continue with Google". The **Browser link** syncs through your own browser instead, where you are already logged in. ChatBridge still does all the reading and saving; the small **AI ChatBridge Browser link** extension in your browser only fetches what the plugin asks for, with that browser's login.
+
+**Set it up (Chrome, Edge or Brave, on a computer):**
+
+1. Build the extension once from this repository: `npm install`, then `npm run build:extension`. It lands in `extension/dist`. The extension is not in the Chrome Web Store yet
+2. In the browser, open `chrome://extensions`, switch on **Developer mode**, select **Load unpacked** and choose the `extension/dist` folder
+3. In Obsidian, open the account's settings (Gemini, Claude or ChatGPT) and set **Login method** to **Browser link**
+4. Select **Pair browser…**, open the extension (its toolbar button, or **Details** → **Extension options**), paste the code and select **Pair**. The code works once, for 5 minutes
+
+Keep the browser open while you sync. If it is closed, not paired, or not logged in to the site, that account is **skipped** with a message saying which; the other accounts carry on and the automatic sync keeps trying. New Google accounts start on the Browser link; existing accounts keep the login window until you switch.
+
+**What the extension can do, and why:**
+
+- **Sites:** only `claude.ai`, `chatgpt.com`, `gemini.google.com` and `aistudio.google.com` (plus AI Studio's own API, called from its page), and `127.0.0.1` to talk to Obsidian. No other site, no `<all_urls>`, no `debugger`, no `cookies` permission
+- **What it does:** a request from a tab of one of those sites with your browser's login, Gemini's and AI Studio's two signed read calls in a background tab it opens itself, and reading a few small, non-secret values the sites' own pages can read (claude.ai's organization, ChatGPT's device and workspace IDs, your Google account number). It runs no code sent to it, never parses or stores your chats, and has no analytics
+- **Tabs:** it uses an open tab of the site for requests, or opens one in the background and closes it again. It never navigates or runs anything in tabs you opened
+- **The link:** a WebSocket on `127.0.0.1` only (a random port, remembered), running only while an account uses the Browser link. Pairing hands the extension a random token, kept in Obsidian's secret storage and the extension's own storage; anything without it, and any web page, is refused. Both sides refuse every site not on the list above, so the link can't be used as a general proxy
+- **Never written anywhere:** no cookie, token or login value is saved in `data.json`, notes or logs
 
 ## See how the last sync went
 
@@ -531,6 +553,7 @@ This plugin needs network access for the web providers. Please read this before 
 - **Services contacted:** `claude.ai`, `chatgpt.com`, `gemini.google.com`, `aistudio.google.com` (with its API host `alkalimakersuite-pa.clients6.google.com`) and `lumo.proton.me`, plus their login pages, e.g. `auth.openai.com`, `accounts.google.com` and `account.proton.me` - only when you log in or sync. Nothing is sent anywhere else. No telemetry
 - **What is sent:** the same requests your browser sends to list and read your own chats and files, with your login
 - **Accounts:** you need your own account with each provider you sync
+- **Browser link (optional):** syncs through your own browser via the ChatBridge extension and a link on `127.0.0.1` only; see [Browser link](#browser-link-google-logins) for exactly what it can reach
 - **Login windows:** a normal sign-in page in a window of its own, locked down - pages opened there can't use your camera, microphone, location, notifications or connected devices
 - **Where logins are stored:** in each login window's own storage on this computer, outside the vault, separately per account. Never in `data.json`, notes or logs. **Log out** and **Remove** in the settings clear them
 - **Account identifiers:** the name you give an account, and its claude.ai organization ID or ChatGPT workspace ID, are stored in `data.json` - these are not secrets
@@ -581,7 +604,7 @@ That's the 429s: with 1,000+ chats the providers start saying "too many requests
 
 **The login window doesn't work for me?**
 
-Use the pasted login fallback. Sign in to the site in your browser and open DevTools (**F12**), then:
+Use the [Browser link](#browser-link-google-logins): it syncs through your own browser, where you are already logged in. Or use the pasted login fallback. Sign in to the site in your browser and open DevTools (**F12**), then:
 
 - **claude.ai:** **Application → Cookies**, copy the value of `sessionKey`
 - **ChatGPT:** use **Use browser login…** under the ChatGPT login (made for accounts created with "Continue with Google", which Google blocks inside apps). It walks you through copying `__Secure-next-auth.session-token` - both the `.0` and `.1` rows when ChatGPT splits it - and checks it with ChatGPT before saving
