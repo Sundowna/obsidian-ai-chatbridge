@@ -181,13 +181,22 @@ export function geminiWebPanel(ctx: PanelContext, el: HTMLElement, account: Gemi
 	rawMoveRow(ctx, el, () => googleRawMoves(ctx.app, account, 'web', masterRaw(ctx.plugin.settings)));
 	new Setting(el)
 		.setName('What is saved')
-		.setDesc("Each chat's prompts and answers, including the reasoning Gemini shows (switch below). Images and files in chats are listed but not downloaded. Gemini has no public API, so the plugin reads what the website itself loads; if Google changes that, the sync stops instead of saving something wrong.");
+		.setDesc("Each chat's prompts and answers, including the reasoning Gemini shows (switch below). Pictures Gemini made are saved beside the chat (switch below); web pictures and your uploads are linked. Gemini has no public API, so the plugin reads what the website itself loads; if Google changes that, the sync stops instead of saving something wrong.");
 	new Setting(el)
 		.setName('Show reasoning in the note')
 		.setDesc('Gemini\'s reasoning and AI Studio\'s thinking, folded above each answer. On by default; off leaves it out of the notes (it stays in the raw file). Notes follow when a chat next changes.')
 		.addToggle((t) =>
 			t.setValue(g.showReasoning !== false).onChange(async (v) => {
 				g.showReasoning = v;
+				await ctx.plugin.saveSettings();
+			}),
+		);
+	new Setting(el)
+		.setName('Save pictures Gemini made')
+		.setDesc('Full size, in Attachments/ next to the chat, shown in the note. Needs the Browser link or the login window (pasted cookies cannot fetch them; the note then keeps the link). Chats saved earlier get theirs when they next change.')
+		.addToggle((t) =>
+			t.setValue(g.downloadFiles !== false).onChange(async (v) => {
+				g.downloadFiles = v;
 				await ctx.plugin.saveSettings();
 			}),
 		);

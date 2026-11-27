@@ -34,22 +34,24 @@ export function imagesAsLinks(answer: string, images: readonly GeminiImage[] = [
  * Each becomes a line with a link to the picture on Google's servers (it opens only while
  * signed in to Google), or "not saved" when the chat data gave no address.
  */
-export function generatedAsLinks(answer: string, generated: readonly GeminiGenerated[] = []): string {
+export function generatedAsLinks(answer: string, generated: readonly GeminiGenerated[] = [], saved?: ReadonlyMap<string, string>): string {
 	return answer.replace(GENERATED_PLACEHOLDER, (placeholder) => {
 		const url = generated.find((g) => g.placeholder === placeholder)?.url;
+		const path = url ? saved?.get(url) : undefined;
+		if (path) return `![[${path}]]`;
 		return url ? `*(Generated image, [view](<${url}>), opens while signed in to Google)*` : '*(Generated image, not saved)*';
 	});
 }
 
 /** `showReasoning`: the AI's reasoning, folded, above each answer (the account's switch; on unless turned off). */
-export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string, showReasoning = true): string {
+export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string, showReasoning = true, pictures?: ReadonlyMap<string, string>): string {
 	const fm = ['---', `uuid: ${chat.id}`, `created: ${chat.createdAt}`, `updated: ${chat.updatedAt}`];
 	if (chat.pinned) fm.push('pinned: true');
 	fm.push(`raw: ${y(`[[${jsonFileName}]]`)}`, 'unread: true', '---', '');
 	const body = chat.turns.flatMap((t) => {
 		const answer: string[] = [];
 		if (t.reasoning && showReasoning) answer.push(callout('Reasoning', t.reasoning));
-		answer.push(generatedAsLinks(imagesAsLinks(t.answer, t.images), t.generated).trim() || '*(no text)*');
+		answer.push(generatedAsLinks(imagesAsLinks(t.answer, t.images), t.generated, pictures).trim() || '*(no text)*');
 		if (t.otherDrafts) answer.push(`*(${t.otherDrafts} other draft${t.otherDrafts === 1 ? '' : 's'} in the raw file)*`);
 		return [
 			`## You · ${localDateTime(t.createdAt)}`, '', t.prompt.trim() || '*(no text)*', '',
@@ -74,4 +76,13 @@ export function renderStudioTranscript(p: StudioPrompt, jsonFileName: string, sh
 		body.push(`## ${m.role === 'user' ? 'You' : 'Model'}${when}`, '', m.text.trim() || '*(no text)*', '');
 	}
 	return fm.join('\n') + body.join('\n');
+}
+
+/** The pictures Gemini made in a chat, each with the file name it is saved under. */
+export function chatPictures(chat: GeminiChat): { url: string; name: string }[] {
+	const out: { url: string; name: string }[] = [];
+	chat.turns.forEach((t, i) => (t.generated ?? []).forEach((g, k) => {
+		if (g.url) out.push({ url: g.url, name: `Gemini picture ${i + 1}-${k + 1}` });
+	}));
+	return out;
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.51.0 - 2026-11-27
+
+### Added
+- **Gemini: pictures saved** - pictures Gemini makes are now saved full size next to the chat (Attachments/) and shown in the note, instead of a link that opens only while signed in. A switch per account, on by default. Works with the Browser link (update the extension to 0.2.3) and the login window; with pasted cookies the note keeps the link. Chats saved earlier get their pictures when they next change.
+
 ## 0.50.0 - 2026-11-27
 
 ### Added

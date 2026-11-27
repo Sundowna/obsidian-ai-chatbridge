@@ -195,6 +195,8 @@ export interface GeminiSettings {
 	loginMethod?: LoginMethod;
 	/** Gemini's reasoning and AI Studio's thinking in the notes, folded. Missing = on (as before the switch); always in the raw file. */
 	showReasoning?: boolean;
+	/** Save the pictures Gemini made beside the chat (Attachments/<chat>/). Missing = on. */
+	downloadFiles?: boolean;
 }
 
 /** The same login's Google AI Studio prompts, which AI Studio keeps in Google Drive. */

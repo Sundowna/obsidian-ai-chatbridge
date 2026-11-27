@@ -15,7 +15,7 @@ import type { GeminiAccount } from '../settings';
 import { renderGeminiTranscript, renderStudioTranscript } from './transcript';
 import type { GeminiChat, StudioPrompt } from './types';
 import type { IndexEntry, ListItem } from '../types';
-import { ensureFolder, findFile, freeStem } from '../vaultio';
+import { createNew, ensureFolder, findFile, freeStem } from '../vaultio';
 import { dirOf, rawLink } from '../raw-folders';
 import { addVersion, editsLog, keepVersion, noEdits, recordEdit, setNoteFlag, withVersionInfo, writeNote, writeRaw, type EditedReport } from '../versions';
 
@@ -34,6 +34,9 @@ export interface GoogleSyncResult {
 	/** Notes you had edited whose chat continued. */
 	edits: EditedReport;
 	stopped?: string;
+	/** Pictures the AI made, saved beside their chat this run, and those that could not be fetched (their link stays). */
+	picturesSaved?: number;
+	picturesSkipped?: number;
 	/** Only the recent part of the list was read; the rest was known (quick-list.ts). */
 	quickList?: boolean;
 	/** Set when the run waits for a rate-limit pause to end (not an error). */
@@ -50,8 +53,42 @@ export const emptyResult = (): GoogleSyncResult => ({ listed: 0, unchanged: 0, n
 export interface Saved {
 	createdAt: string;
 	json: string;
-	/** Gets the transcript's link to the raw .json: its file name, or its path when in another folder. */
-	md: (jsonLink: string) => string;
+	/** Gets the transcript's link to the raw .json (its file name, or its path when in another folder), and the pictures saved for this chat (address -> vault path). */
+	md: (jsonLink: string, pictures?: ReadonlyMap<string, string>) => string;
+	/** Pictures the AI made in this chat, to save beside it: their address and a file name without ending. */
+	pictures?: { url: string; name: string }[];
+}
+
+/** Fetches one picture (GeminiApi.picture); null = not available, the note keeps its link. */
+export type PictureSource = (url: string) => Promise<{ bytes: ArrayBuffer; type: string } | null>;
+
+const PICTURE_ENDING: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+
+/**
+ * Saves a chat's pictures to <note folder>/Attachments/<stem>/ and says where each is. A picture
+ * saved before (same name, any ending) is kept and not fetched again; one that cannot be fetched
+ * is counted and keeps its link in the note.
+ */
+async function savePictures(app: App, list: readonly { url: string; name: string }[], dir: string, fetch: PictureSource, result: GoogleSyncResult): Promise<Map<string, string>> {
+	const where = new Map<string, string>();
+	for (const { url, name } of list) {
+		const have = [...new Set(Object.values(PICTURE_ENDING))].map((e) => `${dir}/${name}.${e}`).find((path) => findFile(app, path) instanceof TFile);
+		if (have) {
+			where.set(url, have);
+			continue;
+		}
+		const got = await fetch(url);
+		if (!got) {
+			result.picturesSkipped = (result.picturesSkipped ?? 0) + 1;
+			continue;
+		}
+		await ensureFolder(app, dir);
+		const path = `${dir}/${name}.${PICTURE_ENDING[got.type] ?? 'png'}`;
+		await createNew(app, path, got.bytes);
+		where.set(url, path);
+		result.picturesSaved = (result.picturesSaved ?? 0) + 1;
+	}
+	return where;
 }
 
 /** Google's number for the signed-in account as the Gemini page gives it, or '' when it is not one. */
@@ -114,7 +151,7 @@ export async function saveChats(
 	progress: ProgressFn,
 	result: GoogleSyncResult,
 	/** `label`: what the chats are called in the safety stop; `fromRaw`: the note from its saved raw file. */
-	o: { label: string; fromRaw: FromRaw; flag?: ChatFlag },
+	o: { label: string; fromRaw: FromRaw; flag?: ChatFlag; pictures?: PictureSource },
 ): Promise<void> {
 	const app = plugin.app;
 	const exists = (path: string): boolean => findFile(app, path) instanceof TFile;
@@ -164,7 +201,8 @@ export async function saveChats(
 		// A recovery is the same version again, so there is no earlier one to keep.
 		const versions = addVersion(before, before && !isRecovery ? await keepVersion(app, [json], before.updated_at, saved.json) : null);
 		await writeRaw(app, json, saved.json);
-		const note = await writeNote(app, md, withVersionInfo(saved.md(rawLink(noteFolder, json)), versions, noteFolder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery ? ['unread'] : [] });
+		const pictures = o.pictures && saved.pictures?.length ? await savePictures(app, saved.pictures, `${noteFolder}/Attachments/${stem}`, o.pictures, result) : undefined;
+		const note = await writeNote(app, md, withVersionInfo(saved.md(rawLink(noteFolder, json), pictures), versions, noteFolder), { policy: plugin.settings.editedNotes, lastHash: before?.noteHash, lastSynced: before?.synced, keep: isRecovery ? ['unread'] : [] });
 		recordEdit(result.edits, note, md);
 		// A pin taken away since the last version must not stay in the note as if you had added it.
 		if (o.flag) await setNoteFlag(app, md, o.flag.key, o.flag.of(item));
@@ -193,6 +231,8 @@ export async function writeLog(plugin: AIChatBridge, site: string, account: Gemi
 	if (r.restored.length) parts.push(`${r.restored.length} restored after deletion`);
 	if (r.flagChanges) parts.push(`pinned updated on ${r.flagChanges} note${r.flagChanges === 1 ? '' : 's'}`);
 	parts.push(...editsLog(r.edits));
+	if (r.picturesSaved) parts.push(`${r.picturesSaved} picture${r.picturesSaved === 1 ? '' : 's'} saved`);
+	if (r.picturesSkipped) parts.push(`${r.picturesSkipped} picture${r.picturesSkipped === 1 ? '' : 's'} not available (linked instead)`);
 	if (r.failed.length) parts.push(`could not read: ${r.failed.slice(0, 10).join(', ')}`);
 	let line = `- [[${dailyNoteName(now)}]] ${time} – **${withAccount(site, plugin.settings.gemini, account)}:** ${parts.join(', ')}`;
 	if (r.written.length) line += `: ${r.written.slice(0, 20).map((w) => `[[${w}]]`).join(', ')}${r.written.length > 20 ? ` +${r.written.length - 20} more` : ''}`;

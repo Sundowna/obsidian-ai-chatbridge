@@ -15,7 +15,7 @@ import { pastedSession } from '../cookies';
 import { MassMissingError } from '../missing-guard';
 import { GeminiApi } from './api';
 import { emptyResult, failureText, fileGone, geminiFromRaw, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, writeLog, type GoogleSyncResult } from './save';
-import { renderGeminiTranscript } from './transcript';
+import { chatPictures, renderGeminiTranscript } from './transcript';
 import type { GeminiListItem } from './types';
 import { buildChat, GeminiError } from './wire';
 import { BrowserLinkUnavailable } from '../link/errors';
@@ -68,8 +68,8 @@ export async function runGeminiSync(plugin: AIChatBridge, account: GeminiAccount
 				if (odd.skip(e, item.name)) return null;
 				throw e;
 			}
-			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name) => tagAccount(renderGeminiTranscript(chat, name, g.showReasoning !== false), account.label) };
-		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label, g.showReasoning !== false), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true } });
+			return { createdAt: chat.createdAt, json: JSON.stringify(chat, null, '\t'), md: (name, pictures) => tagAccount(renderGeminiTranscript(chat, name, g.showReasoning !== false, pictures), account.label), pictures: chatPictures(chat) };
+		}, progress, result, { label: 'Gemini chats', fromRaw: geminiFromRaw(account.label, g.showReasoning !== false), flag: { key: 'pinned', of: (item) => byId.get(item.uuid)?.pinned === true }, ...(g.downloadFiles !== false ? { pictures: (url: string) => a.picture(url) } : {}) });
 	} catch (e) {
 		const paused = pausedBy(e, g, result);
 		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.

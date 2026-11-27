@@ -5,7 +5,7 @@
 // the sites answer, and talks to nothing but those sites and 127.0.0.1.
 
 import { fetchFrames, fromBase64, type LinkRequest } from '../../src/link/protocol';
-import { isLinkOpenPage, isLinkPage, isLinkTarget } from '../../src/link/sites';
+import { isLinkImage, isLinkOpenPage, isLinkPage, isLinkTarget, LINK_IMAGE_PAGE } from '../../src/link/sites';
 import { pageCall, pageFetch, pageRead, readyCheck } from './page';
 
 // Timers go through self: this is a service worker, which has no window.
@@ -118,6 +118,15 @@ async function fetchTab(origin: string): Promise<number> {
 async function handle(msg: LinkRequest & { id: number }): Promise<unknown[]> {
 	switch (msg.op) {
 		case 'fetch': {
+			// A picture Gemini made: fetched from a Gemini tab with your login, as Gemini's own page does. GET only.
+			if (isLinkImage(msg.url)) {
+				if (msg.method !== 'GET' || msg.body64 !== undefined) throw new LinkFail('not-allowed', 'method not allowed');
+				const tabId = await fetchTab(LINK_IMAGE_PAGE);
+				const r = await inPage(tabId, pageFetch, [{ url: msg.url, method: 'GET', headers: {}, redirect: 'follow' as const }]);
+				// Only a picture comes back; anything else (a sign-in page) goes back as an empty answer.
+				const type = Object.entries(r.headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '';
+				return fetchFrames(msg.id, r.status, r.headers, type.toLowerCase().startsWith('image/') ? fromBase64(r.body64) : new Uint8Array(0));
+			}
 			if (!isLinkTarget(msg.url) || !isLinkPage(msg.url)) throw new LinkFail('not-allowed', 'site not allowed');
 			if (msg.method !== 'GET' && msg.method !== 'POST') throw new LinkFail('not-allowed', 'method not allowed');
 			const tabId = await fetchTab(originOf(msg.url)!);
