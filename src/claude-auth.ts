@@ -8,11 +8,14 @@ import { loginRef } from './accounts';
 import { cookieValue } from './login';
 import { isUuid } from './schema';
 import type { ClaudeAccount } from './settings';
+import { transportFor, type Transport } from './transport';
 
 export interface ClaudeAuth {
 	getKey: () => string | null;
 	orgId: string;
 	source: 'login window' | 'secret storage' | 'none';
+	/** How this account's requests reach claude.ai. */
+	transport: Transport;
 }
 
 export async function claudeAuth(plugin: AIChatBridge, account: ClaudeAccount): Promise<ClaudeAuth> {
@@ -42,5 +45,6 @@ export async function claudeAuth(plugin: AIChatBridge, account: ClaudeAccount): 
 		getKey: () => key,
 		orgId,
 		source: fromLogin ? 'login window' : fromSecret ? 'secret storage' : 'none',
+		transport: transportFor(login),
 	};
 }

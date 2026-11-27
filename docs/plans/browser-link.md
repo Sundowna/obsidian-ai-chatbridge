@@ -184,6 +184,23 @@ Notes for later stages:
 - Gemini list rows are at `payload[2]` (as `wire.ts` reads them), not `[0]`.
 - Claude in Chrome hides any result whose key mentions "token" or "session"; use neutral keys when testing this way.
 
+### Stage 1 status (27 Nov 2026)
+
+Done in code; `test:ci` 1036 → 1077 PASS (41 new in `test:transport`), 0 FAIL; lint 0 errors, same 14 warnings; build OK. Tests proven to bite (removing `bl` from the page code or dropping headers fails them).
+
+| Piece | Where |
+|---|---|
+| Interface | `src/transport/types.ts`: `request(SiteRequest)` (headers named in `loginOnly` carry the login window's login: Cookie, and for ChatGPT User-Agent), `fetchInBrowser`/`canFetchInBrowser` (was `loginFetch`/`hasLoginFetch`), `isLoggedIn`, `openPage(url, ReadyCheck)` returning a `SitePage` with `call(PageCall)` |
+| Login window | `src/transport/login-window.ts`: `requestUrl` as before; `pageCallCode` builds the old page code from a `PageCall` (`wiz-at`, `sapisidhash`); `READY_CODE` for `gemini-signed-in` / `studio-ready` |
+| Switch | `src/transport/index.ts` `transportFor(login)`: always the login window for now |
+| Callers moved | `api.ts` (3 request sites; `ClaudeApi` takes the transport, from `claudeAuth`), `chatgpt/api.ts` (`request`, start page, generated files, login check), `gemini/api.ts`, `studio/api.ts` |
+| Left as is | `probeOrganizations`, `probeAuthSession` (pasted-login test), ChatGPT signed file links on other hosts, `claude-auth.ts` cookie reads (Stage 5), Lumo |
+| Test change | `test-error-log.ts`: its fake page also answers `call()`; same checks |
+
+Differences from before (none user-visible): Gemini query order (`bl`, `f.sid` now added last) and `_reqid` made in the plugin, not the page; AI Studio hash uses `location.origin` (the ready check guarantees it is `https://aistudio.google.com`).
+
+**Not done:** the manual byte-identical sync in a test vault (needs logins in the test vault's login windows). Stage 4 compares both routes anyway.
+
 ---
 
 ## 5. Research results (27 Nov 2026)

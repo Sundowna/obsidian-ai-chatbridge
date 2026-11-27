@@ -23,7 +23,7 @@ export async function diagnoseActiveChat(plugin: AIChatBridge): Promise<void> {
 		return;
 	}
 	const account = s.claude.find((a) => a.web.index[uuid]) ?? s.claude[0]!;
-	const { getKey, orgId: org } = await claudeAuth(plugin, account);
+	const { getKey, orgId: org, transport } = await claudeAuth(plugin, account);
 	// Read-only RPCs from claude.ai's own ConversationService definition.
 	const variants: { name: string; method: ReadRpc; body: string | Uint8Array }[] = [
 		{ name: '6 ReadConversation json', method: 'ReadConversation', body: JSON.stringify({ conversationId: uuid, displayLanguage: 'en' }) },
@@ -33,7 +33,7 @@ export async function diagnoseActiveChat(plugin: AIChatBridge): Promise<void> {
 
 	const lines: string[] = [];
 	try {
-		const api = new ClaudeApi(org, getKey, { provider: 'claude', accountId: account.id });
+		const api = new ClaudeApi(org, getKey, { provider: 'claude', accountId: account.id }, transport);
 		await ensureFolder(app, OUT);
 		const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 		for (const v of variants) {

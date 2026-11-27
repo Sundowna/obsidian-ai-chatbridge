@@ -268,7 +268,7 @@ export async function runSync(plugin: AIChatBridge, account: ClaudeAccount, prog
 
 	try {
 		if (auth.source === 'none') throw new StopError('Not logged in to claude.ai. Select "Log in" for this account in the plugin settings.');
-		const api = new ClaudeApi(auth.orgId, getKey, { provider: 'claude', accountId: account.id });
+		const api = new ClaudeApi(auth.orgId, getKey, { provider: 'claude', accountId: account.id }, auth.transport);
 
 		// 1. Read the whole chat list, 30 at a time.
 		const observations = s.includeArchived === true ? new ArchiveObservations() : undefined;

@@ -9,7 +9,8 @@
 
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { StopError } from '../api';
-import { cookieHeader, cookieValue, hasLoginFetch, isLoggedIn, loginFetch, loginUserAgent, type LoginRef } from '../login';
+import { cookieHeader, cookieValue, loginUserAgent, type LoginRef } from '../login';
+import { transportFor, type Transport } from '../transport';
 import { checkGptFileInfo, isChatId, isFileId, isGptFileGone, isMessageId } from './schema';
 import { fingerprint, GptRateLimitError, retryDeadline } from './recovery';
 import { sandboxPath } from './files';
@@ -18,6 +19,8 @@ import { describePage, fallbackCookie, findAccessToken, inventoryIdentity, maskS
 import { recordAnswer, recordError, recordFetchAnswer, type ErrorSource } from '../error-log';
 
 const ORIGIN = 'https://chatgpt.com';
+/** The headers that carry the login window's login (its cookies and its browser name). */
+const LOGIN_HEADERS = ['Cookie', 'User-Agent'] as const;
 
 /** Paths we may GET (exact, or the prefix before an ID). */
 const ALLOWED = [
@@ -142,13 +145,20 @@ export class GptApi {
 		private token: string | null,
 	) {}
 
+	private chosen?: Transport;
+	/** How this account's requests reach chatgpt.com (made on first use). */
+	private get transport(): Transport {
+		return (this.chosen ??= transportFor(this.login));
+	}
+
 	/**
 	 * Reads the login window's cookies and gets the page key. Without a login there, uses the
 	 * pasted session cookie (`fallback`, from secret storage) instead. Stops if neither works.
 	 */
 	static async connect(login: LoginRef, fallback: string | null = null): Promise<GptApi> {
 		let api: GptApi;
-		const pasted = !(await isLoggedIn(login));
+		const transport = transportFor(login);
+		const pasted = !(await transport.isLoggedIn());
 		if (!pasted) {
 			api = new GptApi(login, await cookieHeader(login), await cookieValue(login, 'oai-did'), loginUserAgent(login), null);
 		} else {
@@ -158,7 +168,8 @@ export class GptApi {
 			api = new GptApi(login, cookie, null, loginUserAgent(login), null);
 		}
 		let html: string;
-		if (!pasted && hasLoginFetch(login)) {
+		api.chosen = transport;
+		if (!pasted && transport.canFetchInBrowser()) {
 			// Through the login window's own storage, so the renewed login cookie chatgpt.com
 			// sends back is kept there. Before 0.33 it was dropped, and after some days the
 			// stored login no longer counted (seen 2026-11-16).
@@ -358,7 +369,7 @@ export class GptApi {
 
 	/** The generated-file request itself, through the login window (redirects left to the caller). */
 	protected async sandboxFetch(href: string): Promise<Response> {
-		return loginFetch(this.login, href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual' });
+		return this.transport.fetchInBrowser(href, { method: 'GET', headers: this.headers('*/*', true), redirect: 'manual' });
 	}
 
 	/**
@@ -370,7 +381,7 @@ export class GptApi {
 		if (this.deviceId) headers['OAI-Device-Id'] = this.deviceId;
 		let res: Response;
 		try {
-			res = await loginFetch(this.login, ORIGIN + '/', { method: 'GET', headers, credentials: 'include', redirect: 'manual' }, 60_000);
+			res = await this.transport.fetchInBrowser(ORIGIN + '/', { method: 'GET', headers, credentials: 'include', redirect: 'manual' }, 60_000);
 		} catch (e) {
 			const why = `Network error: ${this.redact(e instanceof Error ? e.message : String(e))}`;
 			recordError(this.source, { service: 'ChatGPT', method: 'GET', url: `${ORIGIN}/ (login window)`, status: null, message: why, secrets: this.secrets });
@@ -417,7 +428,7 @@ export class GptApi {
 		const waits = method === 'GET' ? NETWORK_RETRY_WAITS_MS : [];
 		for (let attempt = 0; ; attempt++) {
 			try {
-				res = await requestUrl({ url: url.toString(), method, headers, throw: false });
+				res = await this.transport.request({ url: url.toString(), method, headers, loginOnly: LOGIN_HEADERS });
 				break;
 			} catch (e) {
 				const wait = waits[attempt];
