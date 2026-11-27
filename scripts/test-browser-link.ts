@@ -28,6 +28,7 @@ import { pageCall, pageRead, readyCheck } from '../extension/src/page';
 import { GeminiApi, geminiBase } from '../src/gemini/api';
 import { checkLogin, forgetLogin } from '../src/login-check';
 import { StopError } from '../src/api';
+import { ShapeError } from '../src/schema';
 import { StudioApi } from '../src/studio/api';
 import { runGeminiSync } from '../src/gemini/sync';
 import { runStudioSync } from '../src/studio/sync';
@@ -664,6 +665,23 @@ async function testGeminiLoginCheck() {
 		account.web.googleUser = undefined;
 		const missing = await runGeminiSync(plugin, account);
 		expect('Gemini login check: through the Browser link another Google login is skipped, not stopped', !missing.stopped && (missing.linkSkipped ?? '').includes('but this account belongs to') && account.web.userId === '111', missing.stopped ?? missing.linkSkipped);
+
+		// One chat Google sends in an odd shape is skipped and named; the third in one run stops (odd-chats.ts).
+		const item = (n: number) => ({ uuid: `c_odd${n}`, name: `Odd ${n}`, created_at: '2026-11-27T08:00:00.000Z', updated_at: `2026-11-27T08:0${n}:00.000Z`, pinned: false });
+		let chats = [item(1)];
+		accounts = ['111'];
+		GeminiApi.connect = async () => ({
+			accountId: async () => '111',
+			listChats: async (_w: unknown, _p: unknown, settled?: (page: unknown[], pinned: boolean) => boolean) => { settled?.([], true); settled?.(chats, false); return chats; },
+			chatTurns: async () => { throw new ShapeError('odd turn'); },
+			close: () => undefined,
+		} as unknown as GeminiApi);
+		const odd = await runGeminiSync(plugin, account);
+		expect('Gemini odd chat: one odd chat is skipped and named, the sync goes on', !odd.stopped && !odd.linkSkipped && odd.failed.includes('Odd 1') && odd.newCount === 0, odd.stopped ?? odd.linkSkipped ?? odd.failed.join());
+		chats = [item(1), item(2), item(3)];
+		account.web.listCatalog = undefined;
+		const many = await runGeminiSync(plugin, account);
+		expect('Gemini odd chat: the third odd chat in one run stops the sync', (many.stopped ?? '').includes('could not be verified'), many.stopped);
 	} finally {
 		GeminiApi.connect = connect;
 		console.error = realError;
