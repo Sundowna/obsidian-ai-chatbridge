@@ -30,7 +30,7 @@ export interface LinkServerOptions {
 
 /** The page behind the "Open in browser" button. The extension switches it to its own page. */
 export const OPEN_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI ChatBridge Browser link</title>
-<style>:root{color-scheme:light dark}body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem}h1{font-size:1.25rem}code{font-size:.9em}</style></head>
+<style>:root{color-scheme:light dark}body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;background:#fff;color:#1d1d1f}@media (prefers-color-scheme:dark){body{background:#1e1e1e;color:#e6e6e6}}h1{font-size:1.25rem}code{font-size:.9em}</style></head>
 <body><h1>AI ChatBridge Browser link</h1>
 <p>If the ChatBridge extension is installed in this browser, its page opens now.</p>
 <p>Nothing happens? Then the extension is not in this browser: install it from the plugin's release page (github.com/Sundowna/obsidian-ai-chatbridge/releases), or open this address in the browser where it is installed.</p>

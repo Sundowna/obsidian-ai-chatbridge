@@ -20,7 +20,13 @@ export async function openInBrowser(plugin: AIChatBridge): Promise<boolean> {
 		new Notice('Browser link: choose "Browser link" as the login method of an account first.');
 		return false;
 	}
-	window.open(`http://127.0.0.1:${port}${LINK_OPEN_PATH}`);
+	const url = `http://127.0.0.1:${port}${LINK_OPEN_PATH}`;
+	// The system's default browser, not Obsidian's own web viewer (which would catch window.open
+	// and show the page in an Obsidian tab, where no extension runs).
+	const shell = (window as unknown as { electron?: { remote?: { shell?: { openExternal(u: string): Promise<void> } } } }).electron?.remote?.shell
+		?? (window as unknown as { require?: (m: string) => { shell?: { openExternal(u: string): Promise<void> } } }).require?.('electron')?.shell;
+	if (shell) await shell.openExternal(url);
+	else window.open(url);
 	return true;
 }
 

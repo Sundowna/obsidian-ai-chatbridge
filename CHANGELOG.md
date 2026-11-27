@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.49.2 - 2026-11-27
+
+### Fixed
+- **Browser link: Open in browser opens your real browser** - with Obsidian's own **Web viewer** turned on, the button opened the page in an Obsidian tab, where the extension can't act, and the page looked empty. It now always goes to your system's default browser, and the page is readable in light and dark mode.
+
 ## 0.49.1 - 2026-11-27
 
 ### Added
