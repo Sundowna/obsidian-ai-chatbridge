@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.52.0 - 2026-11-27
+
+### Added
+- **AI memory: Gemini** - a new switch per Gemini account in the Memory tab, off by default. When on, the memory sync saves your own Gems with their description and instructions. Gemini's "Instructions for Gemini" cannot be read yet; the snapshot says so.
+
 ## 0.51.0 - 2026-11-27
 
 ### Added

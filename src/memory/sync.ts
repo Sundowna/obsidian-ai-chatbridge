@@ -16,11 +16,13 @@ import { isPrivatePath, pickBackend, type SqliteBackend } from '../hermes/reader
 import { appendLog } from '../log';
 import { dailyNoteName, safeTitle } from '../naming';
 import type { ProgressFn } from '../progress';
-import { cleanFolder, type ChatgptAccount, type ClaudeAccount, type LumoAccount } from '../settings';
+import { cleanFolder, type ChatgptAccount, type ClaudeAccount, type GeminiAccount, type LumoAccount } from '../settings';
 import { createNew, ensureFolder, findFile, writeOver } from '../vaultio';
 import { captureChatgpt, type MemoryGptApi } from './chatgpt-web';
 import { captureClaude, type MemoryClaudeApi } from './claude-web';
 import { captureLumo, type MemoryLumoApi } from './lumo-web';
+import { captureGemini, type MemoryGeminiApi } from './gemini-web';
+import { GeminiApi } from '../gemini/api';
 import { describeHits, redact } from './redact';
 import { hashOfNote, renderBody, renderNote, sha256 } from './render';
 import { captureClaudeCode, captureCodex } from './sources';
@@ -54,8 +56,11 @@ export const claudeMemoryAccounts = (plugin: AIChatBridge): ClaudeAccount[] => p
 /** The Lumo accounts whose memories in Lumo are turned on. */
 export const lumoMemoryAccounts = (plugin: AIChatBridge): LumoAccount[] => plugin.settings.lumo.filter((a) => plugin.settings.memory.lumoWeb?.[a.id] === true);
 
+/** The Gemini accounts whose own Gems are turned on. */
+export const geminiMemoryAccounts = (plugin: AIChatBridge): GeminiAccount[] => plugin.settings.gemini.filter((a) => plugin.settings.memory.geminiWeb?.[a.id] === true);
+
 export const anyMemoryEnabled = (plugin: AIChatBridge): boolean =>
-	plugin.settings.memory.codexLocal || plugin.settings.memory.claudeCodeLocal || claudeMemoryAccounts(plugin).length > 0 || chatgptMemoryAccounts(plugin).length > 0 || lumoMemoryAccounts(plugin).length > 0;
+	plugin.settings.memory.codexLocal || plugin.settings.memory.claudeCodeLocal || claudeMemoryAccounts(plugin).length > 0 || chatgptMemoryAccounts(plugin).length > 0 || lumoMemoryAccounts(plugin).length > 0 || geminiMemoryAccounts(plugin).length > 0;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const dateOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -73,6 +78,8 @@ export interface MemoryRunOptions {
 	claude?: (account: ClaudeAccount) => Promise<MemoryClaudeApi>;
 	/** The wait between two memory file reads on claude.ai, and between two pages of Lumo's project list (ms). */
 	pauseMs?: number;
+	/** The connection to Gemini for an account; a test hands in a fake. */
+	gemini?: (account: GeminiAccount) => Promise<MemoryGeminiApi>;
 	/** The connection to Lumo for an account; a test hands in a fake. Closed by the caller when given. */
 	lumo?: (account: LumoAccount) => Promise<MemoryLumoApi>;
 }
@@ -86,7 +93,8 @@ export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn =
 		const web = chatgptMemoryAccounts(plugin);
 		const claudeWeb = claudeMemoryAccounts(plugin);
 		const lumoWeb = lumoMemoryAccounts(plugin);
-		const steps = (m.codexLocal ? 1 : 0) + (m.claudeCodeLocal ? 1 : 0) + claudeWeb.length + web.length + lumoWeb.length;
+		const geminiWeb = geminiMemoryAccounts(plugin);
+		const steps = (m.codexLocal ? 1 : 0) + (m.claudeCodeLocal ? 1 : 0) + claudeWeb.length + web.length + lumoWeb.length + geminiWeb.length;
 		let step = 0;
 		const fs = o.fs === undefined ? nodeDesktopFs() : o.fs;
 		if (local && !fs) throw new Error('AI memory on this computer can only be read in Obsidian on desktop.');
@@ -120,6 +128,19 @@ export async function runMemorySync(plugin: AIChatBridge, progress: ProgressFn =
 			progress(`AI memory: reading ChatGPT (${acc.label})…`, step++, steps);
 			const api = o.gpt ? await o.gpt(acc) : await GptApi.connect(loginRef('chatgpt', acc), pastedSession(plugin.app, acc.web.secretId));
 			await save(plugin, await captureChatgpt(api, acc.label), base, now, result);
+		}
+		for (const acc of geminiWeb) {
+			progress(`AI memory: reading Gemini (${acc.label})…`, step++, steps);
+			if (o.gemini) {
+				await save(plugin, await captureGemini(await o.gemini(acc), acc.label), base, now, result);
+				continue;
+			}
+			const g = await GeminiApi.connect(loginRef('gemini', acc), pastedSession(plugin.app, acc.web.secretId));
+			try {
+				await save(plugin, await captureGemini(g, acc.label), base, now, result);
+			} finally {
+				g.close();
+			}
 		}
 		for (const acc of lumoWeb) {
 			progress(`AI memory: reading Lumo (${acc.label})…`, step++, steps);

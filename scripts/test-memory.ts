@@ -452,6 +452,40 @@ async function main() {
 		settings.memory.codexLocal = true;
 	}
 
+
+	// ---- Gemini: your own Gems (made-up payload in the shape seen live on 2026-11-27) ----
+	{
+		const gem = (id: string, name: string, description: string, instructions: string) => [id, [name, description, null, null, null, null, ['', null, null, ['#C88EE1'], ['#9700D2']], false, false, [], [], 0, null, false], [instructions, null, [1]], false, null, [true, true, true]];
+		let gems: unknown = [null, null, [gem('aa11', 'Writer', 'Edits my German', 'Antworte kurz. Passwort: geheim123'), gem('bb22', 'Private diary', 'x', 'never shown'), gem('cc33', 'Writer', '', 'Second one')]];
+		const gemAsked: string[] = [];
+		const fakeGemini = async () => ({ myGems: async () => (gemAsked.push('gems'), gems) });
+		const gemAccount = settings.gemini[0]!;
+		settings.memory.codexLocal = false;
+		const gweb = (now: Date) => runMemorySync(plugin, undefined, { fs: null, now, gemini: fakeGemini });
+		const g0 = await gweb(new Date(2026, 10, 28, 9, 0, 0));
+		expect('Gemini memory: off by default, nothing is asked', g0.newCount === 0 && !gemAsked.length);
+		settings.memory.geminiWeb = { [gemAccount.id]: true };
+		const GM = `30 Sources/AI Memory/Gemini/${gemAccount.label}`;
+		const g1 = await gweb(new Date(2026, 10, 28, 9, 5, 0));
+		const gsnap2 = files.get(`${GM}/2026-11-28.md`) ?? '';
+		expect('Gemini memory sync 1: one snapshot, your Gems by name, the same name kept apart, Private left out',
+			g1.newCount === 1 && (gsnap2.match(/^## \/.*$/gm) ?? []).join(' | ') === '## /gems/Writer | ## /gems/Writer (2)' && !gsnap2.includes('never shown'), `${g1.stopped ?? ''} ${(gsnap2.match(/^## \/.*$/gm) ?? []).join(' | ')}`);
+		expect('Gemini memory sync 1: description and instructions, the filter applies', gsnap2.includes('--- description ---\nEdits my German\n\n--- instructions ---\nAntworte kurz. Passwort: [REDACTED]') && !gsnap2.includes('geheim123'));
+		expect('Gemini memory sync 1: places say what was and was not read', gsnap2.includes('- `your Gems`: 2 Gems') && gsnap2.includes('- `skipped`: 1 Gem named Private') && gsnap2.includes('- `Instructions for Gemini`: not read'));
+		const sizeG = files.size;
+		const g2 = await gweb(new Date(2026, 10, 29, 9, 0, 0));
+		expect('Gemini memory sync 2: nothing changed = nothing written', g2.unchanged === 1 && files.size === sizeG);
+		gems = [null, null, []];
+		const g3 = await gweb(new Date(2026, 10, 29, 9, 30, 0));
+		expect('Gemini memory: no Gems left = a new snapshot that says none', g3.changedCount === 1 && (files.get(`${GM}/2026-11-29.md`) ?? '').includes('- `your Gems`: none'));
+		gems = { odd: true };
+		const g4 = await gweb(new Date(2026, 10, 30, 9, 0, 0));
+		expect('Gemini memory: a list in another shape stops and writes nothing', /does not know/.test(g4.stopped ?? '') && !files.has(`${GM}/2026-11-30.md`));
+		expect('Gemini memory: the switch is kept across a reload', normalizeSettings(JSON.parse(JSON.stringify(settings))).settings.memory.geminiWeb?.[gemAccount.id] === true);
+		settings.memory.geminiWeb = {};
+		settings.memory.codexLocal = true;
+	}
+
 	const mobile = await runMemorySync(plugin, undefined, { fs: null, backend, account: 'Tower' });
 	expect('sync: no file access (mobile) stops with a clear message', /desktop/.test(mobile.stopped ?? ''));
 }

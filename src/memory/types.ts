@@ -28,6 +28,8 @@ export interface MemorySettings {
 	chatgptWeb: Record<string, boolean>;
 	/** Lumo accounts (by account ID) whose memories and personalization in Lumo are read. Missing = none. */
 	lumoWeb?: Record<string, boolean>;
+	/** Gemini accounts (by account ID) whose own Gems are read. Missing = none. */
+	geminiWeb?: Record<string, boolean>;
 	/** The privacy filter: passwords, recovery codes, 2FA seeds, ID and card numbers become [REDACTED]. */
 	redact: boolean;
 	/** "<provider>/<account>" -> its last snapshot. */
