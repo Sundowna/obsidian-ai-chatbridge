@@ -1,7 +1,7 @@
 # Browser link: plan and implementation plan
 
 Handover document. Written 27 Nov 2026 by the session that did the kickoff (reading and research only).
-**Progress: stages 0–4 done; Stage 5 code done (live run with Claude and ChatGPT pending). See each "Stage N status" below.**
+**Progress: stages 0–5 done and merged as 0.45.1 (PR #70); Claude and ChatGPT live run passed. Next: Stage 6 (login-window fixes). See each "Stage N status" below.**
 
 The next session should read this file top to bottom, then start at [Stage 0](#stage-0-proof-in-the-real-browser).
 
@@ -280,7 +280,25 @@ Code done after merging main 0.45.0 (parity). `test:ci` 1332 → 1356 PASS, 0 FA
 | UI | Login method for Claude and ChatGPT; link login row; ChatGPT's "Made your account with Google?" recommends the Browser link |
 | Fix | The switch set by one plugin copy is reset on unload (a stale one broke `test:sync`) |
 
+**Signed-in run (27 Nov 2026, after the 0.45.1 merge)**, owner's Chrome, extension reloaded and paired (the live check now remembers its pairing in its output folder):
+
+| Check | Result |
+|---|---|
+| claude.ai organization read from the browser | yes |
+| Claude chat list, first page | 30 chats, more pages |
+| Claude newest chat read | 245 KB JSON |
+| ChatGPT login key from the start page in the browser | yes; workspace known |
+| ChatGPT chat list, first page | 20 chats (21 in all) |
+| ChatGPT newest chat read | 850 KB JSON |
+
 Merge with main: `accountId()` (parity) now reads a named page value (`google-account-id`) instead of a code string; a `read` op in the protocol and extension.
+
+### Stage 6 status (27 Nov 2026)
+
+| Part | Result |
+|---|---|
+| Google mode in every partition | Done in `src/login.ts`: a header rule for Google's sign-in hosts in the claude.ai and ChatGPT storages (Firefox name, no client hints) plus the page's own browser name switched on main-frame navigation to Google and back. Gemini's window unchanged. Tested against a stand-in Electron (8 checks, proven to bite); a real "Continue with Google" in the login window still needs the owner |
+| Popups as real child windows with a live `window.opener` | **Not possible from a plugin**: Obsidian's main process decides through `setWindowOpenHandler`, which must answer at once, and a plugin's handler only runs later through `electron.remote` (seen in 0.4x, see the comment in `openLogin`). Today's behaviour stays: the popup's address opens in the same window. Accounts that need a popup sign-in use the Browser link instead |
 
 Not done in Stage 3: Edge and Brave by hand; a signed-in run through the real extension (Stage 4 does it with the plugin wired in); attribution file (nothing was copied from sho7650/obsidian-AI-exporter or browser-tools-mcp, only the manifest idea, so no notice is needed yet).
 

@@ -100,13 +100,12 @@ async function main(): Promise<void> {
 		line(`CLAUDE  organization read from the browser: ${org ? 'yes' : 'no (not logged in?)'}`);
 		if (org) {
 			const api = new ClaudeApi(org, () => BROWSER_LINK_KEY, { provider: 'claude', accountId: 'live' }, t);
-			const first = await api.get(api.listPath(0));
-			const n = Array.isArray(first) ? first.length : 0;
-			line(`CLAUDE  first page of the chat list: ${n} chats`);
-			const top = Array.isArray(first) ? (first[0] as { uuid?: string } | undefined) : undefined;
+			const first = (await api.get(api.listPath(0))).json as { data?: { uuid?: string }[]; has_more?: boolean };
+			line(`CLAUDE  first page of the chat list: ${first.data?.length ?? 0} chats${first.has_more ? ', more pages' : ''}`);
+			const top = first.data?.[0];
 			if (top?.uuid) {
 				await wait();
-				const chat = await api.get(api.chatPath(top.uuid));
+				const chat = (await api.get(api.chatPath(top.uuid))).json;
 				writeFileSync(join(out, 'claude-chat.json'), JSON.stringify(chat, null, '	'));
 				line(`CLAUDE  newest chat read: ${JSON.stringify(chat).length} bytes of JSON`);
 			}
@@ -118,12 +117,12 @@ async function main(): Promise<void> {
 	if (only.includes('chatgpt')) try {
 		const g = await GptApi.connect({ provider: 'chatgpt', id: 'live' });
 		line(`CHATGPT login key found in the page: yes; workspace known: ${g.workspaceId ? 'yes' : 'no'}`);
-		const first = await g.get(g.listPath(0, false)) as { items?: { id?: string }[]; total?: number };
+		const first = (await g.get(g.listPath(0, false))).json as { items?: { id?: string }[]; total?: number };
 		line(`CHATGPT first page of the chat list: ${first.items?.length ?? 0} chats (total ${first.total ?? '?'})`);
 		const top = first.items?.[0]?.id;
 		if (top) {
 			await wait();
-			const chat = await g.get(g.chatPath(top));
+			const chat = (await g.get(g.chatPath(top))).json;
 			writeFileSync(join(out, 'chatgpt-chat.json'), JSON.stringify(chat, null, '	'));
 			line(`CHATGPT newest chat read: ${JSON.stringify(chat).length} bytes of JSON`);
 		}

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.47.1 - 2026-11-27
+
+### Fixed
+- **"Continue with Google" in the claude.ai and ChatGPT login windows** - Google's sign-in pages now see these windows as Firefox, as the Gemini window already did, while claude.ai and chatgpt.com keep seeing the usual browser name. If Google still refuses, use the [Browser link](README.md#browser-link-google-logins).
 ## 0.47.0 - 2026-11-27
 
 ### Added
