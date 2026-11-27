@@ -68,11 +68,21 @@ export function chatFiles(chat: Chat): FileTask[] {
  * Text that claude.ai keeps inside the chat JSON itself (issue #64): a long paste becomes a
  * "Pasted" card, a text file you add is read in. Both are messages[].attachments[] with
  * { id, file_name ("" for a paste), file_size, file_type, extracted_content } and no
- * file_uuid (seen 2026-11-07). Short ones are written into the note; longer ones are saved
- * as a file (with "Download files" on) and linked, else folded into the note.
+ * file_uuid (seen 2026-11-07). Up to 5 lines are written into the note; longer ones follow
+ * the "Long pasted text" setting (PasteMode).
  */
-export const PASTE_INLINE_CHARS = 3000;
-export const PASTE_INLINE_LINES = 60;
+export const PASTE_INLINE_CHARS = 500;
+export const PASTE_INLINE_LINES = 5;
+/** Lines of a long paste shown above its link to the saved file. */
+export const PASTE_PREVIEW_LINES = 5;
+
+/** Longer pastes: "file" = saved file, linked with a preview (all of it in the note while Download files is off); "note" = all of it in the note. */
+export type PasteMode = 'file' | 'note';
+
+/** The paste's lines, line endings made plain, trailing blank space dropped. */
+export function pastedLines(text: string): string[] {
+	return text.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
+}
 
 export interface PastedText {
 	/** Key in the file index: "pasted:<attachment id>", or null without an ID. */
@@ -90,9 +100,9 @@ export function pastedText(a: FileRef): PastedText | null {
 	return { key: id ? `pasted:${id}` : null, fileName: typeof a.file_name === 'string' ? a.file_name.trim() : '', text };
 }
 
-/** Short enough to read in the note itself (about two screen pages). */
+/** Short enough to read in the note itself: up to 5 lines (and 500 characters). */
 export function fitsInline(text: string): boolean {
-	return text.length <= PASTE_INLINE_CHARS && text.split('\n').length <= PASTE_INLINE_LINES;
+	return text.trimEnd().length <= PASTE_INLINE_CHARS && pastedLines(text).length <= PASTE_INLINE_LINES;
 }
 
 /** File name for a saved paste: its own name, else "Pasted text.md". */
@@ -100,8 +110,14 @@ export function pastedName(p: PastedText): string {
 	return p.fileName || 'Pasted text.md';
 }
 
+/** Does any message of the chat hold pasted text (shown in the note or saved as a file)? */
+export function hasPastedText(chat: Chat): boolean {
+	return chat.chat_messages.some((m) => (m.attachments ?? []).some((a) => !isUuid(a.file_uuid) && pastedText(a) !== null));
+}
+
 /** Long pasted texts of a chat (every branch), to save as files; each ID once. */
-export function pastedFiles(chat: Chat): FileTask[] {
+export function pastedFiles(chat: Chat, mode: PasteMode = 'file'): FileTask[] {
+	if (mode === 'note') return [];
 	const seen = new Set<string>();
 	const out: FileTask[] = [];
 	for (const m of chat.chat_messages) {

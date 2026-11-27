@@ -16,6 +16,7 @@ import type { HermesSettings } from './hermes/types';
 import type { MemorySettings } from './memory/types';
 import type { LastAll, LastRun } from './last-run';
 import type { EditedPolicy } from './versions';
+import type { PasteMode } from './files';
 import type { NoteState } from './types';
 
 /** A usable vault folder path, or null (empty, root, or inside a hidden folder like .obsidian). */
@@ -54,6 +55,8 @@ export interface ClaudeWebSettings {
 	recentFolderName: string;
 	/** Also download the files listed in a chat (Artifacts/ and Attachments/ next to the chat). */
 	downloadFiles: boolean;
+	/** Pasted text longer than 5 lines (issue #64): "file" = saved file, linked with a 5-line preview; "note" = all of it in the note. Missing = "file". */
+	pastedText?: PasteMode;
 	/** Also read claude.ai's archived chats (a list of their own). Missing = off. */
 	includeArchived?: boolean;
 	separateArchived?: boolean;
