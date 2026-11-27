@@ -2,6 +2,23 @@
 // both sides refuse anything else, so a stolen pairing cannot turn the link into a proxy.
 // Plain data and pure functions only (the extension imports this file too).
 
+/**
+ * The local page Obsidian opens in your browser to bring up the extension's own page:
+ * http://127.0.0.1:<port><LINK_OPEN_PATH>. The extension sees it load and switches the tab.
+ */
+export const LINK_OPEN_PATH = '/chatbridge-browser-link';
+
+/** True for that local page (any port: before pairing the extension does not know the port yet). */
+export function isLinkOpenPage(url: string | undefined): boolean {
+	if (!url) return false;
+	try {
+		const u = new URL(url);
+		return u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.pathname === LINK_OPEN_PATH;
+	} catch {
+		return false;
+	}
+}
+
 /** Sites whose pages the extension may open, and that a request may come from. */
 export const LINK_PAGE_ORIGINS = [
 	'https://claude.ai',

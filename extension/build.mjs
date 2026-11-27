@@ -3,7 +3,7 @@
 //   npm run build:extension
 
 import esbuild from 'esbuild';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +26,7 @@ await esbuild.build({
 });
 copyFileSync(join(here, 'manifest.json'), join(out, 'manifest.json'));
 copyFileSync(join(here, 'src/options.html'), join(out, 'options.html'));
+cpSync(join(here, 'icons'), join(out, 'icons'), { recursive: true });
 console.log(`Extension built: ${out}`);
 
 // Firefox: the same code; its manifest runs the background as a script (Firefox has no
@@ -34,6 +35,7 @@ const ff = join(here, 'dist-firefox');
 rmSync(ff, { recursive: true, force: true });
 mkdirSync(ff, { recursive: true });
 for (const f of ['background.js', 'options.js', 'options.html']) copyFileSync(join(out, f), join(ff, f));
+cpSync(join(here, 'icons'), join(ff, 'icons'), { recursive: true });
 const manifest = JSON.parse(readFileSync(join(here, 'manifest.json'), 'utf8'));
 delete manifest.minimum_chrome_version;
 manifest.background = { scripts: ['background.js'] };

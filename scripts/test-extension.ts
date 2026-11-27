@@ -149,6 +149,17 @@ async function run(): Promise<void> {
 	expect('options: the code field is emptied after pairing', (await evalIn(optSession, `document.getElementById('code').value`)) === '');
 	const token = store.value;
 
+	// Obsidian's "Open in browser": the local page turns into the extension's page.
+	const op = await cdp('Target.createTarget', { url: `http://127.0.0.1:${port}/chatbridge-browser-link` });
+	const opened = await until(async () => {
+		const r = await cdp('Target.getTargets');
+		return ((r.result?.targetInfos ?? []) as { targetId: string; url: string }[]).some((t) => t.targetId === op.result?.targetId && t.url === `chrome-extension://${extId}/options.html`);
+	}, 10_000);
+	expect('open in browser: the local page becomes the extension\'s page in the same tab', opened);
+	await cdp('Target.closeTarget', { targetId: op.result?.targetId });
+	expect('options: the ChatBridge logo shows on the page', Number(await evalIn(optSession, `new Promise((r) => { const i = document.querySelector('h1 img'); if (!i) r(0); else if (i.complete) r(i.naturalWidth); else i.onload = () => r(i.naturalWidth); })`)) === 48);
+	expect('options: warns to keep the browser open while syncing', /Keep this browser open while Obsidian syncs/.test(String(await evalIn(optSession, `document.body.innerText`))));
+
 	// A web page (not the extension) tries the port.
 	const pg = await cdp('Target.createTarget', { url: 'about:blank' });
 	const pgSession = (await cdp('Target.attachToTarget', { targetId: pg.result?.targetId, flatten: true })).result?.sessionId as string;

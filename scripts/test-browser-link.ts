@@ -22,6 +22,7 @@ import { GptApi } from '../src/chatgpt/api';
 import { runSync } from '../src/sync';
 import { runGptSync } from '../src/chatgpt/sync';
 import { asFirefoxHeaders, isGoogleSignIn, openLogin } from '../src/login';
+import { isLinkOpenPage, LINK_OPEN_PATH } from '../src/link/sites';
 import { pageCall, pageRead, readyCheck } from '../extension/src/page';
 import { GeminiApi } from '../src/gemini/api';
 import { StudioApi } from '../src/studio/api';
@@ -459,6 +460,36 @@ async function testGoogleMode() {
 	}
 }
 
+// ---- 7. The local page behind "Open in browser" ----------------------------------------------
+
+async function testOpenPage() {
+	const { request } = await import('node:http');
+	const get = (port: number, path: string, host = `127.0.0.1:${port}`, method = 'GET') => new Promise<{ status: number; type: string; csp: string; body: string }>((resolve) => {
+		const r = request({ host: '127.0.0.1', port, path, method, headers: { host } }, (res) => {
+			let body = '';
+			res.on('data', (d: Buffer) => { body += d.toString(); });
+			res.on('end', () => resolve({ status: res.statusCode ?? 0, type: String(res.headers['content-type'] ?? ''), csp: String(res.headers['content-security-policy'] ?? ''), body }));
+		});
+		r.on('error', () => resolve({ status: 0, type: '', csp: '', body: '' }));
+		r.end();
+	});
+	const server = new LinkServer({ store: memStore() });
+	const port = await server.start();
+	try {
+		const ok = await get(port, LINK_OPEN_PATH);
+		expect('open page: served at 127.0.0.1 as a plain HTML page', ok.status === 200 && ok.type.startsWith('text/html'));
+		expect('open page: loads nothing (strict content policy, no scripts)', ok.csp.includes("default-src 'none'") && !/<script/i.test(ok.body));
+		expect('open page: says to keep the browser open while syncing', /Keep that browser open while Obsidian syncs/.test(ok.body));
+		expect('open page: a query string is fine', (await get(port, `${LINK_OPEN_PATH}?x=1`)).status === 200);
+		expect('open page: any other path is 404', (await get(port, '/')).status === 404 && (await get(port, '/chatbridge-browser-link/x')).status === 404);
+		expect('open page: another host name is 404 (DNS rebinding)', (await get(port, LINK_OPEN_PATH, `evil.example:${port}`)).status === 404);
+		expect('open page: only GET', (await get(port, LINK_OPEN_PATH, undefined, 'POST')).status === 404);
+		expect('open page: the extension knows it on any port, http on 127.0.0.1 only', isLinkOpenPage(`http://127.0.0.1:${port}${LINK_OPEN_PATH}`) && isLinkOpenPage('http://127.0.0.1:1234/chatbridge-browser-link?a') && !isLinkOpenPage('https://127.0.0.1:1/chatbridge-browser-link') && !isLinkOpenPage('http://localhost:1/chatbridge-browser-link') && !isLinkOpenPage('http://evil.com/chatbridge-browser-link') && !isLinkOpenPage(undefined));
+	} finally {
+		await server.stop();
+	}
+}
+
 async function main() {
 	testSwitch();
 	await testTransport();
@@ -466,6 +497,7 @@ async function main() {
 	await testSkip();
 	await testClaudeAndGpt();
 	await testGoogleMode();
+	await testOpenPage();
 	console.log(failures ? `${failures} Browser link check(s) FAILED.` : 'All Browser link checks passed.');
 	process.exit(failures ? 1 : 0);
 }
