@@ -45,6 +45,7 @@ async function testAutomaticResume() {
 	const h = harness();
 	let persisted = structuredClone(h.settings);
 	persisted.chatgpt[0]!.web.chatProgress = { inventoryKey: 'account:retry-test', scope: '[true,[],"",[]]', saved: 285, total: 926 };
+	persisted.chatgpt[0]!.desktop.enabled = true; // Codex local turned on (new vaults start with it off)
 	const commands = new Map<string, { checkCallback?: (checking: boolean) => boolean }>();
 	const flush = async (done: () => boolean) => {
 		for (let n = 0; n < 100; n++) {

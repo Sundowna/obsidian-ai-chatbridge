@@ -316,7 +316,8 @@ export const DEFAULT_CLAUDE_WEB: ClaudeWebSettings = {
 	downloadFiles: true,
 	index: {},
 	fileIndex: {},
-	cloudSessions: true,
+	// Off until you turn it on, like every coding tool (since 0.56.1; vaults saved before keep theirs).
+	cloudSessions: false,
 };
 
 export const DEFAULT_GPT: GptSettings = {
@@ -357,7 +358,8 @@ export const DEFAULT_STUDIO: StudioSettings = {
 	index: {},
 };
 
-export const desktopApp = (folder: string): DesktopAppSettings => ({ enabled: true, folder, extraFolders: [], index: {} });
+/** A desktop app's settings. New ones start off until you turn them on (since 0.56.1). */
+export const desktopApp = (folder: string, enabled = false): DesktopAppSettings => ({ enabled, folder, extraFolders: [], index: {} });
 
 export const DEFAULT_HERMES: HermesSettings = {
 	folder: 'AI Chats/Hermes',

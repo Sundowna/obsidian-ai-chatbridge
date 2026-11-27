@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.56.1 - 2026-11-27
+
+### Changed
+- **Coding tools start off** - in a new vault or a newly added account, Claude Code (local and cloud) and Codex local are off until you turn them on, like Codex cloud and Hermes already were. Vaults you already use keep their settings.
+
 ## 0.56.0 - 2026-11-27
 
 ### Added
