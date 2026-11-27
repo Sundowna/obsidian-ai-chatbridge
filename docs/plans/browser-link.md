@@ -166,7 +166,21 @@ Headless run, logged-out profile, Chrome 158:
 
 Spike fix: chatgpt.com has no `/favicon.ico`; the binary check now takes the hashed favicon from the page.
 
-**Still open:** the signed-in rows (Claude orgs, ChatGPT token, Gemini and AI Studio signed calls, `_account`, `lastActiveOrg`, `SAPISID`). Needs either Claude in Chrome connected to the owner's Chrome (not connected in this session), or the owner running `extension/spike/README.md` once.
+Signed-in run, owner's own Chrome 158 (through Claude in Chrome, page context, same code as `recipes.js` `pageFetch`; only statuses and yes/no were read):
+
+| Site | Fetch with browser cookies | Signed call (no eval) | Cookies readable by the page |
+|---|---|---|---|
+| Claude | `/api/organizations` 200, 1 org with `uuid` | not needed | `lastActiveOrg` yes |
+| ChatGPT | `/` 200 (831 KB, `accessToken` in HTML: yes); `/api/auth/session` 200, token yes, account ID yes | not needed | `oai-did` yes, `_account` yes |
+| Gemini | ready check (`SNlM0e`) true | `MaZiqc` with `wiz-at` 200, real rows with IDs | `SAPISID` yes |
+| AI Studio | ready values (API key, `SAPISID`) found | `ListPrompts` with `sapisidhash` 200, JSON | `SAPISID` yes |
+
+**Stage 0 done.** Option C (packaged functions, no code strings) works on all four sites; no userScripts, no debugger. Every cookie value the plugin reads today is reachable without the `cookies` permission (`sessionKey` is not needed under the Browser link).
+
+Notes for later stages:
+- AI Studio redirected the tab to `/onboarding` (account barely used there). The call still worked; Stage 4's ready check must not insist on `/library`.
+- Gemini list rows are at `payload[2]` (as `wire.ts` reads them), not `[0]`.
+- Claude in Chrome hides any result whose key mentions "token" or "session"; use neutral keys when testing this way.
 
 ---
 
