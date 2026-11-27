@@ -20,7 +20,7 @@
 
 **Default sorting structure:**
 
-<img width="371" height="646" alt="image" src="https://github.com/user-attachments/assets/63471285-d0fd-48bf-862e-e26470c3eaf4" />
+<img width="454" height="844" alt="2026-11-27 10_38_14-Greenshot" src="https://github.com/user-attachments/assets/b3e18a7b-8a14-4cc5-9c6b-e0f3ed1681d1" />
 
 
 Older changes are in the [changelog](CHANGELOG.md).
