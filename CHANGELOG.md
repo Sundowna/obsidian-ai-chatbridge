@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **ChatGPT: older photos are saved again** - chatgpt.com now serves some older photos only as a smaller, resized copy. These waited for ever as "size mismatch"; the resized copy is now saved. Other files of the wrong size are still skipped
+
 ## 0.41.7 - 2026-11-27
 
 ### Added
