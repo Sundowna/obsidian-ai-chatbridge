@@ -61,6 +61,12 @@ export interface StudioMessage {
 	thought?: boolean;
 	createdAt?: string;
 	tokens?: number;
+	/** Code the model ran (AI Studio's code execution): [10] = [language, code]. */
+	code?: { language: string; text: string };
+	/** What that code printed: [11] = [outcome, output]. */
+	codeResult?: string;
+	/** A picture in the prompt itself ([12] = [type, base64]), e.g. one the code drew. Its bytes stay in the raw row; `picture` names its place there. */
+	picture?: { type: string; chunk: number };
 }
 
 /** An AI Studio prompt's .json file. */

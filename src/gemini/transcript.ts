@@ -61,20 +61,84 @@ export function renderGeminiTranscript(chat: GeminiChat, jsonFileName: string, s
 	return fm.join('\n') + body.join('\n');
 }
 
-export function renderStudioTranscript(p: StudioPrompt, jsonFileName: string, showReasoning = true): string {
+/** A code block whose fence is longer than any backtick run inside. */
+function fenced(lang: string, text: string): string {
+	const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+	const fence = '`'.repeat(longest + 1);
+	return `${fence}${lang}\n${text.replace(/\n+$/, '')}\n${fence}`;
+}
+
+/** Picture chunks AI Studio repeats (the same picture twice in a row) are shown and saved once. */
+function repeatedPicture(p: StudioPrompt, i: number): boolean {
+	const m = p.messages[i];
+	const before = p.messages[i - 1];
+	if (!m?.picture || !before?.picture) return false;
+	const data = (k: number): string => {
+		const raw: unknown = p.raw;
+		const outer = Array.isArray(raw) ? (raw as unknown[])[13] : undefined;
+		const chunks = Array.isArray(outer) ? (outer as unknown[])[0] : undefined;
+		const c = Array.isArray(chunks) ? (chunks as unknown[])[k] : undefined;
+		const pic = Array.isArray(c) ? (c as unknown[])[12] : undefined;
+		return Array.isArray(pic) ? String((pic as unknown[])[1]) : '';
+	};
+	return data(m.picture.chunk) !== '' && data(m.picture.chunk) === data(before.picture.chunk);
+}
+
+/** The pictures of an AI Studio prompt, each with the file name it is saved under (repeats left out). */
+export function studioPictures(p: StudioPrompt): { url: string; name: string; chunk: number; type: string }[] {
+	const out: { url: string; name: string; chunk: number; type: string }[] = [];
+	p.messages.forEach((m, i) => {
+		if (!m.picture || repeatedPicture(p, i)) return;
+		out.push({ url: `studio:${p.id}#${m.picture.chunk}`, name: `AI Studio picture ${out.length + 1}`, chunk: m.picture.chunk, type: m.picture.type });
+	});
+	return out;
+}
+
+/**
+ * An AI Studio prompt as a note. A model turn's parts (the code it ran, the code's output, the
+ * pictures it made) stay under one heading. `pictures`: saved picture files by their key.
+ */
+export function renderStudioTranscript(p: StudioPrompt, jsonFileName: string, showReasoning = true, pictures?: ReadonlyMap<string, string>): string {
 	const fm = ['---', `uuid: ${p.id}`, `updated: ${p.updatedAt}`];
 	if (p.model) fm.push(`model: ${y(p.model)}`);
 	fm.push(`raw: ${y(`[[${jsonFileName}]]`)}`, 'unread: true', '---', '');
 	const body: string[] = [];
 	if (p.systemInstruction?.trim()) body.push(callout('System instructions', p.systemInstruction), '');
-	for (const m of p.messages) {
+	let open: 'user' | 'model' | null = null;
+	const heading = (m: StudioPrompt['messages'][number]) => {
+		if (open === m.role) return;
+		const when = m.createdAt ? ` · ${localDateTime(m.createdAt)}` : '';
+		body.push(`## ${m.role === 'user' ? 'You' : 'Model'}${when}`, '');
+		open = m.role;
+	};
+	p.messages.forEach((m, i) => {
 		if (m.thought) {
 			if (showReasoning) body.push(callout('Thinking', m.text || '(empty)'), '');
-			continue;
+			return;
 		}
-		const when = m.createdAt ? ` · ${localDateTime(m.createdAt)}` : '';
-		body.push(`## ${m.role === 'user' ? 'You' : 'Model'}${when}`, '', m.text.trim() || '*(no text)*', '');
-	}
+		if (m.code) {
+			heading(m);
+			body.push(callout(`Code (${m.code.language})`, fenced(m.code.language, m.code.text)), '');
+			return;
+		}
+		if (m.codeResult !== undefined) {
+			heading(m);
+			if (m.codeResult.trim()) body.push(callout('Code output', fenced('', m.codeResult)), '');
+			return;
+		}
+		if (m.picture) {
+			if (repeatedPicture(p, i)) return;
+			heading(m);
+			const path = pictures?.get(`studio:${p.id}#${m.picture.chunk}`);
+			body.push(path ? `![[${path}]]` : '*(Picture, not saved)*', '');
+			return;
+		}
+		// Text: a new heading only when the speaker changes; an empty message shows only as a turn of its own.
+		const fresh = open !== m.role;
+		heading(m);
+		if (m.text.trim()) body.push(m.text.trim(), '');
+		else if (fresh) body.push('*(no text)*', '');
+	});
 	return fm.join('\n') + body.join('\n');
 }
 
