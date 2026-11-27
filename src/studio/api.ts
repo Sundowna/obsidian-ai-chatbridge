@@ -47,7 +47,8 @@ export class StudioApi {
 		this.page.close();
 	}
 
-	async listPrompts(wait: () => Promise<void>, progress: (page: number) => void): Promise<ListItem[]> {
+	/** Every prompt of the library. `settled` is shown every page and may end the list early (quick-list.ts). */
+	async listPrompts(wait: () => Promise<void>, progress: (page: number) => void, settled?: (page: ListItem[]) => boolean): Promise<ListItem[]> {
 		const byId = new Map<string, ListItem>();
 		let token: string | null = null;
 		for (let page = 1; page <= MAX_PAGES; page++) {
@@ -55,7 +56,7 @@ export class StudioApi {
 			await wait();
 			const r = readPromptList(await this.call('ListPrompts', token ? [PAGE_SIZE, token] : [PAGE_SIZE]));
 			for (const it of r.items) if (!byId.has(it.uuid)) byId.set(it.uuid, it);
-			if (!r.next || r.next === token) return [...byId.values()];
+			if (settled?.(r.items) === true || !r.next || r.next === token) return [...byId.values()];
 			token = r.next;
 		}
 		throw new StopError('The AI Studio prompt list did not end. Nothing was saved.');

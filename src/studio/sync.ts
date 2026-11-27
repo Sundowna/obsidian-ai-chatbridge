@@ -10,12 +10,13 @@ import { OddChats, readOrSkip } from '../odd-chats';
 import { endCooldown, heldByCooldown, pausedBy } from '../cooldown-run';
 import { cleanFolder, MIN_DELAY_SECONDS, type GeminiAccount } from '../settings';
 import { masterRaw, mirrorRaw, rawBase } from '../raw-folders';
-import { emptyResult, failureText, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, writeLog, type GoogleSyncResult } from '../gemini/save';
+import { emptyResult, failureText, fileGone, SAME_GOOGLE_LOGIN, sameGoogleLogin, saveChats, studioFromRaw, writeLog, type GoogleSyncResult } from '../gemini/save';
 import { renderStudioTranscript } from '../gemini/transcript';
 import { pastedSession } from '../cookies';
 import { MassMissingError } from '../missing-guard';
 import { StudioApi } from './api';
 import { BrowserLinkUnavailable } from '../link/errors';
+import { listFailed, readList } from '../quick-list';
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
@@ -39,7 +40,12 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 		const twin = sameGoogleLogin(plugin.settings.gemini, account, account.web.userId);
 		if (twin) throw new StopError(SAME_GOOGLE_LOGIN(twin.label));
 		const odd = new OddChats();
-		const items = await a.listPrompts(wait, (page) => progress(`reading AI Studio library… page ${page}`));
+		// The library list: all of it, or only its recent part when the rest is known (quick-list.ts).
+		const list = await readList(st, { scope: 'prompts', fileGone: fileGone(plugin.app, st.index), now: Date.now() },
+			(settled) => a.listPrompts(wait, (page) => progress(`reading AI Studio library… page ${page}`), (page) => settled(page, false)));
+		if (list.changed) await plugin.saveSettings();
+		result.quickList = list.quick;
+		const items = list.rows.map((row) => row.item);
 		await saveChats(plugin, items, st.index, folder, masterRaw(plugin.settings) !== undefined ? mirrorRaw(folder, masterRaw(plugin.settings)) : rawBase(st.rawFolder) ?? folder, async (item) => {
 			// One prompt in an odd shape is skipped and tried again next run; the third one stops the sync.
 			const p = await readOrSkip(odd, item.name, () => a.prompt(item.uuid, wait));
@@ -48,9 +54,13 @@ export async function runStudioSync(plugin: AIChatBridge, account: GeminiAccount
 			return { createdAt: created, json: JSON.stringify(p, null, '\t'), md: (name) => tagAccount(renderStudioTranscript(p, name), account.label) };
 		}, progress, result, { label: 'AI Studio prompts', fromRaw: studioFromRaw(account.label) });
 	} catch (e) {
-		if (pausedBy(e, st, result)) await plugin.saveSettings();
+		const paused = pausedBy(e, st, result);
 		// Browser link: the browser is closed, not paired or not logged in. Skipped, not an error.
-		else if (e instanceof BrowserLinkUnavailable) result.linkSkipped = e.message;
+		const skipped = !paused && e instanceof BrowserLinkUnavailable;
+		// After a run that failed, the next one reads the whole library list again (quick-list.ts).
+		if (paused || (!skipped && listFailed(st))) await plugin.saveSettings();
+		if (paused) { /* waiting for the pause to end, not an error */ }
+		else if (skipped) result.linkSkipped = (e as Error).message;
 		else if (e instanceof StopError || e instanceof MassMissingError) result.stopped = e.message;
 		else if (e instanceof ShapeError) result.stopped = `AI Studio's answer could not be verified (${e.message}). Google may have changed it, so nothing more was saved.`;
 		else result.stopped = `Something went wrong while reading AI Studio (${failureText(e)}).`;

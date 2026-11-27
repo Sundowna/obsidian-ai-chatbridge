@@ -18,9 +18,9 @@ export const WEB_LOCAL = {
 	claude: ['index', 'fileIndex', 'cloudIndex', 'cooldownUntil', 'resumeAfter429', 'projectCatalog', 'archiveCleanup', 'listCatalog'],
 	chatgpt: ['index', 'fileIndex', 'codexCloudIndex', 'cooldownUntil', 'resumeAfter429', 'assetRetries', 'pendingCaptures', 'inventories', 'chatProgress', 'projectCatalog', 'archiveCleanup'],
 	lumo: ['index', 'fileIndex', 'cooldownUntil', 'resumeAfter429', 'projectCatalog'],
-	gemini: ['index', 'cooldownUntil', 'resumeAfter429'],
+	gemini: ['index', 'cooldownUntil', 'resumeAfter429', 'listCatalog'],
 } as const;
-export const STUDIO_LOCAL = ['index', 'cooldownUntil', 'resumeAfter429'] as const;
+export const STUDIO_LOCAL = ['index', 'cooldownUntil', 'resumeAfter429', 'listCatalog'] as const;
 /** A desktop app's sessions exist on one computer only, and so do its extra folders. */
 export const DESKTOP_LOCAL = ['extraFolders', 'index', 'ignored', 'groupCache'] as const;
 
