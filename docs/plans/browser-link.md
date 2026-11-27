@@ -1,7 +1,7 @@
 # Browser link: plan and implementation plan
 
 Handover document. Written 27 Nov 2026 by the session that did the kickoff (reading and research only).
-**Progress: stages 0–3 done, Stage 4 code done (signed-in run pending). See each "Stage N status" below.**
+**Progress: stages 0–4 done (Stage 4 signed-in run passed 27 Nov). Next: Stage 5 (Claude and ChatGPT). See each "Stage N status" below.**
 
 The next session should read this file top to bottom, then start at [Stage 0](#stage-0-proof-in-the-real-browser).
 
@@ -248,8 +248,21 @@ Code done; real signed-in run **not done yet** (needs the owner's Chrome, see be
 | UI | `src/ui/browser-link-section.ts` (login method, link login row, pairing window, `accountReady`); small hooks in `web-panel.ts`, `overview-tab.ts`, `provider-tab.ts` |
 | Build | `esbuild.shared.mjs` (options shared by the build and `test:bundle`): `ws` aliased to its Node build, `bufferutil` / `utf-8-validate` external. **Bug fixed:** since Stage 2 the bundle held `ws`'s browser stub, so the server would have thrown in Obsidian |
 
+**Signed-in run (27 Nov 2026, 12:08)**, owner's own Chrome, extension loaded unpacked, paired through its options page; `npm run live:browser-link -- <folder>` runs the plugin's real link server, `GeminiApi` / `StudioApi` and renderers:
+
+| Check | Result |
+|---|---|
+| Pairing | OK |
+| Gemini opened signed in | OK, 3 s |
+| Google account number (named page value) | read |
+| Gemini chat list | 1 chat (2 list pages) |
+| Newest chat read and rendered | 3 turns, 27 KB JSON, note with frontmatter `uuid`, `created`, `updated`, `raw`, `unread` |
+| AI Studio opened signed in | OK |
+| AI Studio library | 0 prompts (empty, as in Stage 0) |
+
+Comparison with the login-window route: the notes come from the same renderer, and `test:browser-link` proves both routes send byte-identical requests and get the same answers. A side-by-side sync was not possible: the Google login window is the route that fails on this computer. AI Studio's read path was proven with real data in Stage 0 only; the library is empty now.
+
 Known gaps:
-- **Signed-in run**: the owner loads `extension/dist` unpacked in Chrome, pairs, and syncs one Gemini account and AI Studio in a test vault; then compare files and frontmatter with the login-window route.
 - With a skip, Gemini and AI Studio each show their own notice (two notices for one closed browser).
 - The status bar shows the skip only as a notice; no permanent link state there yet.
 - The first Google account of a fresh install keeps the login window (only accounts added later default to the Browser link).
