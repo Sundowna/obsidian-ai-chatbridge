@@ -27,8 +27,9 @@ type Legacy = Partial<ClaudeWebSettings> & Partial<Omit<Settings, 'claude' | 'ch
 
 type Saved = Partial<Settings>;
 
+// A saved account without the switch had it on (the default before 0.56.1); only new setups start off.
 const hydrateDesktop = (d: Partial<DesktopAppSettings> | undefined, folder: string): DesktopAppSettings => ({
-	...desktopApp(folder),
+	...desktopApp(folder, true),
 	...d,
 	extraFolders: [...(d?.extraFolders ?? [])],
 	index: { ...(d?.index ?? {}) },
@@ -96,7 +97,7 @@ function seedChatProgress(g: GptSettings): void {
 const hydrateClaude = (a: Partial<ClaudeAccount>): ClaudeAccount => ({
 	id: a.id ?? DEFAULT_ACCOUNT_ID,
 	label: a.label ?? DEFAULT_ACCOUNT_LABEL,
-	web: { ...DEFAULT_CLAUDE_WEB, ...a.web, projects: [...(a.web?.projects ?? [])], index: { ...(a.web?.index ?? {}) }, fileIndex: { ...(a.web?.fileIndex ?? {}) } },
+	web: { ...DEFAULT_CLAUDE_WEB, cloudSessions: true, ...a.web, projects: [...(a.web?.projects ?? [])], index: { ...(a.web?.index ?? {}) }, fileIndex: { ...(a.web?.fileIndex ?? {}) } },
 	desktop: hydrateDesktop(a.desktop, DEFAULT_SETTINGS.claude[0]!.desktop.folder),
 });
 
@@ -165,8 +166,10 @@ function hydrateHermes(h: Partial<HermesSettings> | undefined, claudeChatFolder:
 /** `migrated` = flat settings were converted (the caller keeps a copy of the old file). */
 export function normalizeSettings(loaded: unknown): { settings: Settings; migrated: boolean } {
 	const raw = (loaded ?? {}) as Saved & Legacy;
-	const flat = !Array.isArray(raw.claude);
-	const saved: Saved = flat ? fromLegacy(raw) : raw;
+	// Nothing saved yet = a new vault: the defaults as they are (coding tools off), not the old flat layout.
+	const fresh = loaded === null || loaded === undefined;
+	const flat = !fresh && !Array.isArray(raw.claude);
+	const saved: Saved = flat ? fromLegacy(raw) : fresh ? {} : raw;
 	const claude = saved.claude?.length ? saved.claude : DEFAULT_SETTINGS.claude;
 	const chatgpt = saved.chatgpt?.length ? saved.chatgpt : DEFAULT_SETTINGS.chatgpt;
 	const hydratedClaude = claude.map(hydrateClaude);

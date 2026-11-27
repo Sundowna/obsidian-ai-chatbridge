@@ -451,6 +451,10 @@ async function accountsTest() {
 	expect('migrate: shared numbers', moved.settings.maxChatsPerRun === 7);
 	const again = normalizeSettings(structuredClone(moved.settings)).settings;
 	expect('migrate: reloading changes nothing', JSON.stringify(again) === JSON.stringify(moved.settings));
+	const fresh = normalizeSettings(null).settings;
+	expect('defaults: a new vault starts with every coding tool off (Claude Code local and cloud, Codex local)', !fresh.claude[0]!.desktop.enabled && !fresh.chatgpt[0]!.desktop.enabled && !fresh.claude[0]!.web.cloudSessions);
+	const older = normalizeSettings({ claude: [{ id: 'default', label: 'Main', web: { chatFolder: 'S/C' }, desktop: { folder: 'S/D', extraFolders: [], index: {} } }], chatgpt: [{ id: 'default', label: 'Main', web: { folder: 'S/G' }, desktop: { folder: 'S/X', extraFolders: [], index: {} } }] }).settings;
+	expect('defaults: a vault saved before keeps its coding tools on when it never stored the switch', older.claude[0]!.desktop.enabled && older.chatgpt[0]!.desktop.enabled && older.claude[0]!.web.cloudSessions === true);
 	expect('migrate: fresh install does not share the defaults', normalizeSettings(null).settings.claude[0]!.web.index !== normalizeSettings(null).settings.claude[0]!.web.index);
 
 	const s = normalizeSettings({ orgId: ORG_A, chatFolder: 'S/Claude Desktop/Chat', maxChatsPerRun: 0, logPath: 'log2.md', desktop: { quietMinutes: 0 } }).settings;
@@ -459,6 +463,8 @@ async function accountsTest() {
 	const work = addAccount(s, 'claude', 'Work') as ClaudeAccount;
 	const gptWork = addAccount(s, 'chatgpt', 'Work') as ChatgptAccount;
 	const [c0, g0] = [s.claude[0]!, s.chatgpt[0]!];
+	expect('add: new accounts have their coding tools off (local sessions and Claude Code cloud)', !work.desktop.enabled && !gptWork.desktop.enabled && !work.web.cloudSessions);
+	work.desktop.enabled = gptWork.desktop.enabled = true; // turned on, as the tests below need
 	expect('add: shares the first account\'s folders', work.web.chatFolder === c0.web.chatFolder && work.web.codeFolder === c0.web.codeFolder && work.desktop.folder === c0.desktop.folder && gptWork.web.folder === g0.web.folder && gptWork.desktop.folder === g0.desktop.folder);
 	expect('add: own login storage and own history', work.id !== 'default' && work.web.index !== s.claude[0]!.web.index);
 	work.web.orgId = ORG_B;
