@@ -21,6 +21,7 @@ import { ClaudeApi } from '../src/api';
 import { GptApi } from '../src/chatgpt/api';
 import { runSync } from '../src/sync';
 import { runGptSync } from '../src/chatgpt/sync';
+import { asFirefoxHeaders, isGoogleSignIn, openLogin } from '../src/login';
 import { pageCall, pageRead, readyCheck } from '../extension/src/page';
 import { GeminiApi } from '../src/gemini/api';
 import { StudioApi } from '../src/studio/api';
@@ -382,12 +383,89 @@ async function testClaudeAndGpt() {
 	}
 }
 
+// ---- 6. Login windows: Google mode on Google's sign-in pages ----------------------------------
+
+async function testGoogleMode() {
+	expect('Google mode: accounts.google.com is Google sign-in', isGoogleSignIn('https://accounts.google.com/v3/signin/identifier?x=1') && isGoogleSignIn('https://accounts.youtube.com/accounts/SetSID'));
+	expect('Google mode: claude.ai, chatgpt.com, auth.openai.com and lookalikes are not', !['https://claude.ai/login', 'https://chatgpt.com/', 'https://auth.openai.com/log-in', 'https://accounts.google.com.evil.com/', 'http://accounts.google.com/', 'not a url'].some(isGoogleSignIn));
+	const ff = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0';
+	const h = asFirefoxHeaders({ 'User-Agent': 'Chrome', 'sec-ch-ua': 'x', 'Sec-CH-UA-Platform': 'y', Accept: 'text/html' }, ff);
+	expect('Google mode: requests to Google say Firefox and carry no client hints', h['User-Agent'] === ff && h.Accept === 'text/html' && Object.keys(h).length === 2);
+
+	// The real openLogin against a stand-in Electron.
+	const filters: { urls: string[] | null; listener: (d: { requestHeaders: Record<string, string> }, cb: (r: { requestHeaders: Record<string, string> }) => void) => void }[] = [];
+	const sessionUA: string[] = [];
+	const ses = {
+		cookies: { get: async () => [], set: async () => undefined },
+		clearStorageData: async () => undefined,
+		setPermissionRequestHandler: () => undefined,
+		setPermissionCheckHandler: () => undefined,
+		setUserAgent: (ua: string) => void sessionUA.push(ua),
+		getUserAgent: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.11.4 Chrome/142.0.0.0 Electron/39.0.0 Safari/537.36',
+		webRequest: {
+			onBeforeSendHeaders: (a: unknown, b?: unknown) => void filters.push(typeof a === 'function' ? { urls: null, listener: a as never } : { urls: (a as { urls: string[] }).urls, listener: b as never }),
+			onSendHeaders: () => undefined,
+			onCompleted: () => undefined,
+		},
+	};
+	const pageUA: string[] = [];
+	let navigate: ((e: { url?: string; isMainFrame?: boolean }, url?: string, inPlace?: boolean, main?: boolean) => void) | null = null;
+	let destroyed = false;
+	class FakeWin {
+		webContents = {
+			removeAllListeners: () => undefined,
+			on: (_ev: string, l: typeof navigate) => { navigate = l; },
+			setUserAgent: (ua: string) => void pageUA.push(ua),
+			setWindowOpenHandler: () => undefined,
+			executeJavaScript: async () => false,
+		};
+		loadURL = async () => undefined;
+		isDestroyed = () => destroyed;
+		close = () => { destroyed = true; };
+		focus = () => undefined;
+	}
+	const g = globalThis as unknown as Record<string, unknown>;
+	const keepElectron = g.electron;
+	g.electron = { remote: { BrowserWindow: FakeWin, session: { fromPartition: () => ses } } };
+	try {
+		const done = openLogin({ provider: 'claude', id: 'gm' });
+		await sleep(50);
+		const plain = sessionUA[0] ?? '';
+		expect('claude.ai window: keeps its own browser name (no Firefox for the site)', !!plain && !/Firefox|Electron|obsidian/.test(plain));
+		const google = filters.find((f) => f.urls?.includes('https://accounts.google.com/*'));
+		expect('claude.ai window: a header rule for Google sign-in pages only', !!google && filters.every((f) => f.urls !== null));
+		let rewritten: Record<string, string> = {};
+		google?.listener({ requestHeaders: { 'User-Agent': plain, 'sec-ch-ua': '"Chromium"' } }, (r) => { rewritten = r.requestHeaders; });
+		expect('claude.ai window: requests to Google say Firefox, no client hints', /Firefox\//.test(rewritten['User-Agent'] ?? '') && !('sec-ch-ua' in rewritten));
+		navigate?.({}, 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x', false, true);
+		navigate?.({}, 'https://accounts.google.com/frame', false, false);
+		navigate?.({ url: 'https://claude.ai/new', isMainFrame: true });
+		expect('claude.ai window: the page says Firefox on Google, its own name back on claude.ai', pageUA.length === 2 && /Firefox\//.test(pageUA[0] ?? '') && pageUA[1] === plain, JSON.stringify(pageUA.map((u) => u.slice(-20))));
+		destroyed = true;
+		await done;
+
+		filters.length = 0;
+		sessionUA.length = 0;
+		pageUA.length = 0;
+		navigate = null;
+		destroyed = false;
+		const gem = openLogin({ provider: 'gemini', id: 'gm' });
+		await sleep(50);
+		expect('Gemini window: unchanged, Firefox everywhere for its whole storage', /Firefox\//.test(sessionUA[0] ?? '') && filters.length === 1 && filters[0]!.urls === null && navigate === null);
+		destroyed = true;
+		await gem;
+	} finally {
+		if (keepElectron === undefined) delete g.electron; else g.electron = keepElectron;
+	}
+}
+
 async function main() {
 	testSwitch();
 	await testTransport();
 	await testSamePage();
 	await testSkip();
 	await testClaudeAndGpt();
+	await testGoogleMode();
 	console.log(failures ? `${failures} Browser link check(s) FAILED.` : 'All Browser link checks passed.');
 	process.exit(failures ? 1 : 0);
 }

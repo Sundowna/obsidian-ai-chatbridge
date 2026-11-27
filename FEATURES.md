@@ -173,7 +173,8 @@ Every selected or active state needs a visible signal in light and dark theme.
 - [ ] Own window per account; closes itself on login; 15 min limit; reopening focuses the open one; account name in the title with 2+ accounts
 - [ ] Partition names are fixed (`persist:claude-chat-sync-*`, `persist:ai-chatbridge-*`); first account keeps the base name. Renaming logs everyone out
 - [ ] Login windows: sandboxed, all permissions refused except sanitized clipboard write, cross-site jumps and popups stay inside the window
-- [ ] Google login presents as Firefox, client hints removed
+- [ ] Google login presents as Firefox, client hints removed (the Gemini window, for its whole storage)
+- [ ] Google mode in every login window: in the claude.ai and ChatGPT windows, Google's sign-in pages (`accounts.google.com`, `accounts.youtube.com`) get Firefox's browser name and no client hints, in the requests and in the page itself; back on the site the window's own name returns, so claude.ai and chatgpt.com keep seeing the name the sync's requests send — `npm run test:browser-link` (Google mode)
 - [ ] Hidden windows for Lumo, Gemini, AI Studio; pasted Google cookies go to an in-memory session cleared after use
 - [ ] Split cookies (`name.0`, `name.1`) count as logged in
 - [ ] ChatGPT: each sync reads the chatgpt.com page through the login window's own storage, so the renewed login cookie is kept there (a pasted session still goes through `requestUrl`)

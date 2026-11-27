@@ -96,6 +96,7 @@ interface Session {
 	getUserAgent(): string;
 	webRequest: {
 		onBeforeSendHeaders(listener: (d: { requestHeaders: Record<string, string> }, callback: (r: { requestHeaders: Record<string, string> }) => void) => void): void;
+		onBeforeSendHeaders(filter: { urls: string[] }, listener: (d: { requestHeaders: Record<string, string> }, callback: (r: { requestHeaders: Record<string, string> }) => void) => void): void;
 		onSendHeaders(filter: { urls: string[] }, listener: (d: { id: number; requestHeaders: Record<string, string> }) => void): void;
 		onSendHeaders(listener: null): void;
 		onCompleted(filter: { urls: string[] }, listener: (d: { id: number; url: string; statusCode: number }) => void): void;
@@ -109,6 +110,8 @@ interface Win {
 	focus(): void;
 	webContents: {
 		removeAllListeners(event: string): void;
+		on(event: 'did-start-navigation', listener: (e: { url?: string; isMainFrame?: boolean }, url?: string, isInPlace?: boolean, isMainFrame?: boolean) => void): void;
+		setUserAgent(ua: string): void;
 		setWindowOpenHandler(handler: (details: { url: string }) => unknown): void;
 		executeJavaScript(code: string): Promise<unknown>;
 	};
@@ -149,6 +152,29 @@ export function firefoxUserAgent(chromeAgent: string, now = Date.now()): string 
 	return `Mozilla/5.0 (${system}; rv:${version}.0) Gecko/20100101 Firefox/${version}.0`;
 }
 
+/** Google's sign-in pages. Every login window presents as Firefox there: Google blocks sign-in from embedded Chromium. */
+export const GOOGLE_SIGN_IN_URLS = ['https://accounts.google.com/*', 'https://accounts.youtube.com/*'];
+
+/** True for a page of Google's sign-in (a "Continue with Google" from claude.ai or ChatGPT lands there). */
+export function isGoogleSignIn(url: string): boolean {
+	try {
+		const u = new URL(url);
+		return u.protocol === 'https:' && (u.host === 'accounts.google.com' || u.host === 'accounts.youtube.com');
+	} catch {
+		return false;
+	}
+}
+
+/** Request headers as Firefox would send them: its browser name, and no Chromium "client hints". */
+export function asFirefoxHeaders(headers: Record<string, string>, firefox: string): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [name, value] of Object.entries(headers)) {
+		if (/^sec-ch-ua/i.test(name)) continue;
+		out[name] = /^user-agent$/i.test(name) ? firefox : value;
+	}
+	return out;
+}
+
 /** What a login window's pages may use. Signing in needs none of camera, microphone, location, notifications or devices. */
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write']);
 
@@ -165,7 +191,12 @@ function lockPermissions(ses: Session): void {
 function prepareSession(ses: Session, site: Site): void {
 	lockPermissions(ses);
 	if (!site.asFirefox) {
-		ses.setUserAgent(plainUserAgent(ses));
+		const plain = plainUserAgent(ses);
+		ses.setUserAgent(plain);
+		// The site itself keeps this browser name (Cloudflare compares it with the sync's requests);
+		// only Google's sign-in pages get Firefox's, as the Gemini window does everywhere.
+		const firefox = firefoxUserAgent(plain);
+		ses.webRequest.onBeforeSendHeaders({ urls: GOOGLE_SIGN_IN_URLS }, (d, callback) => callback({ requestHeaders: asFirefoxHeaders(d.requestHeaders, firefox) }));
 		return;
 	}
 	ses.setUserAgent(firefoxUserAgent(plainUserAgent(ses)));
@@ -269,6 +300,18 @@ export async function openLogin(login: LoginRef, accountLabel?: string): Promise
 		if (/^https:\/\//i.test(url) && !win.isDestroyed()) win.loadURL(url).catch(() => undefined);
 		return { action: 'deny' };
 	});
+	// Google mode on Google's sign-in pages: the page itself sees Firefox's name too, not only
+	// the requests (set above on the storage). Back on the site, the window's own name returns.
+	if (!site.asFirefox) {
+		const plain = plainUserAgent(ses);
+		const firefox = firefoxUserAgent(plain);
+		win.webContents.on('did-start-navigation', (e, url, _inPlace, isMainFrame) => {
+			const to = typeof url === 'string' ? url : e?.url;
+			const main = typeof isMainFrame === 'boolean' ? isMainFrame : e?.isMainFrame;
+			if (!main || !to || win.isDestroyed()) return;
+			win.webContents.setUserAgent(isGoogleSignIn(to) ? firefox : plain);
+		});
+	}
 	// Redirects during login make loadURL report "aborted"; that is normal.
 	win.loadURL(site.start).catch(() => undefined);
 
