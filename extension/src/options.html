@@ -3,10 +3,11 @@
 <head>
 	<meta charset="utf-8">
 	<title>AI ChatBridge Browser link</title>
+	<link rel="icon" href="icons/icon-32.png">
 	<style>
 		:root { color-scheme: light dark; --line: #8884; --accent: #7a5cff; }
 		body { font: 15px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 2.5rem auto; padding: 0 1rem; }
-		h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+		h1 { font-size: 1.3rem; margin: 0 0 .25rem; display: flex; align-items: center; gap: .6rem; }
 		p { margin: .25rem 0 1rem; }
 		.state { display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; border: 1px solid var(--line); border-radius: .5rem; margin: 1rem 0 1.5rem; }
 		.dot { width: .65rem; height: .65rem; border-radius: 50%; background: #999; flex: none; }
@@ -18,12 +19,15 @@
 		button { font: inherit; padding: .45rem .9rem; border-radius: .4rem; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
 		button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 		.muted { opacity: .75; font-size: .9rem; }
+		.warn { padding: .6rem .9rem; border-left: 3px solid #d9822b; background: #d9822b1a; margin: 1rem 0; }
 		section + section { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
 	</style>
 </head>
 <body>
-	<h1>AI ChatBridge Browser link</h1>
+	<h1><img src="icons/icon-48.png" alt="" width="32" height="32">AI ChatBridge Browser link</h1>
 	<p class="muted">Lets the AI ChatBridge plugin in Obsidian sync your chats through this browser, where you are already logged in.</p>
+
+	<p class="warn"><strong>Keep this browser open while Obsidian syncs.</strong> If it is closed, the accounts that use the Browser link are skipped until the next sync.</p>
 
 	<div class="state" id="state" data-state="not-paired" role="status" aria-live="polite">
 		<span class="dot" aria-hidden="true"></span><span id="state-text">Not paired</span>

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.49.1 - 2026-11-27
+
+### Added
+- **Browser link: Open in browser** - a button on the login row of a Browser link account and in the pairing window opens the extension's page in your default browser (and starts the browser if it is closed). The extension's page now also says to keep the browser open while Obsidian syncs. Needs the extension 0.2.0 from this release.
+- **The extension shows the ChatBridge logo** - in the browser's toolbar, its extensions page and on the extension's own page.
+
 ## 0.49.0 - 2026-11-27
 
 ### Added

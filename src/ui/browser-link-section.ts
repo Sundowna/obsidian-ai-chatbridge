@@ -9,7 +9,20 @@ import { isLoggedIn, type Provider } from '../login';
 import type AIChatBridge from '../main';
 import type { GeminiAccount } from '../settings';
 import { lastRunLine, runKey } from '../last-run';
+import { LINK_OPEN_PATH } from '../link/sites';
 import { bindSyncButton, type PanelContext } from './fields';
+
+/** Opens the extension's page in your default browser (through a small page on 127.0.0.1). */
+export async function openInBrowser(plugin: AIChatBridge): Promise<boolean> {
+	await plugin.updateBrowserLink();
+	const port = plugin.browserLink.server?.port;
+	if (!port) {
+		new Notice('Browser link: choose "Browser link" as the login method of an account first.');
+		return false;
+	}
+	window.open(`http://127.0.0.1:${port}${LINK_OPEN_PATH}`);
+	return true;
+}
 
 /** The link as it stands now. */
 export function browserLinkState(plugin: AIChatBridge): LinkState {
@@ -76,6 +89,11 @@ export function linkLoginRow(ctx: PanelContext, el: HTMLElement, provider: Provi
 			}),
 		);
 	}
+	row.addButton((b) =>
+		b.setButtonText('Open in browser')
+			.setTooltip("Opens the extension's page in your default browser, which also starts the browser")
+			.onClick(() => void openInBrowser(plugin)),
+	);
 	if (state !== 'linked') {
 		row.addButton((b) => {
 			b.setButtonText(state === 'not-paired' ? 'Pair browser…' : 'Pair again…').onClick(() => new PairBrowserModal(ctx.app, plugin, ctx.refresh).open());
@@ -115,9 +133,13 @@ export class PairBrowserModal extends Modal {
 		}
 		const code = server.newPairingCode();
 		const steps = contentEl.createEl('ol');
-		steps.createEl('li', { text: 'Install the ChatBridge extension in Chrome, Edge or Brave (see "Browser link" in the plugin\'s README).' });
-		steps.createEl('li', { text: 'Select its button in the browser toolbar to open its page.' });
-		steps.createEl('li', { text: 'Paste this code there and select "Pair". It works once, for 5 minutes.' });
+		steps.createEl('li', { text: 'Install the ChatBridge extension in your browser (see "Browser link" in the plugin\'s README).' });
+		steps.createEl('li', { text: 'Select "Open in browser" below: the extension\'s page opens there.' });
+		steps.createEl('li', { text: 'Paste this code there and press Enter. It works once, for 5 minutes.' });
+		new Setting(contentEl)
+			.setName('Extension page')
+			.setDesc('Opens in your default browser. Keep that browser open while Obsidian syncs.')
+			.addButton((b) => b.setButtonText('Open in browser').setCta().onClick(() => void openInBrowser(this.plugin)));
 		new Setting(contentEl)
 			.setName('Pairing code')
 			.setDesc(code)

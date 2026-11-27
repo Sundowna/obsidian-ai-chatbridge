@@ -5,7 +5,7 @@
 // the sites answer, and talks to nothing but those sites and 127.0.0.1.
 
 import { fetchFrames, fromBase64, type LinkRequest } from '../../src/link/protocol';
-import { isLinkPage, isLinkTarget } from '../../src/link/sites';
+import { isLinkOpenPage, isLinkPage, isLinkTarget } from '../../src/link/sites';
 import { pageCall, pageFetch, pageRead, readyCheck } from './page';
 
 const PING_MS = 20_000;
@@ -299,6 +299,10 @@ chrome.runtime.onMessage.addListener((m: { op?: string; code?: string }, sender,
 });
 
 chrome.action?.onClicked.addListener(() => void chrome.runtime.openOptionsPage());
+// Obsidian's "Open in browser" opens a small page on 127.0.0.1; this tab becomes the extension's page.
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+	if (isLinkOpenPage(info.url ?? (info.status === 'loading' ? tab.url : undefined))) void chrome.tabs.update(tabId, { url: chrome.runtime.getURL('options.html') });
+});
 void chrome.alarms.create('link', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((a) => {
 	if (a.name !== 'link') return;

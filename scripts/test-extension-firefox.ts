@@ -168,6 +168,16 @@ async function run(): Promise<void> {
 	expect('pairing: the code from the plugin, typed in the options page, links Firefox', await until(() => server.linked && server.paired, 15_000));
 	const token = store.value;
 
+	// Obsidian's "Open in browser": the local page turns into the extension's page.
+	const op = (await send('browsingContext.create', { type: 'tab' })).result!.context as string;
+	await send('browsingContext.navigate', { context: op, url: `http://127.0.0.1:${port}/chatbridge-browser-link` });
+	const turned = await until(async () => {
+		const r = await send('browsingContext.getTree', {});
+		return ((r.result?.contexts ?? []) as { context: string; url: string }[]).some((c) => c.context === op && c.url.startsWith('moz-extension://') && c.url.endsWith('/options.html'));
+	}, 10_000);
+	expect("open in browser: the local page becomes the extension's page in the same tab", turned, JSON.stringify(await tabUrls()));
+	await send('browsingContext.close', { context: op });
+
 	const page = (await send('browsingContext.create', { type: 'tab' })).result!.context as string;
 	const probe = await evalIn(page, `new Promise((r) => { const s = new WebSocket('ws://127.0.0.1:${port}'); s.onopen = () => s.send(JSON.stringify({op:'hello', token:'guess'})); s.onclose = (e) => r('closed ' + e.code); setTimeout(() => r('still open'), 4000); })`);
 	expect('security: a web page cannot use the port', probe !== 'still open', String(probe));
