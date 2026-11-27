@@ -228,12 +228,12 @@ A session that's already saved stays with the account that saved it.
 
 Google blocks its sign-in inside apps, so the login window can't sign in to Gemini, AI Studio, or a Claude or ChatGPT account made with "Continue with Google". The **Browser link** syncs through your own browser instead, where you are already logged in. ChatBridge still does all the reading and saving; the small **AI ChatBridge Browser link** extension in your browser only fetches what the plugin asks for, with that browser's login.
 
-**Set it up (Chrome, Edge or Brave, on a computer):**
+**Set it up (Chrome, Edge, Brave or Firefox, on a computer):**
 
-1. Build the extension once from this repository: `npm install`, then `npm run build:extension`. It lands in `extension/dist`. The extension is not in the Chrome Web Store yet
-2. In the browser, open `chrome://extensions`, switch on **Developer mode**, select **Load unpacked** and choose the `extension/dist` folder
+1. Build the extension once from this repository: `npm install`, then `npm run build:extension`. It lands in `extension/dist` (Chrome, Edge, Brave) and `extension/dist-firefox` (Firefox). It is not in the Chrome Web Store or Firefox Add-ons yet
+2. Chrome, Edge, Brave: open `chrome://extensions`, switch on **Developer mode**, select **Load unpacked** and choose the `extension/dist` folder. Firefox: open `about:debugging` → **This Firefox** → **Load Temporary Add-on…** and choose `extension/dist-firefox/manifest.json` (Firefox removes a temporary add-on when it closes). The extension's page opens by itself; if it shows **Allow site access**, select it
 3. In Obsidian, open the account's settings (Gemini, Claude or ChatGPT) and set **Login method** to **Browser link**
-4. Select **Pair browser…**, open the extension (its toolbar button, or **Details** → **Extension options**), paste the code and select **Pair**. The code works once, for 5 minutes
+4. Select **Pair browser…**, paste the code into the extension's page (or open it with its toolbar button) and press **Enter**. The code works once, for 5 minutes
 
 Keep the browser open while you sync. If it is closed, not paired, or not logged in to the site, that account is **skipped** with a message saying which; the other accounts carry on and the automatic sync keeps trying. New Google accounts start on the Browser link; existing accounts keep the login window until you switch.
 
