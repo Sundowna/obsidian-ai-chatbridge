@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.53.0 - 2026-11-27
+
+### Added
+- **ChatGPT: pinned chats marked** - a chat you pinned in ChatGPT gets `pinned: true` in its note's properties, like Gemini's pinned and Claude's and Lumo's starred chats. Pinning or unpinning shows at the next sync. Needs **Include pinned chats** (on by default).
+
 ## 0.52.0 - 2026-11-27
 
 ### Added

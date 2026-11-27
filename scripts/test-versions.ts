@@ -186,6 +186,8 @@ const note = (body: string, extra = '') => `---\nuuid: abc\nupdated: 2026-11-07T
 		const gpt = (messages: unknown[], extra: object = {}) => renderGptTranscript({ conversation_id: 'c1', title: 'T', create_time: 1795000000, update_time: 1795000000, gizmo_id: null, messages, ...extra } as never, { jsonFileName: 'c.json' }).split('---')[1]!;
 		expect('model: a ChatGPT note names the models that answered', gpt([msg('user'), msg('assistant', 'gpt-6-thinking'), msg('user'), msg('assistant', 'gpt-6')]).includes('\nmodel:\n  - "gpt-6-thinking"\n  - "gpt-6"\nraw:'));
 		expect('model: without one on the answers the chat default is used; without that, nothing', gpt([msg('user'), msg('assistant')], { default_model_slug: 'gpt-6' }).includes('\nmodel: "gpt-6"\n') && !gpt([msg('user'), msg('assistant')]).includes('model:'));
+		const pinnedNote = (pinned?: boolean) => renderGptTranscript({ conversation_id: 'c1', title: 'T', create_time: 1795000000, update_time: 1795000000, gizmo_id: null, messages: [msg('user')] } as never, { jsonFileName: 'c.json', pinned }).split('---')[1]!;
+		expect('pinned: a ChatGPT chat pinned in its pinned list has pinned: true, others nothing', pinnedNote(true).includes('\npinned: true\n') && !pinnedNote(false).includes('pinned') && !pinnedNote().includes('pinned'));
 		const carried = carryProperties('---\nuuid: x\nmodel: "old"\ntags:\n  - mine\nunread: false\n---\nbody\n', '---\nuuid: x\nmodel:\n  - "a"\n  - "b"\nunread: true\n---\nbody\n');
 		expect('model: a rewrite takes the new models and keeps your own properties', carried.includes('model:\n  - "a"\n  - "b"') && !carried.includes('"old"') && carried.includes('tags:\n  - mine'), carried);
 	}
