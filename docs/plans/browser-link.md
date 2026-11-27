@@ -1,7 +1,7 @@
 # Browser link: plan and implementation plan
 
 Handover document. Written 27 Nov 2026 by the session that did the kickoff (reading and research only).
-**No code has been written. Nothing is committed. The baseline test run has not been done yet.**
+**Progress: stages 0–3 done (see each "Stage N status" below). Next: Stage 4.**
 
 The next session should read this file top to bottom, then start at [Stage 0](#stage-0-proof-in-the-real-browser).
 
@@ -219,6 +219,23 @@ Node modules are loaded through `window.require` (lint forbids imports of Node m
 - esbuild builds for the browser platform, where `ws` resolves to its browser stub (throws). Add `alias: { ws: './node_modules/ws/index.js' }` and mark `bufferutil` and `utf-8-validate` external in `esbuild.config.mjs`.
 - Add a check that `main.js` loads with Node modules unavailable (phone) and that `ws` code only runs after `LinkManager.update(true)`.
 - `TokenStore` on `app.secretStorage`; remembered port in `data.json`.
+
+### Stage 3 status (27 Nov 2026)
+
+Done for Chrome (Edge and Brave use the same build; not run on them yet). `test:ci` 1150 PASS, 0 FAIL (unchanged); lint 0 errors, same 14 warnings; build OK. New `npm run test:extension`: **38 PASS** in real Chrome 158 with a logged-out throwaway profile against the real `LinkServer`. Proven to bite (extension allow-list off: 3 checks fail).
+
+| Piece | Where |
+|---|---|
+| Service worker | `extension/src/background.ts`: connect / pair / reconnect (30 s alarm), 20 s ping, `fetch`, `open`, `call`, `close`, `status`, own-tab bookkeeping (closed on disconnect, after 60 s unused, and leftovers after a worker restart) |
+| Page functions | `extension/src/page.ts`: `pageFetch`, `pageCall` (`wiz-at`, `sapisidhash`), `readyCheck` (named checks only) |
+| Options page | `extension/src/options.html`, `options.ts` |
+| Build | `npm run build:extension` = `tsc -p extension/tsconfig.json` + `extension/build.mjs` → `extension/dist` (git-ignored) |
+| Lint | `extension/` is now ignored by the plugin's ESLint (Obsidian rules do not apply); type-checked by its own tsconfig instead |
+| Test | `scripts/test-extension.ts` (`npm run test:extension`; needs Chrome + internet, so not in `test:ci`; `CHROME=` to point at another binary) |
+
+Found and fixed by the test: logged-out Gemini stays on gemini.google.com (Google allows signed-out use), so the extension said "could not open the site". It now reports "not logged in" when a page loaded on its own site but the sign-in check never passed.
+
+Not done in Stage 3: Edge and Brave by hand; a signed-in run through the real extension (Stage 4 does it with the plugin wired in); attribution file (nothing was copied from sho7650/obsidian-AI-exporter or browser-tools-mcp, only the manifest idea, so no notice is needed yet).
 
 ---
 

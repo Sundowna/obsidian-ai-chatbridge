@@ -15,7 +15,9 @@ export default defineConfig(
 		'tsconfig.json',
 		'scripts',
 		'samples',
-		'extension/spike',
+		// The browser extension is not Obsidian code: Obsidian's rules do not apply there.
+		// It is type-checked with its own tsconfig by `npm run build:extension`.
+		'extension',
 	]),
 	{
 		languageOptions: {

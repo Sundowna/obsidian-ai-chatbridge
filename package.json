@@ -8,6 +8,7 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"build:extension": "tsc -p extension/tsconfig.json && node extension/build.mjs",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"test": "npm run test:offline && npm run test:ci",
@@ -31,7 +32,8 @@
 		"test:lumo": "esbuild scripts/test-lumo.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-lumo.cjs && node scripts/.test-lumo.cjs",
 		"test:channel": "esbuild scripts/test-channel.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-channel.cjs && node scripts/.test-channel.cjs",
 		"test:transport": "esbuild scripts/test-transport.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-transport.cjs && node scripts/.test-transport.cjs",
-		"test:error-log": "esbuild scripts/test-error-log.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-error-log.cjs && node scripts/.test-error-log.cjs"
+		"test:error-log": "esbuild scripts/test-error-log.ts --bundle --platform=browser --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-error-log.cjs && node scripts/.test-error-log.cjs",
+		"test:extension": "npm run build:extension && esbuild scripts/test-extension.ts --bundle --platform=node --format=cjs --alias:obsidian=./scripts/obsidian-test-stub.ts --log-level=warning --outfile=scripts/.test-extension.cjs && node scripts/.test-extension.cjs"
 	},
 	"keywords": [
 		"obsidian",
@@ -55,6 +57,7 @@
 	"homepage": "https://github.com/Sundowna/obsidian-ai-chatbridge#readme",
 	"devDependencies": {
 		"@eslint/js": "^9.39.4",
+		"@types/chrome": "^0.3.8",
 		"@types/node": "^22.15.17",
 		"@types/ws": "^8.18.2",
 		"esbuild": "0.25.5",
