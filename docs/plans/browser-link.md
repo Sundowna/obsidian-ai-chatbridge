@@ -201,6 +201,25 @@ Differences from before (none user-visible): Gemini query order (`bl`, `f.sid` n
 
 **Not done:** the manual byte-identical sync in a test vault (needs logins in the test vault's login windows). Stage 4 compares both routes anyway.
 
+### Stage 2 status (27 Nov 2026)
+
+Done; `test:ci` 1077 → 1150 PASS (73 new in `test:channel`), 0 FAIL; lint 0 errors, same 14 warnings; build OK. Tests proven to bite (origin check off, allow-list off: both caught).
+
+| Piece | Where |
+|---|---|
+| Allow-list, origin check | `src/link/sites.ts` (pure, for the extension too) |
+| Messages, base64, 512 KB parts | `src/link/protocol.ts` (pure; `BodyAssembler` counts parts, any order) |
+| Skip reasons | `src/link/errors.ts`: `BrowserLinkUnavailable` (`not-paired`, `browser-closed`, `not-logged-in`, `tab-failed`), `BrowserLinkError` |
+| Server | `src/link/server.ts`: `ws` 8.23.0 (MIT) on Node `http`, 127.0.0.1, random or remembered port (`portChanged` if taken), Host check, extension origins only, 5 s hello, pairing code 5 min / single use / 5 tries, token via `TokenStore`, one browser, `fetch` / `open` / `call` / `closePage` / `status` |
+| Start/stop | `src/link/manager.ts` `LinkManager.update(wanted)`: dynamic import of the server, desktop only |
+
+Node modules are loaded through `window.require` (lint forbids imports of Node modules and disabling that rule).
+
+**For Stage 4 (wiring into `main.ts`):**
+- esbuild builds for the browser platform, where `ws` resolves to its browser stub (throws). Add `alias: { ws: './node_modules/ws/index.js' }` and mark `bufferutil` and `utf-8-validate` external in `esbuild.config.mjs`.
+- Add a check that `main.js` loads with Node modules unavailable (phone) and that `ws` code only runs after `LinkManager.update(true)`.
+- `TokenStore` on `app.secretStorage`; remembered port in `data.json`.
+
 ---
 
 ## 5. Research results (27 Nov 2026)
