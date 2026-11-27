@@ -12,7 +12,7 @@ import { testHooks } from 'obsidian';
 import { LinkServer, type TokenStore } from '../src/link/server';
 import { BrowserLinkUnavailable } from '../src/link/errors';
 import { fetchFrames, fromBase64 } from '../src/link/protocol';
-import { linkState, loginMethodOf, readTokens, secretTokenStore, usesBrowserLink, writeTokens, LINK_SECRET_ID } from '../src/link/account';
+import { linkState, loginMethodOf, pairButtonText, pickBrowser, readTokens, unpairForgetsAll, secretTokenStore, usesBrowserLink, writeTokens, LINK_SECRET_ID } from '../src/link/account';
 import { BrowserLinkTransport } from '../src/transport/browser-link';
 import { setBrowserLink, transportFor, type PageCall } from '../src/transport';
 import { pageCallCode, READ_CODE, READY_CODE, SITE_VALUE_COOKIE } from '../src/transport/login-window';
@@ -590,6 +590,14 @@ async function testSeveralBrowsers() {
 
 // ---- Which login an account reads (login-check.ts), and the Google account number ----------
 
+function testPickBrowser() {
+	expect('any browser: an account\'s own browser wins', pickBrowser('edge', ['edge'], ['chrome', 'edge']) === 'edge');
+	expect('any browser: a browser another account picked is passed over', pickBrowser(undefined, ['edge'], ['edge', 'chrome']) === 'chrome');
+	expect('any browser: when every connected browser is picked, any one will do', pickBrowser(undefined, ['edge'], ['edge']) === undefined);
+	expect('pairing: a linked account offers to pair another browser (no unpair needed)', pairButtonText('linked') === 'Pair another browser…' && pairButtonText('not-paired') === 'Pair browser…' && pairButtonText('browser-closed') === 'Pair again…');
+	expect('unpair: without its own browser and with several paired, it would forget all, so it asks first', unpairForgetsAll(undefined, 2) && !unpairForgetsAll(undefined, 1) && !unpairForgetsAll('edge', 2));
+}
+
 function testLoginCheck() {
 	const bound: { loginUser?: string; loginEmail?: string } = {};
 	expect('login check: the first login is remembered', checkLogin('claude.ai', bound, { id: 'u-home', email: 'me@home.example' }, [], true) && bound.loginUser === 'u-home' && bound.loginEmail === 'me@home.example');
@@ -618,6 +626,7 @@ async function main() {
 	await testOpenPage();
 	await testSeveralBrowsers();
 	testLoginCheck();
+	testPickBrowser();
 	console.log(failures ? `${failures} Browser link check(s) FAILED.` : 'All Browser link checks passed.');
 	process.exit(failures ? 1 : 0);
 }

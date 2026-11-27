@@ -66,3 +66,22 @@ export function readTokens(raw: string | null): Record<string, string> {
 export function writeTokens(tokens: Record<string, string>): string | null {
 	return Object.keys(tokens).length ? JSON.stringify(tokens) : null;
 }
+
+/**
+ * The browser an account's requests go to. Its own pick wins. Without one ("Any connected
+ * browser"), a connected browser that no other account has picked comes first, so a browser
+ * paired for one account (a work profile, say) does not catch the others' requests; when every
+ * connected browser is picked by someone, any of them will do.
+ */
+export function pickBrowser(own: string | undefined, claimedByOthers: readonly string[], linked: readonly string[]): string | undefined {
+	if (own) return own;
+	return linked.find((b) => !claimedByOthers.includes(b));
+}
+
+/** The pair button of an account's login row: always there, so a second browser never needs an unpair first. */
+export function pairButtonText(state: LinkState): string {
+	return state === 'not-paired' ? 'Pair browser…' : state === 'linked' ? 'Pair another browser…' : 'Pair again…';
+}
+
+/** Unpair from an account without a browser of its own forgets every paired browser: with several, it asks first. */
+export const unpairForgetsAll = (own: string | undefined, paired: number): boolean => !own && paired > 1;

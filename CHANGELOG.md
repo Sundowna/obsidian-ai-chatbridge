@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.55.2 - 2026-11-27
+
+### Fixed
+- **"Any connected browser" caught by another account's browser** - after a second browser (say, a work profile in Edge) was paired for one account, accounts left on "Any connected browser" could be sent there and found no login. They now prefer a browser no other account has picked.
+- **Adding a second browser unpaired the first** - a linked account showed only "Unpair", and on an account set to "Any connected browser" that forgot every paired browser. The login row now always offers "Pair another browser…", and unpairing all browsers says so and asks first.
+
 ## 0.55.1 - 2026-11-27
 
 ### Fixed
